@@ -172,8 +172,15 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# Model weights & TRT engines
+external/weights/
+*.engine
+*.onnx
+
+# Data & output
+data/output/
+cache/
+
+# Videos (except samples)
 *.mp4
-*.txt
-*.tar
-*.pth
 !assets/sample1.mp4
