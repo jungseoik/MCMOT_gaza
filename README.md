@@ -87,17 +87,57 @@ $ python -m src.benchmark -i assets/sample1.mp4 -n 100
 
 <br>
 
+## MOT 데이터셋 평가
+
+`main.py`로 MOT17/MOT20 벤치마크 평가를 수행합니다. 백엔드는 `--engine` 인자로 선택합니다.
+
+| 엔진 | 설명 | 검출기 | ReID 전처리 |
+|------|------|--------|------------|
+| `torch` | PyTorch FP16 (원본 main 로직) | PyTorch | PyTorch |
+| `trt` | TRT 기본 | TensorRT | PyTorch |
+| `trt_opt` | TRT mixed precision + GPU 최적화 | TensorRT FP16 | GPU 버퍼 (~17.6 FPS) |
+
+한 번 실행하면 **추론 + 후처리 + TrackEval 메트릭 산출 + 통합 JSON 저장**이 모두 끝납니다.
+
+```bash
+# PyTorch 기준선 (val_half에서 평가)
+$ python main.py --dataset mot20 --engine torch    --exp_name BTPP_torch
+
+# TRT 기본
+$ python main.py --dataset mot20 --engine trt      --exp_name BTPP_trt
+
+# TRT 최적화 (가장 빠름)
+$ python main.py --dataset mot20 --engine trt_opt  --exp_name BTPP_trt_opt
+```
+
+각 실행이 끝나면:
+- 콘솔에 timing 요약 + HOTA/MOTA/IDF1 등 벤치마크 점수 출력
+- `results/trackers/<benchmark>-val/<exp_name>_results.json` 에 timing + metrics 통합 저장
+
+**`--test_dataset` 사용 시 GT가 없으므로 TrackEval 자동 평가가 건너뛰어집니다.** `--no_eval`로 평가만 끌 수도 있습니다.
+
+상세한 사용법, 주의사항(필요한 weights/엔진), 시간/메트릭 해석:
+[docs/eval-pipeline.md](docs/eval-pipeline.md)
+
+<br>
+
 ## 프로젝트 구조
 
 ```
-src/                           # 추론 모듈 (신규)
-  inference.py                 # PyTorch 기본 추론
-  inference_trt.py             # TRT 추론
-  inference_gpu.py             # TRT + GPU 최적화 추론 (x20)
+src/                           # 추론 + 평가 모듈
+  inference.py                 # PyTorch 기본 추론 (영상)
+  inference_trt.py             # TRT 추론 (영상)
+  inference_gpu.py             # TRT + GPU 최적화 추론 (영상, x20)
   build_trt.py                 # ONNX export + TRT 엔진 빌드
   benchmark.py                 # 속도/정확도 비교 벤치마크
+  eval_common.py               # MOT 평가 공통 유틸 (타이밍, 결과 저장, 후처리)
+  eval_torch.py                # MOT 평가 — PyTorch 백엔드
+  eval_trt.py                  # MOT 평가 — TRT 기본 백엔드
+  eval_trt_opt.py              # MOT 평가 — TRT FP16 + GPU 최적화 백엔드
 docs/
   optimization-report.md       # 최적화 상세 보고서
+  eval-pipeline.md             # MOT 평가 파이프라인 가이드
+main.py                        # MOT 평가 진입점 (--engine 분기)
 tracker/                       # 핵심 추적 알고리즘 (변경 없음)
 external/                      # 외부 모듈 (변경 없음)
 ```
