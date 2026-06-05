@@ -82,7 +82,12 @@ def build_engine(onnx_path: str, engine_path: str, fp16: bool = False,
                  dynamic_batch: bool = False, max_batch: int = 256):
     """Build TensorRT engine from ONNX."""
     builder = trt.Builder(TRT_LOGGER)
-    network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+    # TRT 10+ removed the EXPLICIT_BATCH flag (explicit batch is now the default);
+    # keep the flag only on older TRT where the attribute still exists.
+    network_flags = 0
+    if hasattr(trt.NetworkDefinitionCreationFlag, "EXPLICIT_BATCH"):
+        network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    network = builder.create_network(network_flags)
     parser = trt.OnnxParser(network, TRT_LOGGER)
 
     with open(onnx_path, "rb") as f:

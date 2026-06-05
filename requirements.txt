@@ -21,5 +21,6 @@ tqdm
 psutil
 huggingface_hub
 torchreid==0.2.5
-tensorrt-cu12
+tensorrt-cu12<11
 onnxscript
+gdown
