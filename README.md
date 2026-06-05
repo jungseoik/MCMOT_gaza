@@ -87,6 +87,22 @@ $ python -m src.benchmark -i assets/sample1.mp4 -n 100
 
 <br>
 
+## 실시간 추적 웹 UI (FastAPI)
+
+비디오를 업로드하면 TRT 추론 결과를 추론되는 대로 라이브로 보여주고, 완료되면
+결과를 부드럽게 무한 루프 재생하는 독립형 웹 UI입니다. 코어 파이프라인을
+**재사용만** 하므로 위의 워크플로에는 영향이 없습니다.
+
+```bash
+$ pip install -r webui/requirements.txt   # 웹 전용 의존성 (1회)
+$ python -m webui                          # http://localhost:8000
+```
+
+동작 원리(MJPEG 라이브→루프 재생, 페이싱, 화질/속도 튜닝), 엔드포인트, 제약 등
+상세 내용: [docs/webui.md](docs/webui.md)
+
+<br>
+
 ## MOT 데이터셋 평가
 
 `main.py`로 MOT17/MOT20 벤치마크 평가를 수행합니다. 백엔드는 `--engine` 인자로 선택합니다.
@@ -134,9 +150,14 @@ src/                           # 추론 + 평가 모듈
   eval_torch.py                # MOT 평가 — PyTorch 백엔드
   eval_trt.py                  # MOT 평가 — TRT 기본 백엔드
   eval_trt_opt.py              # MOT 평가 — TRT FP16 + GPU 최적화 백엔드
+webui/                         # 실시간 추적 웹 UI (독립 모듈, FastAPI)
+  server.py                    # FastAPI 앱 (upload/stream/status/result)
+  index.html                   # 프론트엔드
+  __main__.py                  # python -m webui 진입점
 docs/
   optimization-report.md       # 최적화 상세 보고서
   eval-pipeline.md             # MOT 평가 파이프라인 가이드
+  webui.md                     # 실시간 추적 웹 UI 가이드
 main.py                        # MOT 평가 진입점 (--engine 분기)
 tracker/                       # 핵심 추적 알고리즘 (변경 없음)
 external/                      # 외부 모듈 (변경 없음)

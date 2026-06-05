@@ -169,31 +169,29 @@ class BoostTrackGPUInference:
             cv2.putText(vis, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         return vis
 
-    def run(self, input_video: str, output_video: str) -> dict:
+    def stream(self, input_video: str, reset: bool = True):
+        """Generator form of run(): yields one dict per processed frame.
+
+        Each item: {"index", "total", "fps", "width", "height", "frame" (BGR ndarray)}.
+        The caller decides what to do with each frame (write to file, JPEG-encode
+        for live MJPEG streaming, etc.). Both run() and the web server build on this.
+        """
         cap = cv2.VideoCapture(input_video)
         if not cap.isOpened():
             raise FileNotFoundError(f"Cannot open video: {input_video}")
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps_in = cap.get(cv2.CAP_PROP_FPS)
+        fps_in = cap.get(cv2.CAP_PROP_FPS) or 0.0
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        os.makedirs(os.path.dirname(output_video) or ".", exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(output_video, fourcc, fps_in, (w, h))
-
-        # Reset tracker
-        KalmanBoxTracker.count = 0
-        self.tracker.frame_count = 0
-        self.tracker.trackers.clear()
+        # Reset tracker state so each video starts fresh
+        if reset:
+            KalmanBoxTracker.count = 0
+            self.tracker.frame_count = 0
+            self.tracker.trackers.clear()
 
         processed = 0
-        t_start = time.time()
-
-        pbar = tqdm(total=total_frames, desc="Tracking(GPU)", unit="frame",
-                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]")
-
         try:
             while True:
                 ret, frame = cap.read()
@@ -212,13 +210,43 @@ class BoostTrackGPUInference:
                 else:
                     vis = frame
 
-                writer.write(vis)
                 processed += 1
+                yield {
+                    "index": processed,
+                    "total": total_frames,
+                    "fps": fps_in,
+                    "width": w,
+                    "height": h,
+                    "frame": vis,
+                }
+        finally:
+            cap.release()
+
+    def run(self, input_video: str, output_video: str) -> dict:
+        os.makedirs(os.path.dirname(output_video) or ".", exist_ok=True)
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = None
+        pbar = None
+        processed = 0
+        t_start = time.time()
+
+        try:
+            for item in self.stream(input_video):
+                if writer is None:
+                    writer = cv2.VideoWriter(
+                        output_video, fourcc, item["fps"] or 25.0,
+                        (item["width"], item["height"]))
+                    pbar = tqdm(total=item["total"], desc="Tracking(GPU)", unit="frame",
+                                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} "
+                                           "[{elapsed}<{remaining}, {rate_fmt}]")
+                writer.write(item["frame"])
+                processed = item["index"]
                 pbar.update(1)
         finally:
-            pbar.close()
-            cap.release()
-            writer.release()
+            if pbar is not None:
+                pbar.close()
+            if writer is not None:
+                writer.release()
 
         total_time = time.time() - t_start
         result = {
