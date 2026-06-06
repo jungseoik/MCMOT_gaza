@@ -1,40 +1,42 @@
-"""Standalone live tracking web UI (FastAPI + MJPEG).
+"""Standalone live tracking web UI (FastAPI + MJPEG) with a speed dashboard.
 
-This module is fully separate from the core pipeline. It only *reuses*
-`src.inference_gpu.BoostTrackGPUInference` — it does not change any README
-workflow. Launch it on demand with:
-
-    python -m webui            # then open http://localhost:8000
+Separate from the core pipeline — reuses `src.inference_gpu` and `webui.speed`.
 
 Flow:
-  1. Upload a video               -> POST /upload  (returns job_id)
-  2. A worker thread runs TRT inference frame-by-frame, and for each frame
-       (a) writes it to outputs/<job_id>.mp4   (for smooth loop replay)
-       (b) JPEG-encodes it into a queue          (for the live MJPEG view)
-  3. While processing: <img src="/stream/<id>"> shows frames as they finish.
-  4. When done: the page swaps to <video loop> playing /result/<id>.mp4.
+  1. POST /upload         -> save video, return {job_id, width, height,
+                             first_frame (base64 jpg)}  (no inference yet)
+  2. Client picks an optional 4-point ROI + a calibration line on the first
+     frame, then POST /start/{job_id} {roi, pixels_per_meter}.
+  3. A worker runs TRT inference frame-by-frame; for each frame it estimates
+     per-object speed, draws the overlay, writes the result mp4, JPEG-encodes
+     for the live stream, and snapshots dashboard metrics onto the job.
+  4. GET /stream/{job_id} shows frames live, then loops the result.
+  5. GET /status/{job_id} feeds the dashboard (count / speeds / ...).
 """
 import os
 import sys
 import time
 import queue
 import uuid
+import base64
 import asyncio
 import threading
 from pathlib import Path
 
 import cv2
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Body
 from fastapi.responses import (
     StreamingResponse, HTMLResponse, FileResponse, JSONResponse,
 )
+from fastapi.staticfiles import StaticFiles
 
 # Make the project root importable so we can reuse the existing pipeline.
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from src.inference_gpu import BoostTrackGPUInference  # noqa: E402
+from src.inference_gpu import BoostTrackGPUInference   # noqa: E402
+from webui.speed import SpeedEstimator, annotate       # noqa: E402
 
 BASE = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE / "_data" / "uploads"
@@ -42,10 +44,11 @@ OUTPUT_DIR = BASE / "_data" / "outputs"
 INDEX_HTML = BASE / "index.html"
 
 app = FastAPI(title="BoostTrack Live UI")
+app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 
 # Stream tuning. Smaller JPEGs keep the MJPEG stream at full source fps
 # (large frames become transport-bound). The saved mp4 keeps full resolution.
-STREAM_MAX_WIDTH = 854   # downscale wider frames for the live/replay stream
+STREAM_MAX_WIDTH = 854
 JPEG_QUALITY = 72
 
 _model: BoostTrackGPUInference | None = None
@@ -60,18 +63,29 @@ class Job:
         self.input_path = input_path
         self.output_path = OUTPUT_DIR / f"{job_id}.mp4"
         self.queue: "queue.Queue[bytes | None]" = queue.Queue(maxsize=128)
-        # All encoded JPEG frames, kept for loop replay (no re-decode needed).
-        self.replay_frames: list[bytes] = []
-        self.status = "queued"        # queued | processing | done | error
+        self.replay_frames: list[bytes] = []   # all JPEGs, for loop replay
+        self.replay_metrics: list[dict] = []   # per-frame metrics, for replay sync
+        self.status = "uploaded"   # uploaded | queued | processing | done | error
         self.processed = 0
         self.total = 0
         self.fps = 0.0
         self.error: str | None = None
+        # speed config (set by /start)
+        self.roi: list | None = None
+        self.ppm: float | None = None          # pixels per meter (linear mode)
+        self.homography: list | None = None    # 3x3, image foot -> ground meters
+        self.world_area_m2: float | None = None
+        self.metrics: dict = {
+            "unit": "px/s", "count": 0, "cumulative": 0, "avg": 0.0,
+            "max": 0.0, "accel": 0.0, "moving": 0, "stationary": 0,
+            "moving_ratio": 0.0, "density": 0.0, "density_unit": "-",
+            "level": "—", "level_kr": "—", "avg_dwell": 0.0,
+            "max_dwell": 0.0, "objects": [],
+        }
 
 
 def _push(job: Job, data):
-    """Non-blocking push. If the live viewer lags, drop the oldest frame —
-    the mp4 on disk still keeps every frame, so nothing is lost for replay."""
+    """Non-blocking push; drop oldest live frame if the viewer lags."""
     try:
         job.queue.put_nowait(data)
     except queue.Full:
@@ -85,43 +99,55 @@ def _push(job: Job, data):
             pass
 
 
+def _encode(frame):
+    if STREAM_MAX_WIDTH and frame.shape[1] > STREAM_MAX_WIDTH:
+        scale = STREAM_MAX_WIDTH / frame.shape[1]
+        frame = cv2.resize(frame, None, fx=scale, fy=scale,
+                           interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY),
+                                           JPEG_QUALITY])
+    return buf.tobytes() if ok else None
+
+
 def _worker(job: Job):
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = None
+    est = None
     try:
-        # Serialize: only one inference runs at a time (shared tracker state).
-        with _model_lock:
+        with _model_lock:                 # one inference at a time
             job.status = "processing"
-            for item in _model.stream(str(job.input_path)):
-                if writer is None:
+            for item in _model.stream(str(job.input_path), draw=False):
+                if est is None:
                     job.total = item["total"]
                     job.fps = item["fps"] or 25.0
+                    est = SpeedEstimator(job.fps, pixels_per_meter=job.ppm,
+                                         homography=job.homography, roi=job.roi,
+                                         world_area_m2=job.world_area_m2,
+                                         frame_size=(item["width"], item["height"]))
                     writer = cv2.VideoWriter(
                         str(job.output_path), fourcc, job.fps,
-                        (item["width"], item["height"]),
-                    )
-                writer.write(item["frame"])
-                vis = item["frame"]
-                if STREAM_MAX_WIDTH and vis.shape[1] > STREAM_MAX_WIDTH:
-                    scale = STREAM_MAX_WIDTH / vis.shape[1]
-                    vis = cv2.resize(vis, None, fx=scale, fy=scale,
-                                     interpolation=cv2.INTER_AREA)
-                ok, buf = cv2.imencode(
-                    ".jpg", vis, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
-                )
-                if ok:
-                    jpg = buf.tobytes()
-                    job.replay_frames.append(jpg)   # keep all frames for replay
-                    _push(job, jpg)                 # live view (drops if viewer lags)
+                        (item["width"], item["height"]))
+
+                present = est.update(item["index"], item["targets"])
+                frame = annotate(item["frame"], item["targets"], present, est)
+
+                writer.write(frame)
+                jpg = _encode(frame)
+                if jpg is not None:
+                    job.replay_frames.append(jpg)
+                    _push(job, jpg)
+                m = est.metrics(present)
+                job.metrics = m
+                job.replay_metrics.append(m)   # keep per-frame for replay sync
                 job.processed = item["index"]
         job.status = "done"
-    except Exception as exc:  # surface failure to the UI
+    except Exception as exc:
         job.error = str(exc)
         job.status = "error"
     finally:
         if writer is not None:
             writer.release()
-        _push(job, None)   # sentinel: end of live stream
+        _push(job, None)
 
 
 @app.on_event("startup")
@@ -147,10 +173,55 @@ async def upload(file: UploadFile = File(...)):
     with open(dest, "wb") as f:
         while chunk := await file.read(1 << 20):
             f.write(chunk)
-    job = Job(job_id, dest)
-    _jobs[job_id] = job
+
+    # Grab the first frame so the client can set ROI / calibration on it.
+    cap = cv2.VideoCapture(str(dest))
+    ok, frame = cap.read()
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    if not ok:
+        raise HTTPException(400, "cannot read video")
+    fok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    first_b64 = base64.b64encode(buf.tobytes()).decode() if fok else ""
+
+    _jobs[job_id] = Job(job_id, dest)
+    return {"job_id": job_id, "width": w, "height": h,
+            "first_frame": "data:image/jpeg;base64," + first_b64}
+
+
+@app.post("/start/{job_id}")
+def start(job_id: str, body: dict = Body(default={})):
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status not in ("uploaded",):
+        raise HTTPException(409, f"job already {job.status}")
+
+    roi = body.get("roi")                       # [[x,y]*4] in original px, or None
+    if roi and len(roi) == 4:
+        job.roi = roi
+    mode = body.get("mode", "none")             # none | line | homography | depth
+
+    if mode == "line":
+        ppm = body.get("pixels_per_meter")
+        if ppm and float(ppm) > 0:
+            job.ppm = float(ppm)
+    elif mode == "homography" and job.roi:
+        rw, rh = float(body.get("real_w", 0)), float(body.get("real_h", 0))
+        if rw > 0 and rh > 0:
+            import numpy as np
+            img = np.array(job.roi, dtype=np.float32)            # 4 image corners
+            world = np.array([[0, 0], [rw, 0], [rw, rh], [0, rh]],
+                             dtype=np.float32)                    # meters
+            H = cv2.getPerspectiveTransform(img, world)
+            job.homography = H.tolist()
+            job.world_area_m2 = rw * rh
+    # mode == "depth": handled in a later phase; falls back to px/s for now
+
+    job.status = "queued"
     threading.Thread(target=_worker, args=(job,), daemon=True).start()
-    return {"job_id": job_id}
+    return {"job_id": job_id, "roi": job.roi, "pixels_per_meter": job.ppm}
 
 
 @app.get("/status/{job_id}")
@@ -164,20 +235,27 @@ def status(job_id: str):
         "total": job.total,
         "fps": round(job.fps, 1),
         "error": job.error,
+        "metrics": job.metrics,
     })
+
+
+@app.get("/metrics_all/{job_id}")
+def metrics_all(job_id: str):
+    """Full per-frame metrics, so the client can replay the dashboard in sync
+    with the looping result video (no DB — ephemeral, in memory)."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    return {"fps": job.fps or 25.0, "total": len(job.replay_metrics),
+            "frames": job.replay_metrics}
 
 
 @app.get("/stream/{job_id}")
 async def stream(job_id: str):
-    """One continuous MJPEG stream that transitions live -> loop replay.
+    """One continuous MJPEG stream: live during processing, then loop replay.
 
-    Phase 1 (while processing): emit frames as inference produces them.
-    Phase 2 (once done): decode the saved mp4 server-side (cv2 reads mp4v fine)
-    and re-emit it as JPEG in an endless loop at the source frame rate. The
-    browser only ever decodes JPEGs in an <img>, so there is no codec issue.
-
-    Async generator: blocking ops (queue.get / cap.read) run in a thread, and
-    pacing uses asyncio.sleep so the event loop streams each frame promptly.
+    The browser only ever decodes JPEGs in an <img>, so there is no video-codec
+    dependency. Blocking ops run in a thread; pacing uses asyncio.sleep.
     """
     job = _jobs.get(job_id)
     if job is None:
@@ -187,17 +265,14 @@ async def stream(job_id: str):
 
     async def gen():
         # Phase 1 — live frames while inference is running
-        if job.status in ("queued", "processing"):
+        if job.status in ("uploaded", "queued", "processing"):
             while True:
                 data = await asyncio.to_thread(job.queue.get)
                 if data is None:
                     break
                 yield boundary + data + b"\r\n"
 
-        # Phase 2 — loop the pre-encoded frames forever, paced at source fps.
-        # Frames were JPEG-encoded once during inference, so replay does zero
-        # decode/encode work: pacing is governed purely by asyncio.sleep, which
-        # holds true fps. Fixed schedule (next_t += delay) absorbs send jitter.
+        # Phase 2 — loop the pre-encoded frames forever, paced at source fps
         frames = job.replay_frames
         if job.status == "done" and frames:
             delay = 1.0 / (job.fps or 25.0)
@@ -211,7 +286,7 @@ async def stream(job_id: str):
                 if sleep_for > 0:
                     await asyncio.sleep(sleep_for)
                 else:
-                    next_t = time.monotonic()   # fell behind -> resync
+                    next_t = time.monotonic()
 
     return StreamingResponse(
         gen(), media_type="multipart/x-mixed-replace; boundary=frame"

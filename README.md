@@ -90,16 +90,19 @@ $ python -m src.benchmark -i assets/sample1.mp4 -n 100
 ## 실시간 추적 웹 UI (FastAPI)
 
 비디오를 업로드하면 TRT 추론 결과를 추론되는 대로 라이브로 보여주고, 완료되면
-결과를 부드럽게 무한 루프 재생하는 독립형 웹 UI입니다. 코어 파이프라인을
-**재사용만** 하므로 위의 워크플로에는 영향이 없습니다.
+결과를 부드럽게 무한 루프 재생하는 독립형 웹 UI입니다. 객체별 속도(km/h)·밀도·
+체류시간 등을 우측 대시보드로 함께 표출합니다. 코어 파이프라인을 **재사용만**
+하므로 위의 워크플로에는 영향이 없습니다.
 
 ```bash
 $ pip install -r webui/requirements.txt   # 웹 전용 의존성 (1회)
 $ python -m webui                          # http://localhost:8000
 ```
 
-동작 원리(MJPEG 라이브→루프 재생, 페이싱, 화질/속도 튜닝), 엔드포인트, 제약 등
-상세 내용: [docs/webui.md](docs/webui.md)
+- 사용법(설치/실행/튜닝): [docs/webui.md](docs/webui.md)
+- **개발 문서(무엇으로·어떻게 만들었는지, 처음부터 재현 가이드 포함)**:
+  [docs/webui-dev/](docs/webui-dev/) — 이 폴더의 문서만 따라가면 동일하게 다시
+  구현할 수 있도록 아키텍처·백엔드·스트리밍·속도지표·프론트·함정기록을 정리했습니다.
 
 <br>
 
@@ -157,7 +160,8 @@ webui/                         # 실시간 추적 웹 UI (독립 모듈, FastAPI
 docs/
   optimization-report.md       # 최적화 상세 보고서
   eval-pipeline.md             # MOT 평가 파이프라인 가이드
-  webui.md                     # 실시간 추적 웹 UI 가이드
+  webui.md                     # 실시간 추적 웹 UI 사용법
+  webui-dev/                   # 웹 UI 개발 문서(재현 가이드 포함)
 main.py                        # MOT 평가 진입점 (--engine 분기)
 tracker/                       # 핵심 추적 알고리즘 (변경 없음)
 external/                      # 외부 모듈 (변경 없음)

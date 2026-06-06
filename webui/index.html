@@ -1,146 +1,354 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>BoostTrack Live Tracking</title>
+<title>MACS — Live Tracking & Speed</title>
+<link rel="stylesheet" href="/static/colors_and_type.css" />
+<link rel="stylesheet" href="/static/app.css" />
 <style>
-  :root { --bg:#0e1117; --panel:#161b22; --fg:#e6edf3; --muted:#8b949e;
-          --accent:#2f81f7; --ok:#3fb950; --err:#f85149; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-         background:var(--bg); color:var(--fg); }
-  header { padding:18px 24px; border-bottom:1px solid #21262d; }
-  header h1 { margin:0; font-size:18px; font-weight:600; }
-  header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
-  main { max-width:1000px; margin:0 auto; padding:24px; }
-  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  input[type=file] { color:var(--muted); }
-  button { background:var(--accent); color:#fff; border:0; border-radius:6px;
-           padding:9px 16px; font-size:14px; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  .stage { margin-top:20px; background:var(--panel); border:1px solid #21262d;
-           border-radius:10px; padding:16px; }
-  .view { width:100%; background:#000; border-radius:8px; display:block;
-          aspect-ratio:16/9; object-fit:contain; }
-  .hidden { display:none; }
-  .statusbar { display:flex; justify-content:space-between; align-items:center;
-               margin-bottom:12px; font-size:13px; }
-  .badge { padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; }
-  .badge.processing { background:rgba(47,129,247,.15); color:var(--accent); }
-  .badge.done { background:rgba(63,185,80,.15); color:var(--ok); }
-  .badge.error { background:rgba(248,81,73,.15); color:var(--err); }
-  .badge.queued { background:rgba(139,148,158,.15); color:var(--muted); }
-  .bar { height:6px; background:#21262d; border-radius:999px; overflow:hidden; margin-top:4px; }
-  .bar > div { height:100%; width:0; background:var(--accent); transition:width .3s; }
-  .muted { color:var(--muted); font-size:12px; }
+  /* supplements not covered by the imported design system */
+  .hidden{ display:none !important; }
+  .navbtn svg, .brand svg, .mh svg, .icbtn svg, .srcchip svg { width:20px; height:20px; }
+  .brand{ color:var(--pia-cyan); }
+  .mh svg{ width:13px; height:13px; }
+  /* setup (ROI / calibration) screen */
+  .setup{ flex:1; min-width:0; min-height:0; display:flex; flex-direction:column;
+          align-items:center; justify-content:center; padding:28px; gap:16px; overflow:auto;
+          background:radial-gradient(900px 460px at 50% -8%, rgba(42,41,237,.14), transparent 60%), var(--bg-base); }
+  .setup .hd{ text-align:center; }
+  .setup .hd h2{ font:var(--display-28); margin:0 0 4px; }
+  .setup .hd p{ font:var(--body-14); color:var(--text-3); margin:0; }
+  #canvas{ border-radius:var(--r-md); cursor:crosshair; background:#000; border:1px solid var(--stroke-2); max-width:100%; }
+  .tools{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; }
+  .tools .seg{ display:flex; gap:6px; }
+  .tag-btn{ height:34px; padding:0 12px; border-radius:var(--r-md); border:1px solid var(--stroke-3);
+            background:var(--bg-3); color:var(--text-2); font:var(--button-14); cursor:pointer; }
+  .tag-btn.on{ background:rgba(48,220,251,.14); border-color:var(--pia-cyan); color:var(--pia-cyan); }
+  .tools input[type=number]{ width:74px; height:34px; background:var(--bg-3); color:var(--text-1);
+            border:1px solid var(--stroke-3); border-radius:var(--r-md); padding:0 8px; font-family:var(--font-num); }
+  .setinfo{ font:var(--caption-12); color:var(--text-3); }
+  /* HUD count chip value */
+  .hud .meta-r b{ color:#fff; }
+  .pill{ display:inline-block; }
 </style>
 </head>
 <body>
-<header>
-  <h1>BoostTrack — Live TRT Tracking</h1>
-  <p>비디오를 업로드하면 추론되는 대로 실시간 표시하고, 완료되면 결과를 반복 재생합니다.</p>
-</header>
-<main>
-  <div class="row">
-    <input id="file" type="file" accept="video/*" />
-    <button id="go">업로드 &amp; 추론</button>
-    <span id="hint" class="muted"></span>
+<div class="app">
+
+  <!-- nav rail -->
+  <nav class="rail">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 4l7 8-7 8M20 4l-7 8 7 8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <button class="navbtn on" title="Live"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="13" height="12" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 10l5-3v10l-5-3" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
+    <button class="navbtn" title="Recordings"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="2"/><path d="M10 9l5 3-5 3V9z" fill="currentColor"/></svg></button>
+    <button class="navbtn" title="Search"><svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="2"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    <button class="navbtn" title="Analytics"><svg viewBox="0 0 24 24" fill="none"><path d="M4 18l5-6 4 3 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button class="navbtn" title="Zones"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6 7-11a7 7 0 10-14 0c0 5 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4" stroke="currentColor" stroke-width="2"/></svg></button>
+    <span class="sp"></span>
+    <button class="navbtn" title="Settings"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  </nav>
+
+  <!-- top bar -->
+  <div class="topbar">
+    <div class="crumb"><b>Live analytics</b><span>실시간 분석 · Single source</span></div>
+    <div id="srcchip" class="srcchip hidden">
+      <span class="sdot cyan"></span>
+      <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="13" height="12" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 10l5-3v10l-5-3" stroke="currentColor" stroke-width="2"/></svg>
+      <span class="snm" id="srcName">—</span>
+      <span class="ssub">FILE</span>
+    </div>
+    <span class="sp"></span>
+    <span class="clock t-num" id="clock">--:--:--</span>
+    <button class="icbtn" title="Alerts"><svg viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 20a2 2 0 004 0" stroke="currentColor" stroke-width="2"/></svg></button>
+    <button class="btn mono sm" id="changeSrc" style="display:none">↻ Change source</button>
+    <div class="acct"><div class="av">OP</div><div class="who"><b>Operator</b><span>Control room A</span></div></div>
   </div>
 
-  <div id="stage" class="stage hidden">
-    <div class="statusbar">
-      <div>
-        <span id="badge" class="badge queued">queued</span>
-        <span id="meta" class="muted"></span>
+  <!-- stage -->
+  <div class="stage">
+
+    <!-- screen 1: upload -->
+    <div id="scrUpload" class="empty">
+      <div class="srcpanel">
+        <div class="eyebrow"><span class="ld"></span> MACS · 실시간 분석</div>
+        <h1>Add a source</h1>
+        <p class="lede">비디오 파일을 업로드하면 사람 추적과 속도·밀도 분석을 시작합니다.</p>
+        <label class="drop" id="drop">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" width="26" height="26"><path d="M12 16V4m0 0L7 9m5-5l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a1 1 0 001 1h14a1 1 0 001-1v-2" stroke="currentColor" stroke-width="2"/></svg></div>
+          <div class="big">비디오를 끌어다 놓거나 <span class="browse">찾아보기</span></div>
+          <div class="small">MP4 · MOV · MKV</div>
+          <input id="file" type="file" accept="video/*" style="display:none" />
+        </label>
+        <div id="upInfo" class="small" style="margin-top:12px;color:var(--text-3)"></div>
       </div>
-      <span id="phase" class="muted"></span>
     </div>
-    <div class="bar"><div id="prog"></div></div>
-    <div style="margin-top:12px;">
-      <!-- single MJPEG view: live during processing, then loops the result -->
-      <img id="live" class="view" alt="tracking view" />
+
+    <!-- screen 2: ROI / calibration -->
+    <div id="scrSetup" class="setup hidden">
+      <div class="hd"><h2>분석 영역 설정</h2>
+        <p>선택 사항 — 미설정 시 전체 화면·px/s. ROI 4점으로 측정 영역을, 보정선 2점+거리로 km/h 환산.</p></div>
+      <canvas id="canvas"></canvas>
+      <div class="tools">
+        <span class="setinfo">속도 보정:</span>
+        <label class="setinfo"><input type="radio" name="mode" value="none" checked> 없음 (px/s)</label>
+        <label class="setinfo"><input type="radio" name="mode" value="line"> 보정선(2점)</label>
+        <label class="setinfo"><input type="radio" name="mode" value="homography"> ROI 실측(4점)</label>
+        <label class="setinfo"><input type="radio" name="mode" value="depth" disabled> Depth 자동 (곧 지원)</label>
+      </div>
+      <div class="tools">
+        <div class="seg">
+          <button id="mRoi" class="tag-btn">ROI 4점</button>
+          <button id="mCal" class="tag-btn">보정선 2점</button>
+          <button id="clr" class="tag-btn">지우기</button>
+        </div>
+        <span id="lineInputs" class="setinfo hidden">거리 <input id="meters" type="number" min="0" step="0.1" value="1.0" /> m</span>
+        <span id="homoInputs" class="setinfo hidden">실제 가로 <input id="rw" type="number" min="0" step="0.1" value="5.0" /> m × 세로 <input id="rh" type="number" min="0" step="0.1" value="3.0" /> m
+          <span class="setinfo">(ROI는 좌상→우상→우하→좌하 순서로)</span></span>
+        <span id="setupInfo" class="setinfo"></span>
+      </div>
+      <button class="btn cyan" id="go">측정 시작 →</button>
     </div>
+
+    <!-- screen 3: analysis (video + dashboard) -->
+    <div id="scrRun" class="hidden" style="flex:1;display:flex;min-width:0;min-height:0">
+      <div class="workspace">
+        <div class="videowrap">
+          <div class="videobox">
+            <img id="view" class="feed-real" alt="tracking" style="object-fit:contain;filter:none;background:#000" />
+            <div class="hud">
+              <div class="hud-top">
+                <span class="live-token"><span class="d"></span> LIVE</span>
+                <span class="src-name" id="hudName">—</span>
+                <span class="meta-r">
+                  <span class="chip-h"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M5 20c0-3.3 3-5 7-5s7 1.7 7 5" stroke="currentColor" stroke-width="2"/></svg> <b id="hudCount">0</b></span>
+                  <span id="hudRes">—</span>
+                  <span id="hudFps">— fps</span>
+                </span>
+              </div>
+              <div class="hud-bot">
+                <div class="transport">
+                  <button class="tbtn play" title="(MJPEG)">❚❚</button>
+                </div>
+                <span class="tcbig" id="hudPhase">—</span>
+                <div class="btrack"><div class="bf" id="hudBar" style="width:0"></div></div>
+                <span class="tcbig t-num" id="hudProg">0%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="dash">
+        <div class="dash-head">
+          <div class="ttl">Analytics<span>실시간 영상 분석</span></div>
+          <span class="live-mini"><span class="d"></span> <span id="liveLbl">LIVE</span></span>
+        </div>
+        <div class="dash-body">
+          <div class="dgroup">
+            <div class="sectitle">Live metrics <span class="kr">실시간 지표</span></div>
+            <div class="cardgrid">
+              <div class="metric accent-cyan">
+                <div class="mh"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M5 20c0-3.3 3-5 7-5s7 1.7 7 5" stroke="currentColor" stroke-width="2"/></svg> People now <span class="kr">현재 인원</span></div>
+                <div class="val"><b id="mCount">0</b></div>
+                <div class="sub">누적 <b class="t-num" id="mCum" style="color:var(--text-2)">0</b> today</div>
+              </div>
+              <div class="metric">
+                <div class="mh"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l9 5-9 5-9-5 9-5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 13l9 5 9-5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg> Density <span class="kr">밀집도</span></div>
+                <div class="val"><b id="mDensity">0</b><span class="u" id="uDensity">/m²</span></div>
+                <div class="sub"><span class="pill pill-normal" id="mLevel" style="padding:1px 7px">—</span></div>
+              </div>
+              <div class="metric">
+                <div class="mh"><svg viewBox="0 0 24 24" fill="none"><path d="M4 18l5-6 4 3 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Avg speed <span class="kr">평균 속도</span></div>
+                <div class="val"><b id="mAvg">0</b><span class="u" id="uAvg">px/s</span></div>
+                <div class="sub">peak <b class="t-num" id="mMax" style="color:var(--text-2)">0</b> <span id="uMax">px/s</span></div>
+                <svg id="spark" class="spark" viewBox="0 0 100 28" preserveAspectRatio="none"></svg>
+              </div>
+              <div class="metric">
+                <div class="mh"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Acceleration <span class="kr">가속도</span></div>
+                <div class="val"><b id="mAccel">0</b><span class="u">Δ/s</span></div>
+                <div class="sub">mean magnitude</div>
+              </div>
+              <div class="metric">
+                <div class="mh"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Avg dwell <span class="kr">체류시간</span></div>
+                <div class="val"><b id="mDwell">0</b><span class="u">s</span></div>
+                <div class="sub">max <b class="t-num" id="mDwellMax" style="color:var(--text-2)">0</b> s</div>
+              </div>
+              <div class="metric">
+                <div class="mh"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M5 7h14M5 17h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Moving <span class="kr">이동/정지</span></div>
+                <div class="val"><b id="mMoving">0</b><span class="u">/ <span id="mStat">0</span></span></div>
+                <div class="sub"><span id="mRatio">0</span>% moving</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dgroup"><div class="bigcard">
+            <div class="bh"><div class="t">Occupancy<span>인원 추이</span></div>
+              <div class="pill pill-normal" id="mLevel2">—</div></div>
+            <div class="gauge-row" id="occ"></div>
+          </div></div>
+
+          <div class="dgroup">
+            <div class="sectitle">Tracked people <span class="kr">추적 객체 · <span id="trkN">0</span></span></div>
+            <div class="ppl-list" id="ppl"></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
   </div>
-</main>
+</div>
 
 <script>
-const $ = (id) => document.getElementById(id);
-let pollTimer = null;
+const $=id=>document.getElementById(id), SVGNS="http://www.w3.org/2000/svg";
+let jobId=null,origW=0,origH=0,scale=1,img=new Image(),fname="";
+let mode='roi',roiPts=[],calPts=[],pollTimer=null,replayTimer=null,replayArr=null;
+let avgHist=[],countHist=[];
+const cv=$("canvas"),ctx=cv.getContext("2d");
 
-$("go").addEventListener("click", async () => {
-  const f = $("file").files[0];
-  if (!f) { $("hint").textContent = "비디오 파일을 먼저 선택하세요."; return; }
+// clock
+setInterval(()=>{ const d=new Date(); $("clock").textContent=d.toTimeString().slice(0,8); },1000);
 
-  $("go").disabled = true;
-  $("hint").textContent = "업로드 중...";
-  resetStage();
-
-  const fd = new FormData();
-  fd.append("file", f);
-  let job;
-  try {
-    const r = await fetch("/upload", { method: "POST", body: fd });
-    if (!r.ok) throw new Error("upload failed: " + r.status);
-    job = (await r.json()).job_id;
-  } catch (e) {
-    $("hint").textContent = "오류: " + e.message;
-    $("go").disabled = false;
-    return;
-  }
-
-  $("hint").textContent = "";
-  $("stage").classList.remove("hidden");
-  // start live stream (frames appear as they are processed)
-  $("live").src = "/stream/" + job + "?t=" + Date.now();
-  poll(job);
-});
-
-function resetStage() {
-  clearInterval(pollTimer);
-  $("live").removeAttribute("src");
-  setBadge("queued");
-  $("meta").textContent = "";
-  $("phase").textContent = "";
-  $("prog").style.width = "0";
+function show(scr){
+  for(const s of ["scrUpload","scrSetup","scrRun"]) $(s).classList.toggle("hidden", s!==scr);
+  const inSrc = scr!=="scrUpload";
+  $("srcchip").classList.toggle("hidden", !inSrc);
+  $("changeSrc").style.display = inSrc?"":"none";
+}
+$("changeSrc").onclick=()=>{ resetAll(); show("scrUpload"); };
+function resetAll(){
+  clearInterval(pollTimer); clearInterval(replayTimer); replayArr=null;
+  roiPts=[]; calPts=[]; avgHist=[]; countHist=[]; jobId=null; setMode('roi'); $("setupInfo").textContent="";
 }
 
-function setBadge(s) {
-  const b = $("badge");
-  b.className = "badge " + s;
-  b.textContent = s;
+// ---- upload ----
+const fileEl=$("file");
+$("drop").addEventListener("click",()=>fileEl.click());
+$("drop").addEventListener("dragover",e=>{e.preventDefault();$("drop").classList.add("over");});
+$("drop").addEventListener("dragleave",()=>$("drop").classList.remove("over"));
+$("drop").addEventListener("drop",e=>{e.preventDefault();$("drop").classList.remove("over");
+  if(e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]); });
+fileEl.addEventListener("change",()=>{ if(fileEl.files[0]) doUpload(fileEl.files[0]); });
+
+async function doUpload(f){
+  resetAll(); fname=f.name; $("upInfo").textContent="업로드 중...";
+  const fd=new FormData(); fd.append("file",f);
+  let r; try{ r=await (await fetch("/upload",{method:"POST",body:fd})).json(); }
+  catch(e){ $("upInfo").textContent="업로드 실패"; return; }
+  jobId=r.job_id; origW=r.width; origH=r.height; $("upInfo").textContent="";
+  $("srcName").textContent=fname; $("hudName").textContent=fname;
+  $("hudRes").textContent=origW+"×"+origH;
+  img.onload=setupCanvas; img.src=r.first_frame;
+  show("scrSetup");
 }
 
-function poll(job) {
-  pollTimer = setInterval(async () => {
-    let s;
-    try {
-      s = await (await fetch("/status/" + job)).json();
-    } catch (e) { return; }
+// ---- canvas ROI / calibration ----
+function setupCanvas(){ const maxW=Math.min(900,window.innerWidth-120);
+  scale=Math.min(maxW/origW,1); cv.width=Math.round(origW*scale); cv.height=Math.round(origH*scale); draw(); }
+function setMode(m){ mode=m; $("mRoi").classList.toggle("on",m==='roi'); $("mCal").classList.toggle("on",m==='cal'); }
+$("mRoi").onclick=()=>setMode('roi'); $("mCal").onclick=()=>setMode('cal');
+$("clr").onclick=()=>{ if(mode==='roi')roiPts=[]; else calPts=[]; draw(); info(); };
+cv.onclick=e=>{ const rc=cv.getBoundingClientRect(),x=e.clientX-rc.left,y=e.clientY-rc.top;
+  if(mode==='roi'){ if(roiPts.length<4)roiPts.push({x,y}); } else { if(calPts.length<2)calPts.push({x,y}); }
+  draw(); info(); };
+function draw(){ ctx.clearRect(0,0,cv.width,cv.height); if(img.complete)ctx.drawImage(img,0,0,cv.width,cv.height);
+  if(roiPts.length){ ctx.fillStyle="#30DCFB"; ctx.strokeStyle="#30DCFB"; ctx.lineWidth=2; ctx.beginPath();
+    roiPts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); if(roiPts.length===4)ctx.closePath(); ctx.stroke();
+    roiPts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4,0,7);ctx.fill();}); }
+  if(calPts.length){ ctx.fillStyle="#FF4A44"; ctx.strokeStyle="#FF4A44"; ctx.lineWidth=2; ctx.beginPath();
+    calPts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
+    calPts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4,0,7);ctx.fill();}); } }
+function info(){ let s=[]; s.push(roiPts.length===4?"ROI ✓":`ROI ${roiPts.length}/4`);
+  if(calPts.length===2){ const p=calcPPM(); s.push(p?`보정 ${p.toFixed(1)}px/m`:"보정?"); } else s.push(`보정선 ${calPts.length}/2`);
+  $("setupInfo").textContent="· "+s.join(" · "); }
+function calcPPM(){ if(calPts.length!==2)return null; const m=parseFloat($("meters").value); if(!(m>0))return null;
+  return (Math.hypot(calPts[1].x-calPts[0].x,calPts[1].y-calPts[0].y)/scale)/m; }
 
-    setBadge(s.status);
-    const pct = s.total ? Math.round((s.processed / s.total) * 100) : 0;
-    $("prog").style.width = pct + "%";
-    $("meta").textContent =
-      `${s.processed}${s.total ? " / " + s.total : ""} frames`
-      + (s.fps ? `  ·  src ${s.fps}fps` : "");
+// ---- mode selection ----
+function curMode(){ return document.querySelector('input[name=mode]:checked').value; }
+document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("change",()=>{
+  const m=curMode();
+  $("lineInputs").classList.toggle("hidden", m!=="line");
+  $("homoInputs").classList.toggle("hidden", m!=="homography");
+  if(m==="line") setMode('cal'); else if(m==="homography") setMode('roi');
+}));
 
-    if (s.status === "processing") {
-      $("phase").textContent = "추론 중 (라이브)";
-    } else if (s.status === "done") {
-      clearInterval(pollTimer);
-      $("phase").textContent = "완료 · 반복 재생";
-      $("prog").style.width = "100%";
-      // reconnect the same <img>: server now loops the result from frame 0
-      $("live").src = "/stream/" + job + "?replay=" + Date.now();
-      $("go").disabled = false;
-    } else if (s.status === "error") {
-      clearInterval(pollTimer);
-      $("phase").textContent = "오류: " + (s.error || "unknown");
-      $("go").disabled = false;
-    }
-  }, 1000);
+// ---- start ----
+$("go").onclick=async()=>{
+  const m=curMode(); const body={mode:m};
+  if(roiPts.length===4) body.roi=roiPts.map(p=>[p.x/scale,p.y/scale]);
+  if(m==="line"){ const ppm=calcPPM();
+    if(!ppm){ $("setupInfo").textContent="· 보정선 2점과 거리를 입력하세요"; return; }
+    body.pixels_per_meter=ppm; }
+  if(m==="homography"){
+    if(roiPts.length!==4){ $("setupInfo").textContent="· ROI 4점을 찍으세요"; return; }
+    body.real_w=parseFloat($("rw").value); body.real_h=parseFloat($("rh").value);
+    if(!(body.real_w>0&&body.real_h>0)){ $("setupInfo").textContent="· 실제 가로/세로(m)를 입력하세요"; return; } }
+  await fetch("/start/"+jobId,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  show("scrRun"); $("view").src="/stream/"+jobId+"?t="+Date.now(); poll(); };
+
+// ---- run ----
+function poll(){ pollTimer=setInterval(async()=>{
+  let s; try{ s=await (await fetch("/status/"+jobId)).json(); }catch(e){ return; }
+  const pct=s.total?Math.round(s.processed/s.total*100):0;
+  $("hudBar").style.width=pct+"%"; $("hudProg").textContent=pct+"%";
+  $("hudFps").textContent=(s.fps||0)+" fps";
+  renderDash(s.metrics||{});
+  if(s.status==="processing"){ $("hudPhase").textContent="추론 중"; $("liveLbl").textContent="LIVE"; }
+  else if(s.status==="done"){ clearInterval(pollTimer); $("hudPhase").textContent="완료 · 반복"; $("liveLbl").textContent="REPLAY";
+    $("hudBar").style.width="100%"; $("hudProg").textContent="100%";
+    $("view").src="/stream/"+jobId+"?replay="+Date.now(); startReplayDash(jobId); }
+  else if(s.status==="error"){ clearInterval(pollTimer); $("hudPhase").textContent="오류"; }
+},600); }
+
+async function startReplayDash(job){
+  let r; try{ r=await (await fetch("/metrics_all/"+job)).json(); }catch(e){ return; }
+  replayArr=r.frames||[]; const fps=r.fps||25,total=replayArr.length; if(!total)return;
+  avgHist=[]; countHist=[]; const t0=performance.now(); clearInterval(replayTimer);
+  replayTimer=setInterval(()=>{ const idx=Math.floor((performance.now()-t0)/1000*fps)%total; renderDash(replayArr[idx]); },
+    Math.max(40,1000/fps)); }
+
+function renderDash(m){
+  const u=m.unit||"px/s";
+  $("mCount").textContent=m.count??0; $("hudCount").textContent=m.count??0;
+  $("mCum").textContent=(m.cumulative??0).toLocaleString();
+  $("mDensity").textContent=m.density??0; $("uDensity").textContent=(m.density_unit||"-").replace("명","");
+  $("mAvg").textContent=m.avg??0; $("uAvg").textContent=u;
+  $("mMax").textContent=m.max??0; $("uMax").textContent=u;
+  $("mAccel").textContent=m.accel??0;
+  $("mDwell").textContent=m.avg_dwell??0; $("mDwellMax").textContent=m.max_dwell??0;
+  $("mMoving").textContent=m.moving??0; $("mStat").textContent=m.stationary??0; $("mRatio").textContent=m.moving_ratio??0;
+  // level pill
+  const lv=m.level||"—", cls=lv==="High"?"pill-high":lv==="Low"?"pill-low":"pill-normal";
+  for(const id of ["mLevel","mLevel2"]){ const e=$(id); e.className="pill "+cls; if(id==="mLevel")e.style.padding="1px 7px";
+    e.textContent=(m.level&&m.level!=="—")?(m.level+" · "+m.level_kr):"—"; }
+  // sparkline (avg speed)
+  avgHist.push(+(m.avg||0)); if(avgHist.length>40)avgHist.shift(); drawSpark(avgHist);
+  // occupancy bars (count history)
+  countHist.push(+(m.count||0)); if(countHist.length>26)countHist.shift(); drawOcc(countHist);
+  // tracked people list
+  const objs=m.objects||[]; $("trkN").textContent=objs.length;
+  $("ppl").innerHTML = objs.length? objs.slice(0,40).map(o=>{
+    const c=`hsl(${(o.id*53)%360},70%,55%)`;
+    return `<div class="ppl"><span class="pid" style="color:${c}">P-${String(o.id).padStart(2,'0')}</span>
+      <span class="zinfo">${u}</span>
+      <span class="col"><span class="n t-num">${o.speed}</span><span class="k">${u}</span></span>
+      <span class="col"><span class="n t-num">${o.dwell??'-'}</span><span class="k">dwell</span></span></div>`;
+  }).join("") : `<div class="empty-note">측정 객체 없음 · No objects</div>`;
 }
+
+function drawSpark(arr){ const svg=$("spark"); svg.innerHTML=""; if(arr.length<2)return;
+  const W=100,H=28,mx=Math.max(...arr,0.001);
+  const pts=arr.map((v,i)=>`${(i/(arr.length-1)*W).toFixed(1)},${(H-2-(v/mx)*(H-5)).toFixed(1)}`);
+  add(svg,"polygon",{points:`0,${H} ${pts.join(" ")} ${W},${H}`,fill:"rgba(48,220,251,.18)"});
+  add(svg,"polyline",{points:pts.join(" "),fill:"none",stroke:"var(--pia-cyan)","stroke-width":"1.6","vector-effect":"non-scaling-stroke"}); }
+function drawOcc(arr){ const box=$("occ"); box.innerHTML=""; const mx=Math.max(...arr,1);
+  arr.forEach((v,i)=>{ const d=document.createElement("div"); d.className="bar"+(i===arr.length-1?" on":"");
+    d.style.height=(v/mx*100)+"%"; box.appendChild(d); }); }
+function add(svg,t,a){ const e=document.createElementNS(SVGNS,t); for(const k in a)e.setAttribute(k,a[k]); svg.appendChild(e); }
+
+show("scrUpload");
 </script>
 </body>
 </html>

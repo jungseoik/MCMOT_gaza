@@ -169,12 +169,15 @@ class BoostTrackGPUInference:
             cv2.putText(vis, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         return vis
 
-    def stream(self, input_video: str, reset: bool = True):
+    def stream(self, input_video: str, reset: bool = True, draw: bool = True):
         """Generator form of run(): yields one dict per processed frame.
 
-        Each item: {"index", "total", "fps", "width", "height", "frame" (BGR ndarray)}.
-        The caller decides what to do with each frame (write to file, JPEG-encode
-        for live MJPEG streaming, etc.). Both run() and the web server build on this.
+        Each item: {"index", "total", "fps", "width", "height", "frame" (BGR
+        ndarray), "targets" (ndarray Nx>=6 [x1,y1,x2,y2,id,...])}.
+
+        draw=True  -> "frame" has the default ID boxes drawn (run() / simple use).
+        draw=False -> "frame" is the raw BGR frame and the caller draws its own
+                      overlay using "targets" (used by the speed dashboard).
         """
         cap = cv2.VideoCapture(input_video)
         if not cap.isOpened():
@@ -205,7 +208,7 @@ class BoostTrackGPUInference:
                 pred = self.detector.detect(tensor)
                 targets = self.tracker.update(pred, tensor, frame, tag)
 
-                if targets.shape[0] > 0 and targets.shape[1] >= 6:
+                if draw and targets.shape[0] > 0 and targets.shape[1] >= 6:
                     vis = self._draw_tracks(frame, targets)
                 else:
                     vis = frame
@@ -218,6 +221,7 @@ class BoostTrackGPUInference:
                     "width": w,
                     "height": h,
                     "frame": vis,
+                    "targets": targets,
                 }
         finally:
             cap.release()
