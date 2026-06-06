@@ -95,7 +95,7 @@
         <label class="setinfo"><input type="radio" name="mode" value="none" checked> 없음 (px/s)</label>
         <label class="setinfo"><input type="radio" name="mode" value="line"> 보정선(2점)</label>
         <label class="setinfo"><input type="radio" name="mode" value="homography"> ROI 실측(4점)</label>
-        <label class="setinfo"><input type="radio" name="mode" value="depth" disabled> Depth 자동 (곧 지원)</label>
+        <label class="setinfo"><input type="radio" name="mode" value="depth"> Depth 자동 (사람키)</label>
       </div>
       <div class="tools">
         <div class="seg">
@@ -107,6 +107,12 @@
         <span id="homoInputs" class="setinfo hidden">실제 가로 <input id="rw" type="number" min="0" step="0.1" value="5.0" /> m × 세로 <input id="rh" type="number" min="0" step="0.1" value="3.0" /> m
           <span class="setinfo">(ROI는 좌상→우상→우하→좌하 순서로)</span></span>
         <span id="setupInfo" class="setinfo"></span>
+      </div>
+      <div id="depthPanel" class="hidden" style="text-align:center;margin-top:6px;">
+        <div id="depthStatus" class="setinfo"></div>
+        <img id="depthImg" style="max-width:520px;width:100%;border-radius:8px;margin-top:8px;display:none" />
+        <div id="depthInfo" class="setinfo" style="margin-top:6px"></div>
+        <button class="btn cyan hidden" id="depthGo" style="margin-top:8px">이 깊이로 측정 시작 →</button>
       </div>
       <button class="btn cyan" id="go">측정 시작 →</button>
     </div>
@@ -220,6 +226,7 @@ $("changeSrc").onclick=()=>{ resetAll(); show("scrUpload"); };
 function resetAll(){
   clearInterval(pollTimer); clearInterval(replayTimer); replayArr=null;
   roiPts=[]; calPts=[]; avgHist=[]; countHist=[]; jobId=null; setMode('roi'); $("setupInfo").textContent="";
+  $("depthPanel").classList.add("hidden");
 }
 
 // ---- upload ----
@@ -274,10 +281,16 @@ document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("cha
   if(m==="line") setMode('cal'); else if(m==="homography") setMode('roi');
 }));
 
+function roiBody(){ return roiPts.length===4 ? roiPts.map(p=>[p.x/scale,p.y/scale]) : null; }
+async function startJob(body){
+  await fetch("/start/"+jobId,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  show("scrRun"); $("view").src="/stream/"+jobId+"?t="+Date.now(); poll();
+}
+
 // ---- start ----
 $("go").onclick=async()=>{
-  const m=curMode(); const body={mode:m};
-  if(roiPts.length===4) body.roi=roiPts.map(p=>[p.x/scale,p.y/scale]);
+  const m=curMode(); const body={mode:m}; const roi=roiBody(); if(roi) body.roi=roi;
+  if(m==="depth"){ prepareDepth(); return; }   // depth: analyze + confirm first
   if(m==="line"){ const ppm=calcPPM();
     if(!ppm){ $("setupInfo").textContent="· 보정선 2점과 거리를 입력하세요"; return; }
     body.pixels_per_meter=ppm; }
@@ -285,8 +298,26 @@ $("go").onclick=async()=>{
     if(roiPts.length!==4){ $("setupInfo").textContent="· ROI 4점을 찍으세요"; return; }
     body.real_w=parseFloat($("rw").value); body.real_h=parseFloat($("rh").value);
     if(!(body.real_w>0&&body.real_h>0)){ $("setupInfo").textContent="· 실제 가로/세로(m)를 입력하세요"; return; } }
-  await fetch("/start/"+jobId,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  show("scrRun"); $("view").src="/stream/"+jobId+"?t="+Date.now(); poll(); };
+  startJob(body);
+};
+
+// ---- depth: analyze first frame -> show depth -> confirm -> start ----
+async function prepareDepth(){
+  const roi=roiBody(); const body=roi?{roi}:{};
+  $("depthPanel").classList.remove("hidden");
+  $("depthStatus").textContent="깊이 분석 중... (최초 1회 모델 로드로 최대 1분)";
+  $("depthImg").style.display="none"; $("depthGo").classList.add("hidden"); $("depthInfo").textContent="";
+  $("go").disabled=true;
+  let r; try{ r=await (await fetch("/prepare_depth/"+jobId,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
+  catch(e){ $("depthStatus").textContent="깊이 분석 실패 (서버/da3 env 확인)"; $("go").disabled=false; return; }
+  $("go").disabled=false;
+  if(!r.ok){ $("depthStatus").textContent="깊이 보정 실패: "+(r.reason||"unknown"); return; }
+  $("depthStatus").textContent="깊이 분석 완료 — 미리보기 확인 후 진행하세요";
+  $("depthImg").src=r.vis+"?t="+Date.now(); $("depthImg").style.display="inline-block";
+  $("depthInfo").textContent=`초점 ${r.focal}px · 바닥평면 적합 ${Math.round(r.inlier*100)}% · 인원 ${r.people} · (사람키 1.7m 기준 추정)`;
+  $("depthGo").classList.remove("hidden");
+}
+$("depthGo").onclick=()=>{ const body={mode:"depth"}; const roi=roiBody(); if(roi) body.roi=roi; startJob(body); };
 
 // ---- run ----
 function poll(){ pollTimer=setInterval(async()=>{

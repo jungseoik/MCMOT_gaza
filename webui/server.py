@@ -21,9 +21,11 @@ import uuid
 import base64
 import asyncio
 import threading
+import subprocess
 from pathlib import Path
 
 import cv2
+import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException, Body
 from fastapi.responses import (
     StreamingResponse, HTMLResponse, FileResponse, JSONResponse,
@@ -37,11 +39,17 @@ if str(_ROOT) not in sys.path:
 
 from src.inference_gpu import BoostTrackGPUInference   # noqa: E402
 from webui.speed import SpeedEstimator, annotate       # noqa: E402
+from webui import depth_ground                          # noqa: E402
 
 BASE = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE / "_data" / "uploads"
 OUTPUT_DIR = BASE / "_data" / "outputs"
 INDEX_HTML = BASE / "index.html"
+
+# Depth mode runs Depth-Anything-3 in its own conda env (separate deps).
+DA3_PYTHON = os.environ.get(
+    "DA3_PYTHON", os.path.expanduser("~/miniconda3/envs/da3/bin/python"))
+DA3_SCRIPT = str(BASE / "da3_depth.py")
 
 app = FastAPI(title="BoostTrack Live UI")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
@@ -217,7 +225,8 @@ def start(job_id: str, body: dict = Body(default={})):
             H = cv2.getPerspectiveTransform(img, world)
             job.homography = H.tolist()
             job.world_area_m2 = rw * rh
-    # mode == "depth": handled in a later phase; falls back to px/s for now
+    # mode == "depth": homography was already built by /prepare_depth and stored
+    # on the job; nothing to do here. If prepare wasn't run, falls back to px/s.
 
     job.status = "queued"
     threading.Thread(target=_worker, args=(job,), daemon=True).start()
@@ -237,6 +246,71 @@ def status(job_id: str):
         "error": job.error,
         "metrics": job.metrics,
     })
+
+
+def _first_frame_boxes(input_path):
+    """Person boxes on the first frame (for depth focal/ground estimation)."""
+    with _model_lock:
+        for item in _model.stream(input_path, draw=False):
+            t = item["targets"]
+            boxes = [[float(b[0]), float(b[1]), float(b[2]), float(b[3])]
+                     for b in t] if getattr(t, "ndim", 0) == 2 else []
+            return boxes, (item["width"], item["height"])
+    return [], (0, 0)
+
+
+@app.post("/prepare_depth/{job_id}")
+def prepare_depth(job_id: str, body: dict = Body(default={})):
+    """Run Depth-Anything-3 (separate env) on the first frame, fit the ground
+    plane, and build the image->ground homography. Returns a depth preview the
+    UI shows for confirmation before measurement actually starts."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    roi = body.get("roi")
+    if roi and len(roi) == 4:
+        job.roi = roi
+
+    if not os.path.exists(DA3_PYTHON):
+        raise HTTPException(500, f"da3 env python not found ({DA3_PYTHON}); "
+                                 "set DA3_PYTHON env var")
+    cap = cv2.VideoCapture(str(job.input_path))
+    ok, frame = cap.read(); cap.release()
+    if not ok:
+        raise HTTPException(400, "cannot read frame")
+    framep = UPLOAD_DIR / f"{job_id}_f0.png"
+    depthp = OUTPUT_DIR / f"{job_id}_depth.npy"
+    visp = OUTPUT_DIR / f"{job_id}_depth.png"
+    cv2.imwrite(str(framep), frame)
+
+    r = subprocess.run([DA3_PYTHON, DA3_SCRIPT, "--image", str(framep),
+                        "--out-depth", str(depthp), "--out-vis", str(visp)],
+                       capture_output=True, text=True, timeout=600)
+    if r.returncode != 0 or not depthp.exists():
+        raise HTTPException(500, "depth extraction failed: " + (r.stderr or "")[-400:])
+
+    depth = np.load(str(depthp))
+    boxes, (w, h) = _first_frame_boxes(str(job.input_path))
+    est = depth_ground.estimate(depth, boxes, (w, h))
+    if est is None:
+        return {"ok": False, "vis": f"/depthvis/{job_id}",
+                "reason": "ground-plane estimate failed (need standing people / floor)"}
+    job.homography = est["homography"]
+    if job.roi:
+        job.world_area_m2 = depth_ground.polygon_area_m2(
+            np.array(est["homography"], dtype=np.float32), job.roi)
+    return {"ok": True, "vis": f"/depthvis/{job_id}",
+            "focal": round(est["focal"], 1),
+            "inlier": round(est["plane_inlier"], 2),
+            "people": len(boxes)}
+
+
+@app.get("/depthvis/{job_id}")
+def depthvis(job_id: str):
+    visp = OUTPUT_DIR / f"{job_id}_depth.png"
+    if not visp.exists():
+        raise HTTPException(404, "no depth preview")
+    return FileResponse(str(visp), media_type="image/png")
 
 
 @app.get("/metrics_all/{job_id}")

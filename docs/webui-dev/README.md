@@ -14,6 +14,7 @@
 4. **[04-frontend.md](04-frontend.md)** — 3화면 vanilla 프론트, 디자인 시스템 이식, 캔버스 ROI/보정, 재생 동기화
 5. **[05-rebuild-from-scratch.md](05-rebuild-from-scratch.md)** — **빈 레포에서 단계별로 다시 만드는 가이드**
 6. **[06-decisions-and-gotchas.md](06-decisions-and-gotchas.md)** — 막혔던 지점과 그 해결(코덱·페이싱·버전 등). 같은 함정 피하기용
+7. **[07-depth-mode.md](07-depth-mode.md)** — Depth 자동 모드(Depth-Anything-3, 별도 env, 사람키 앵커, 미리보기 확인)
 
 ## 한 줄 요약
 
