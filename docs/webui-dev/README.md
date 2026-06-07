@@ -18,6 +18,7 @@
 8. **[08-speed-and-calibration.md](08-speed-and-calibration.md)** — **속도·가속도 공식 + 보정 4가지(보정선/ROI/Depth) 설명 (누구나 읽는 버전)**
 9. **[09-rtsp-live.md](09-rtsp-live.md)** — RTSP 라이브 모드(프레임 스킵·정지·자동정지·견고성 한계)
 10. **[10-map-view.md](10-map-view.md)** — 2D 맵 뷰(top-down 점+방향벡터, 영상/맵 토글, 리소스 영향)
+11. **[11-in-out-counting.md](11-in-out-counting.md)** — 인·아웃 라인 카운팅(재실 추정, 선 2점+안쪽, 음수 경보)
 
 ## 한 줄 요약
 

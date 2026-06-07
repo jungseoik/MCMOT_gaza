@@ -39,6 +39,7 @@ if str(_ROOT) not in sys.path:
 
 from src.inference_gpu import BoostTrackGPUInference   # noqa: E402
 from webui.speed import SpeedEstimator, annotate       # noqa: E402
+from webui.counter import LineCounter                   # noqa: E402
 from webui import depth_ground                          # noqa: E402
 
 BASE = Path(__file__).resolve().parent
@@ -85,6 +86,11 @@ class Job:
         self.ppm: float | None = None          # pixels per meter (linear mode)
         self.homography: list | None = None    # 3x3, image foot -> ground meters
         self.world_area_m2: float | None = None
+        # in/out line counting
+        self.counting = False
+        self.count_line: list | None = None     # [[x,y],[x,y]]
+        self.count_inside: list | None = None    # [x,y] on the "inside" half
+        self.count_segment = True                # segment-only vs infinite line
         self.metrics: dict = {
             "unit": "px/s", "count": 0, "cumulative": 0, "avg": 0.0,
             "max": 0.0, "accel": 0.0, "moving": 0, "stationary": 0,
@@ -119,6 +125,27 @@ def _encode(frame):
     return buf.tobytes() if ok else None
 
 
+def _make_analyzer(job, item):
+    """LineCounter for in/out counting, else SpeedEstimator."""
+    if job.counting:
+        return LineCounter(job.count_line, job.count_inside,
+                           segment_only=job.count_segment)
+    return SpeedEstimator(job.fps or 25.0, pixels_per_meter=job.ppm,
+                          homography=job.homography, roi=job.roi,
+                          world_area_m2=job.world_area_m2,
+                          frame_size=(item["width"], item["height"]))
+
+
+def _process(analyzer, job, item, t_sec):
+    """Run one frame through the analyzer -> (annotated_frame, metrics)."""
+    if job.counting:
+        analyzer.update(item["targets"])
+        return analyzer.draw(item["frame"], item["targets"]), analyzer.metrics()
+    present = analyzer.update(t_sec, item["targets"])
+    return (annotate(item["frame"], item["targets"], present, analyzer),
+            analyzer.metrics(present))
+
+
 def _stop_other_live(keep_id=None):
     """Signal every other running LIVE job to stop, so it releases the model
     lock. Live jobs never end on their own; without this a new job would queue
@@ -133,32 +160,27 @@ def _worker(job: Job):
         return _worker_live(job)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = None
-    est = None
+    analyzer = None
     try:
         with _model_lock:                 # one inference at a time
             job.status = "processing"
             for item in _model.stream(str(job.input_path), draw=False):
-                if est is None:
+                if analyzer is None:
                     job.total = item["total"]
                     job.fps = item["fps"] or 25.0
-                    est = SpeedEstimator(job.fps, pixels_per_meter=job.ppm,
-                                         homography=job.homography, roi=job.roi,
-                                         world_area_m2=job.world_area_m2,
-                                         frame_size=(item["width"], item["height"]))
+                    analyzer = _make_analyzer(job, item)
                     writer = cv2.VideoWriter(
                         str(job.output_path), fourcc, job.fps,
                         (item["width"], item["height"]))
 
                 t_sec = item["index"] / (job.fps or 25.0)   # video-timeline seconds
-                present = est.update(t_sec, item["targets"])
-                frame = annotate(item["frame"], item["targets"], present, est)
+                frame, m = _process(analyzer, job, item, t_sec)
 
                 writer.write(frame)
                 jpg = _encode(frame)
                 if jpg is not None:
                     job.replay_frames.append(jpg)
                     _push(job, jpg)
-                m = est.metrics(present)
                 job.metrics = m
                 job.replay_metrics.append(m)   # keep per-frame for replay sync
                 job.processed = item["index"]
@@ -176,24 +198,20 @@ def _worker_live(job: Job):
     """Live (RTSP) job: process the newest frame at the model's real-time rate,
     drop the backlog, run until /stop or disconnect. No recording, no replay.
     Speed timing uses the wall clock (frames are skipped non-uniformly)."""
-    est = None
+    analyzer = None
     try:
         with _model_lock:
             job.status = "processing"
             for item in _model.stream(str(job.input_path), draw=False,
                                       live=True, should_stop=lambda: job.stop):
-                if est is None:
+                if analyzer is None:
                     job.fps = item["fps"] or 0.0
-                    est = SpeedEstimator(job.fps or 25.0, pixels_per_meter=job.ppm,
-                                         homography=job.homography, roi=job.roi,
-                                         world_area_m2=job.world_area_m2,
-                                         frame_size=(item["width"], item["height"]))
-                present = est.update(time.monotonic(), item["targets"])  # real time
-                frame = annotate(item["frame"], item["targets"], present, est)
+                    analyzer = _make_analyzer(job, item)
+                frame, m = _process(analyzer, job, item, time.monotonic())  # real time
                 jpg = _encode(frame)
                 if jpg is not None:
                     _push(job, jpg)
-                job.metrics = est.metrics(present)
+                job.metrics = m
                 job.processed = item["index"]
         job.status = "stopped"
     except Exception as exc:
@@ -285,6 +303,18 @@ def start(job_id: str, body: dict = Body(default={})):
         raise HTTPException(404, "job not found")
     if job.status not in ("uploaded",):
         raise HTTPException(409, f"job already {job.status}")
+
+    # in/out line counting (independent of speed calibration)
+    cnt = body.get("count")
+    if cnt and cnt.get("line") and cnt.get("inside"):
+        job.counting = True
+        job.count_line = cnt["line"]
+        job.count_inside = cnt["inside"]
+        job.count_segment = bool(cnt.get("segment", True))
+        _stop_other_live(keep_id=job_id)
+        job.status = "queued"
+        threading.Thread(target=_worker, args=(job,), daemon=True).start()
+        return {"job_id": job_id, "counting": True}
 
     roi = body.get("roi")                       # [[x,y]*4] in original px, or None
     if roi and len(roi) == 4:
