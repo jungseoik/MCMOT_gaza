@@ -184,3 +184,5 @@ cache/
 # Videos (except samples)
 *.mp4
 !assets/sample1.mp4
+# Claude Code personal/local settings
+.claude/settings.local.json
