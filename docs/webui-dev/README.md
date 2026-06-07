@@ -15,6 +15,9 @@
 5. **[05-rebuild-from-scratch.md](05-rebuild-from-scratch.md)** — **빈 레포에서 단계별로 다시 만드는 가이드**
 6. **[06-decisions-and-gotchas.md](06-decisions-and-gotchas.md)** — 막혔던 지점과 그 해결(코덱·페이싱·버전 등). 같은 함정 피하기용
 7. **[07-depth-mode.md](07-depth-mode.md)** — Depth 자동 모드(Depth-Anything-3, 별도 env, 사람키 앵커, 미리보기 확인)
+8. **[08-speed-and-calibration.md](08-speed-and-calibration.md)** — **속도·가속도 공식 + 보정 4가지(보정선/ROI/Depth) 설명 (누구나 읽는 버전)**
+9. **[09-rtsp-live.md](09-rtsp-live.md)** — RTSP 라이브 모드(프레임 스킵·정지·자동정지·견고성 한계)
+10. **[10-map-view.md](10-map-view.md)** — 2D 맵 뷰(top-down 점+방향벡터, 영상/맵 토글, 리소스 영향)
 
 ## 한 줄 요약
 

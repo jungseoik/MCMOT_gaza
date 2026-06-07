@@ -133,6 +133,40 @@ class SpeedEstimator:
         for d in (self.history, self.speed, self.first_seen, self.prev, self.accel):
             d.pop(tid, None)
 
+    def _obj_map(self, tid):
+        """Top-down map position + unit direction for one object.
+        Returns (mx, my, dirx, diry). Metric ground meters when homography is
+        set, else raw image-foot pixels (perspective-distorted fallback)."""
+        dq = self.history.get(tid)
+        if not dq:
+            return 0.0, 0.0, 0.0, 0.0
+        _, x0, y0 = dq[0]
+        _, x1, y1 = dq[-1]
+        if self.H is not None:
+            mx, my = self._world(x1, y1)
+            sx, sy = self._world(x0, y0)
+        else:
+            mx, my, sx, sy = x1, y1, x0, y0
+        dx, dy = mx - sx, my - sy
+        L = (dx * dx + dy * dy) ** 0.5
+        if L > 1e-6:
+            dx, dy = dx / L, dy / L
+        else:
+            dx, dy = 0.0, 0.0
+        return mx, my, dx, dy
+
+    def _map_bounds(self):
+        """[x0,y0,x1,y1] for the map view. ROI(+H) -> stable rect; whole-frame
+        depth -> None (client auto-fits); no calibration -> image pixel space."""
+        if self.H is not None and self.roi is not None:
+            pts = self.roi.astype(np.float32).reshape(-1, 1, 2)
+            w = cv2.perspectiveTransform(pts, self.H).reshape(-1, 2)
+            return [float(w[:, 0].min()), float(w[:, 1].min()),
+                    float(w[:, 0].max()), float(w[:, 1].max())]
+        if self.H is not None:
+            return None
+        return [0.0, 0.0, float(self.fw), float(self.fh)]
+
     def _density(self, n):
         """(value, unit). m² when metric scale known, else per-megapixel."""
         if self.H is not None and self.world_area_m2:
@@ -182,12 +216,20 @@ class SpeedEstimator:
             "level_kr": level_kr,
             "avg_dwell": round(sum(dvals) / len(dvals), 1) if dvals else 0.0,
             "max_dwell": round(max(dvals), 1) if dvals else 0.0,
+            "map_metric": self.H is not None,     # true top-down vs image-space
+            "map_bounds": self._map_bounds(),
             "objects": [
-                {"id": int(tid), "speed": round(float(s), 1),
-                 "dwell": round(float(dwells[tid]), 1)}
+                self._obj_entry(tid, s, dwells[tid])
                 for tid, s in sorted(present.items(), key=lambda kv: -kv[1])
             ],
         }
+
+    def _obj_entry(self, tid, s, dwell):
+        mx, my, dx, dy = self._obj_map(tid)
+        return {"id": int(tid), "speed": round(float(s), 1),
+                "dwell": round(float(dwell), 1),
+                "mx": round(mx, 2), "my": round(my, 2),
+                "dirx": round(dx, 2), "diry": round(dy, 2)}
 
 
 def annotate(frame, targets, present, estimator):

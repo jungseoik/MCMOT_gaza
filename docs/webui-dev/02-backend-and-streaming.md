@@ -7,13 +7,20 @@
 | 메서드 | 경로 | 설명 | 반환 |
 |--------|------|------|------|
 | GET | `/` | 단일 페이지 | `index.html` (매 요청 read → 수정 시 재시작 불필요) |
-| POST | `/upload` | 비디오 저장 + 첫 프레임 | `{job_id, width, height, first_frame(dataURL)}` |
-| POST | `/start/{id}` | ROI·보정 받고 워커 기동 | `{job_id, roi, pixels_per_meter}` |
-| GET | `/status/{id}` | 진행률 + 최신 지표 | `{status, processed, total, fps, error, metrics}` |
-| GET | `/stream/{id}` | MJPEG 라이브→루프 | `multipart/x-mixed-replace` |
-| GET | `/metrics_all/{id}` | 프레임별 지표 전체 | `{fps, total, frames:[metrics,...]}` |
-| GET | `/result/{id}` | 결과 mp4(원본 해상도) | `video/mp4` (VLC 등 재생/다운로드용) |
+| POST | `/upload` | 비디오 파일 저장 + 첫 프레임 | `{job_id, width, height, first_frame(dataURL)}` |
+| POST | `/rtsp` | RTSP/라이브 소스 열기 + 첫 프레임 | `{job_id, width, height, first_frame, live:true}` |
+| POST | `/start/{id}` | ROI·보정·모드 받고 워커 기동 | `{job_id, roi, pixels_per_meter}` |
+| POST | `/stop/{id}` | 라이브 잡 정지 | `{ok:true}` |
+| POST | `/prepare_depth/{id}` | (Depth) 첫 프레임 깊이→평면→호모그래피 | `{ok, vis, focal, inlier, people}` |
+| GET | `/depthvis/{id}` | Depth 미리보기(컬러 깊이맵) | `image/png` |
+| GET | `/status/{id}` | 진행률 + 최신 지표 | `{status, live, processed, total, fps, error, metrics}` |
+| GET | `/stream/{id}` | MJPEG 라이브→(파일)루프 | `multipart/x-mixed-replace` |
+| GET | `/metrics_all/{id}` | 프레임별 지표 전체(파일 재생 동기화) | `{fps, total, frames:[metrics,...]}` |
+| GET | `/result/{id}` | 결과 mp4(파일, 원본 해상도) | `video/mp4` (VLC 등) |
 | GET | `/static/*` | 디자인 자산 | `StaticFiles` 마운트 |
+
+> 파일 모드 흐름은 아래(이 문서), RTSP 라이브 모드는 **[09-rtsp-live.md](09-rtsp-live.md)**,
+> Depth는 **[07-depth-mode.md](07-depth-mode.md)** 참고.
 
 ## Job 모델 (인메모리)
 
@@ -23,9 +30,11 @@ class Job:
     queue            # 라이브 MJPEG용 JPEG 큐 (maxsize=128, 가득 차면 오래된 것 드롭)
     replay_frames[]  # 모든 JPEG (루프 재생용)
     replay_metrics[] # 프레임별 metrics (재생 동기화용)
-    status           # uploaded|queued|processing|done|error
+    status           # uploaded|queued|processing|done|error|stopped(라이브)
     processed,total,fps,error
-    roi, ppm         # /start에서 설정
+    live, stop       # RTSP 라이브 여부 / 정지 플래그
+    roi, ppm         # /start에서 설정 (보정선 모드)
+    homography, world_area_m2   # ROI 실측/Depth 모드의 지면 변환·면적
     metrics          # 최신 프레임 지표 스냅샷
 ```
 

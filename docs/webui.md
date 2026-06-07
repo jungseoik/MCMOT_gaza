@@ -1,11 +1,25 @@
 # 실시간 추적 웹 UI (`webui`)
 
-비디오를 업로드하면 TRT 추론 결과를 **추론되는 대로 라이브로** 보여주고,
-완료되면 결과를 **부드럽게 무한 루프 재생**하는 독립형 웹 UI입니다.
+**비디오 파일 또는 RTSP 스트림**을 입력받아 TRT 추적 결과를 실시간으로 보여주고,
+객체별 속도(km/h)·밀도·체류·가속도를 대시보드로 표출하는 독립형 웹 UI입니다.
+파일은 완료 후 결과를 무한 루프 재생합니다.
 
-핵심 코어 파이프라인(`src/`)과 완전히 분리되어 있으며, 기존 코드를
-**재사용만** 합니다 — README의 기존 워크플로(`python -m src.inference_gpu`
-등)는 전혀 바뀌지 않습니다.
+핵심 코어 파이프라인(`src/`)과 분리되어 있고 기존 코드를 **재사용만** 합니다 —
+README 워크플로(`python -m src.inference_gpu` 등)는 바뀌지 않습니다.
+
+> 이 문서는 **사용법**입니다. 내부 구현/설계(속도 공식, 보정, RTSP, 맵, Depth,
+> 재현 가이드)는 **[webui-dev/](webui-dev/)** 를 보세요.
+
+## 0. 사용 흐름
+
+1. **입력**: 파일 업로드 **또는** RTSP 주소 "연결". (RTSP는 정지 버튼으로 종료)
+2. **세팅(선택)**: 측정 ROI(4점) + **속도 보정 모드** 선택
+   - 없음(px/s) / 보정선(2점+거리) / ROI 실측(4점+가로·세로) / **Depth 자동**(사람키, 깊이 미리보기 확인)
+3. **분석**: 좌측 영상(추적+속도 라벨) + 우측 대시보드. 상단 **영상/맵 토글**로 top-down 맵(점+방향벡터) 전환.
+
+보정·속도 공식은 [webui-dev/08](webui-dev/08-speed-and-calibration.md),
+RTSP는 [09](webui-dev/09-rtsp-live.md), 맵은 [10](webui-dev/10-map-view.md),
+Depth는 [07](webui-dev/07-depth-mode.md).
 
 ---
 
@@ -118,11 +132,17 @@ mp4는 이 설정과 무관하게 원본 해상도**를 유지합니다.
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET`  | `/` | 업로드 페이지 |
-| `POST` | `/upload` | 비디오 업로드 → `{job_id}` 반환, 추론 시작 |
-| `GET`  | `/status/{job_id}` | 진행률/상태 JSON (`processing`/`done`/`error`) |
-| `GET`  | `/stream/{job_id}` | MJPEG (라이브 → 완료 시 루프 재생) |
-| `GET`  | `/result/{job_id}` | 완성 mp4 (원본 해상도, VLC 등에서 재생/다운로드) |
+| `GET`  | `/` | UI 페이지 |
+| `POST` | `/upload` | 비디오 파일 업로드 → `{job_id, 첫프레임}` |
+| `POST` | `/rtsp` | RTSP 소스 열기 → `{job_id, 첫프레임, live}` |
+| `POST` | `/start/{job_id}` | ROI·보정·모드 설정 후 추론 시작 |
+| `POST` | `/stop/{job_id}` | 라이브 잡 정지 |
+| `POST` | `/prepare_depth/{job_id}` | (Depth) 깊이 분석 + 미리보기 생성 |
+| `GET`  | `/depthvis/{job_id}` | Depth 컬러 미리보기(PNG) |
+| `GET`  | `/status/{job_id}` | 진행률/상태/지표 JSON |
+| `GET`  | `/stream/{job_id}` | MJPEG (라이브 → 파일은 완료 시 루프) |
+| `GET`  | `/metrics_all/{job_id}` | 프레임별 지표(파일 재생 동기화) |
+| `GET`  | `/result/{job_id}` | 완성 mp4 (파일, 원본 해상도) |
 
 ---
 
