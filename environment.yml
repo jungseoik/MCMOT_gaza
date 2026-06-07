@@ -27,6 +27,4 @@ dependencies:
       - gdown
       - onnx
       - onnxruntime
-      - streamlit==1.40
-      - streamlit-drawable-canvas==0.9.3
       - huggingface_hub

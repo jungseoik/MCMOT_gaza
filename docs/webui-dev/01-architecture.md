@@ -19,7 +19,7 @@
 | 실시간 영상 | **MJPEG** (`multipart/x-mixed-replace`) | 브라우저가 JPEG만 디코딩 → 영상 코덱 의존 0. `<img>` 하나로 표시. (mp4v는 브라우저 재생 불가 — 06 참고) |
 | 프론트 | **vanilla HTML/CSS/JS** | 빌드/CDN 불필요, 오프라인 동작. 디자인은 외부 시안의 CSS만 이식 |
 | 추론 | **기존 TRT 파이프라인** | `BoostTrackGPUInference` 재사용 |
-| 속도/지표 | **자체 `SpeedEstimator`** | `ui/tab/track_speed_tab.py` 로직을 streamlit 의존 없이 이식·개선 |
+| 속도/지표 | **자체 `SpeedEstimator`** | 슬라이딩 윈도우 px/s + km/h 보정으로 속도/지표 산출 |
 | 동시성 | **스레드 + 락** | GPU 추론은 블로킹 → 워커 스레드. 트래커가 영상별 상태를 가져 잡은 직렬화 |
 
 ## 컴포넌트 구성도

@@ -169,14 +169,6 @@ external/                      # 외부 모듈 (변경 없음)
 
 <br>
 
-## Streamlit 웹 UI
-```bash
-$ pip install streamlit streamlit-drawable-canvas
-$ streamlit run app.py
-```
-
-<br>
-
 ## 기타 기능
 
 ### `check_roi.py`: ROI 설정 GUI 툴

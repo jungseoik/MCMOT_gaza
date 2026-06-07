@@ -1,7 +1,6 @@
 """Per-object speed estimation + dashboard metrics for the live web UI.
 
-Ported (and refined to a sliding-window estimator) from
-`ui/tab/track_speed_tab.py`, with the Streamlit parts removed.
+Sliding-window per-object speed estimator.
 
 Pixel→metric mapping is pluggable (single source of truth for "how fast"):
   - homography : image foot point → ground meters (perspective-correct)  → km/h

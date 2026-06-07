@@ -1,8 +1,7 @@
 # 03 · 속도 추정 & 대시보드 지표
 
-`webui/speed.py` — `SpeedEstimator` 클래스 + `annotate()`. streamlit 의존 없음.
-원형은 `ui/tab/track_speed_tab.py`(3초 배치 px/s)이며, 여기서는 **슬라이딩 윈도우 +
-실세계 km/h 보정 + 지표 확장**으로 개선했다.
+`webui/speed.py` — `SpeedEstimator` 클래스 + `annotate()`.
+**슬라이딩 윈도우 + 실세계 km/h 보정 + 지표 확장**으로 px/s 기반 속도를 추정한다.
 
 ## 입력/출력
 
