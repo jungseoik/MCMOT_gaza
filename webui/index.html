@@ -9,6 +9,7 @@
 <style>
   /* supplements not covered by the imported design system */
   .hidden{ display:none !important; }
+  .topbar .brandlogo{ height:26px; width:auto; display:block; margin-right:4px; }
   .navbtn svg, .brand svg, .mh svg, .icbtn svg, .srcchip svg { width:20px; height:20px; }
   .brand{ color:var(--pia-cyan); }
   .mh svg{ width:13px; height:13px; }
@@ -52,6 +53,7 @@
 
   <!-- top bar -->
   <div class="topbar">
+    <img class="brandlogo" src="/static/pia-logo.png" alt="PIA" />
     <div class="crumb"><b>Live analytics</b><span>실시간 분석 · Single source</span></div>
     <div id="srcchip" class="srcchip hidden">
       <span class="sdot cyan"></span>
@@ -81,6 +83,14 @@
           <div class="small">MP4 · MOV · MKV</div>
           <input id="file" type="file" accept="video/*" style="display:none" />
         </label>
+        <div class="orline">OR · RTSP 라이브</div>
+        <div class="rtsp">
+          <div class="fld">
+            <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><rect x="3" y="6" width="13" height="12" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 10l5-3v10l-5-3" stroke="currentColor" stroke-width="2"/></svg>
+            <input id="rtspUrl" type="text" placeholder="rtsp://192.168.0.x:554/stream" value="rtsp://100.105.203.66:8554/sample1" />
+          </div>
+          <button class="btn primary" id="rtspGo">연결 →</button>
+        </div>
         <div id="upInfo" class="small" style="margin-top:12px;color:var(--text-3)"></div>
       </div>
     </div>
@@ -136,6 +146,7 @@
               <div class="hud-bot">
                 <div class="transport">
                   <button class="tbtn play" title="(MJPEG)">❚❚</button>
+                  <button class="tbtn" id="stopBtn" title="정지" style="display:none;background:rgba(255,74,68,.25);color:#fff">■</button>
                 </div>
                 <span class="tcbig" id="hudPhase">—</span>
                 <div class="btrack"><div class="bf" id="hudBar" style="width:0"></div></div>
@@ -158,7 +169,7 @@
               <div class="metric accent-cyan">
                 <div class="mh"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M5 20c0-3.3 3-5 7-5s7 1.7 7 5" stroke="currentColor" stroke-width="2"/></svg> People now <span class="kr">현재 인원</span></div>
                 <div class="val"><b id="mCount">0</b></div>
-                <div class="sub">누적 <b class="t-num" id="mCum" style="color:var(--text-2)">0</b> today</div>
+                <div class="sub">세션 누적 <b class="t-num" id="mCum" style="color:var(--text-2)">0</b></div>
               </div>
               <div class="metric">
                 <div class="mh"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l9 5-9 5-9-5 9-5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 13l9 5 9-5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg> Density <span class="kr">밀집도</span></div>
@@ -209,7 +220,7 @@
 <script>
 const $=id=>document.getElementById(id), SVGNS="http://www.w3.org/2000/svg";
 let jobId=null,origW=0,origH=0,scale=1,img=new Image(),fname="";
-let mode='roi',roiPts=[],calPts=[],pollTimer=null,replayTimer=null,replayArr=null;
+let mode='roi',roiPts=[],calPts=[],pollTimer=null,replayTimer=null,replayArr=null,isLive=false;
 let avgHist=[],countHist=[];
 const cv=$("canvas"),ctx=cv.getContext("2d");
 
@@ -225,8 +236,8 @@ function show(scr){
 $("changeSrc").onclick=()=>{ resetAll(); show("scrUpload"); };
 function resetAll(){
   clearInterval(pollTimer); clearInterval(replayTimer); replayArr=null;
-  roiPts=[]; calPts=[]; avgHist=[]; countHist=[]; jobId=null; setMode('roi'); $("setupInfo").textContent="";
-  $("depthPanel").classList.add("hidden");
+  roiPts=[]; calPts=[]; avgHist=[]; countHist=[]; jobId=null; isLive=false; setMode('roi'); $("setupInfo").textContent="";
+  $("depthPanel").classList.add("hidden"); $("stopBtn").style.display="none";
 }
 
 // ---- upload ----
@@ -238,17 +249,32 @@ $("drop").addEventListener("drop",e=>{e.preventDefault();$("drop").classList.rem
   if(e.dataTransfer.files[0]) doUpload(e.dataTransfer.files[0]); });
 fileEl.addEventListener("change",()=>{ if(fileEl.files[0]) doUpload(fileEl.files[0]); });
 
+function enterSetup(r, name){
+  jobId=r.job_id; origW=r.width; origH=r.height; fname=name; $("upInfo").textContent="";
+  $("srcName").textContent=name; $("hudName").textContent=name;
+  $("hudRes").textContent=origW+"×"+origH;
+  img.onload=setupCanvas; img.src=r.first_frame;
+  $("srcchip").querySelector(".ssub").textContent = isLive ? "RTSP" : "FILE";
+  show("scrSetup");
+}
 async function doUpload(f){
-  resetAll(); fname=f.name; $("upInfo").textContent="업로드 중...";
+  resetAll(); isLive=false; $("upInfo").textContent="업로드 중...";
   const fd=new FormData(); fd.append("file",f);
   let r; try{ r=await (await fetch("/upload",{method:"POST",body:fd})).json(); }
   catch(e){ $("upInfo").textContent="업로드 실패"; return; }
-  jobId=r.job_id; origW=r.width; origH=r.height; $("upInfo").textContent="";
-  $("srcName").textContent=fname; $("hudName").textContent=fname;
-  $("hudRes").textContent=origW+"×"+origH;
-  img.onload=setupCanvas; img.src=r.first_frame;
-  show("scrSetup");
+  if(!r.job_id){ $("upInfo").textContent="업로드 실패"; return; }
+  enterSetup(r, f.name);
 }
+$("rtspGo").onclick=async()=>{
+  const url=$("rtspUrl").value.trim();
+  if(!url){ $("upInfo").textContent="RTSP 주소를 입력하세요"; return; }
+  resetAll(); isLive=true; $("upInfo").textContent="스트림 연결 중...";
+  let r; try{ r=await (await fetch("/rtsp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})})).json(); }
+  catch(e){ $("upInfo").textContent="연결 실패"; isLive=false; return; }
+  if(!r.job_id){ $("upInfo").textContent="연결 실패: "+(r.detail||"스트림 열 수 없음"); isLive=false; return; }
+  enterSetup(r, url);
+};
+$("stopBtn").onclick=async()=>{ if(jobId){ try{ await fetch("/stop/"+jobId,{method:"POST"}); }catch(e){} } };
 
 // ---- canvas ROI / calibration ----
 function setupCanvas(){ const maxW=Math.min(900,window.innerWidth-120);
@@ -278,13 +304,16 @@ document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("cha
   const m=curMode();
   $("lineInputs").classList.toggle("hidden", m!=="line");
   $("homoInputs").classList.toggle("hidden", m!=="homography");
+  if(m!=="depth") $("depthPanel").classList.add("hidden");
+  $("go").textContent = (m==="depth") ? "깊이 분석 →" : "측정 시작 →";
   if(m==="line") setMode('cal'); else if(m==="homography") setMode('roi');
 }));
 
 function roiBody(){ return roiPts.length===4 ? roiPts.map(p=>[p.x/scale,p.y/scale]) : null; }
 async function startJob(body){
   await fetch("/start/"+jobId,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  show("scrRun"); $("view").src="/stream/"+jobId+"?t="+Date.now(); poll();
+  show("scrRun"); $("stopBtn").style.display = isLive ? "" : "none";
+  $("view").src="/stream/"+jobId+"?t="+Date.now(); poll();
 }
 
 // ---- start ----
@@ -322,10 +351,18 @@ $("depthGo").onclick=()=>{ const body={mode:"depth"}; const roi=roiBody(); if(ro
 // ---- run ----
 function poll(){ pollTimer=setInterval(async()=>{
   let s; try{ s=await (await fetch("/status/"+jobId)).json(); }catch(e){ return; }
-  const pct=s.total?Math.round(s.processed/s.total*100):0;
-  $("hudBar").style.width=pct+"%"; $("hudProg").textContent=pct+"%";
   $("hudFps").textContent=(s.fps||0)+" fps";
   renderDash(s.metrics||{});
+  if(s.live){                                   // RTSP: unbounded, stop-controlled
+    if(s.status==="processing"){ $("hudPhase").textContent="라이브 분석 중"; $("liveLbl").textContent="LIVE";
+      $("hudBar").style.width="100%"; $("hudProg").textContent=s.processed+" f"; }
+    else if(s.status==="stopped"){ clearInterval(pollTimer); $("hudPhase").textContent="정지됨";
+      $("liveLbl").textContent="STOPPED"; $("stopBtn").style.display="none"; }
+    else if(s.status==="error"){ clearInterval(pollTimer); $("hudPhase").textContent="오류"; $("stopBtn").style.display="none"; }
+    return;
+  }
+  const pct=s.total?Math.round(s.processed/s.total*100):0;       // file: bounded + replay
+  $("hudBar").style.width=pct+"%"; $("hudProg").textContent=pct+"%";
   if(s.status==="processing"){ $("hudPhase").textContent="추론 중"; $("liveLbl").textContent="LIVE"; }
   else if(s.status==="done"){ clearInterval(pollTimer); $("hudPhase").textContent="완료 · 반복"; $("liveLbl").textContent="REPLAY";
     $("hudBar").style.width="100%"; $("hudProg").textContent="100%";

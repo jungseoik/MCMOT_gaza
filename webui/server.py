@@ -78,6 +78,8 @@ class Job:
         self.total = 0
         self.fps = 0.0
         self.error: str | None = None
+        self.live = False        # RTSP/live source (unbounded, stop-controlled)
+        self.stop = False        # set by /stop to end a live job
         # speed config (set by /start)
         self.roi: list | None = None
         self.ppm: float | None = None          # pixels per meter (linear mode)
@@ -117,7 +119,18 @@ def _encode(frame):
     return buf.tobytes() if ok else None
 
 
+def _stop_other_live(keep_id=None):
+    """Signal every other running LIVE job to stop, so it releases the model
+    lock. Live jobs never end on their own; without this a new job would queue
+    forever behind an orphaned live job (e.g. a viewer that just closed the tab)."""
+    for jid, j in list(_jobs.items()):
+        if jid != keep_id and j.live and j.status in ("queued", "processing"):
+            j.stop = True
+
+
 def _worker(job: Job):
+    if job.live:
+        return _worker_live(job)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = None
     est = None
@@ -136,7 +149,8 @@ def _worker(job: Job):
                         str(job.output_path), fourcc, job.fps,
                         (item["width"], item["height"]))
 
-                present = est.update(item["index"], item["targets"])
+                t_sec = item["index"] / (job.fps or 25.0)   # video-timeline seconds
+                present = est.update(t_sec, item["targets"])
                 frame = annotate(item["frame"], item["targets"], present, est)
 
                 writer.write(frame)
@@ -158,6 +172,37 @@ def _worker(job: Job):
         _push(job, None)
 
 
+def _worker_live(job: Job):
+    """Live (RTSP) job: process the newest frame at the model's real-time rate,
+    drop the backlog, run until /stop or disconnect. No recording, no replay.
+    Speed timing uses the wall clock (frames are skipped non-uniformly)."""
+    est = None
+    try:
+        with _model_lock:
+            job.status = "processing"
+            for item in _model.stream(str(job.input_path), draw=False,
+                                      live=True, should_stop=lambda: job.stop):
+                if est is None:
+                    job.fps = item["fps"] or 0.0
+                    est = SpeedEstimator(job.fps or 25.0, pixels_per_meter=job.ppm,
+                                         homography=job.homography, roi=job.roi,
+                                         world_area_m2=job.world_area_m2,
+                                         frame_size=(item["width"], item["height"]))
+                present = est.update(time.monotonic(), item["targets"])  # real time
+                frame = annotate(item["frame"], item["targets"], present, est)
+                jpg = _encode(frame)
+                if jpg is not None:
+                    _push(job, jpg)
+                job.metrics = est.metrics(present)
+                job.processed = item["index"]
+        job.status = "stopped"
+    except Exception as exc:
+        job.error = str(exc)
+        job.status = "error"
+    finally:
+        _push(job, None)
+
+
 @app.on_event("startup")
 def _startup():
     global _model
@@ -175,6 +220,7 @@ def index():
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
+    _stop_other_live()                 # adding a new source ends any old live job
     job_id = uuid.uuid4().hex[:12]
     ext = os.path.splitext(file.filename or "")[1].lower() or ".mp4"
     dest = UPLOAD_DIR / f"{job_id}{ext}"
@@ -196,6 +242,40 @@ async def upload(file: UploadFile = File(...)):
     _jobs[job_id] = Job(job_id, dest)
     return {"job_id": job_id, "width": w, "height": h,
             "first_frame": "data:image/jpeg;base64," + first_b64}
+
+
+@app.post("/rtsp")
+def rtsp(body: dict = Body(default={})):
+    """Open a live RTSP/stream source. Grabs one frame for ROI/calibration; the
+    job runs live (no recording) until /stop."""
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "rtsp url required")
+    _stop_other_live()                 # adding a new source ends any old live job
+    cap = cv2.VideoCapture(url)
+    ok, frame = cap.read()
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    if not ok:
+        raise HTTPException(400, f"cannot open stream: {url}")
+    job_id = uuid.uuid4().hex[:12]
+    job = Job(job_id, url)
+    job.live = True
+    _jobs[job_id] = job
+    fok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    first_b64 = base64.b64encode(buf.tobytes()).decode() if fok else ""
+    return {"job_id": job_id, "width": w, "height": h, "live": True,
+            "first_frame": "data:image/jpeg;base64," + first_b64}
+
+
+@app.post("/stop/{job_id}")
+def stop(job_id: str):
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    job.stop = True
+    return {"ok": True}
 
 
 @app.post("/start/{job_id}")
@@ -228,6 +308,7 @@ def start(job_id: str, body: dict = Body(default={})):
     # mode == "depth": homography was already built by /prepare_depth and stored
     # on the job; nothing to do here. If prepare wasn't run, falls back to px/s.
 
+    _stop_other_live(keep_id=job_id)   # free the model lock from any old live job
     job.status = "queued"
     threading.Thread(target=_worker, args=(job,), daemon=True).start()
     return {"job_id": job_id, "roi": job.roi, "pixels_per_meter": job.ppm}
@@ -240,6 +321,7 @@ def status(job_id: str):
         raise HTTPException(404, "job not found")
     return JSONResponse({
         "status": job.status,
+        "live": job.live,
         "processed": job.processed,
         "total": job.total,
         "fps": round(job.fps, 1),

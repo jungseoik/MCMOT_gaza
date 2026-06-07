@@ -30,17 +30,19 @@ class SpeedEstimator:
                     if roi else None)          # (4,2) polygon
         self.fw, self.fh = frame_size or (0, 0)
         self.world_area_m2 = world_area_m2     # ROI real area (homography mode)
-        self.window = max(1, int(round(self.fps * window_sec)))
+        self.window_sec = window_sec           # sliding window length in SECONDS
         self.min_move_px = min_move_px
         self.metric = (self.H is not None) or (self.ppm is not None)
         # "moving" threshold in display unit (km/h or px/s)
         self.move_thresh = 0.5 if self.metric else 3.0
-        self.history = {}      # id -> deque[(frame, fx, fy)]  (pixel foot point)
+        # time is wall-clock seconds; callers pass frame_idx/fps (file) or a
+        # monotonic timestamp (RTSP, where frames are skipped non-uniformly).
+        self.history = {}      # id -> deque[(t, fx, fy)]  (t in seconds)
         self.speed = {}        # id -> current speed (km/h or px/s)
-        self.first_seen = {}
-        self.last_frame = 0
+        self.first_seen = {}   # id -> t (first seen, for dwell)
+        self.last_t = 0.0
         self.seen_ids = set()
-        self.prev = {}         # id -> (frame, speed) for acceleration
+        self.prev = {}         # id -> (t, speed) for acceleration
         self.accel = {}
 
     @property
@@ -62,12 +64,14 @@ class SpeedEstimator:
         return float(w[0]), float(w[1])
 
     def _speed(self, dq):
-        """Speed (km/h or px/s) from the sliding-window foot history."""
+        """Speed (km/h or px/s) from the sliding-window foot history.
+        dt is real elapsed seconds (window endpoints), so it is correct whether
+        frames are consecutive (file) or skipped non-uniformly (RTSP)."""
         if len(dq) < 2:
             return 0.0
-        f0, x0, y0 = dq[0]
-        f1, x1, y1 = dq[-1]
-        dt = (f1 - f0) / self.fps
+        t0, x0, y0 = dq[0]
+        t1, x1, y1 = dq[-1]
+        dt = t1 - t0
         px_dist = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
         if dt <= 0 or px_dist < self.min_move_px:
             return 0.0
@@ -80,24 +84,32 @@ class SpeedEstimator:
             return ((px_dist / self.ppm) / dt) * 3.6
         return px_dist / dt                     # px/s
 
-    def update(self, frame_idx, targets):
-        """Feed one frame's targets. Returns {id: speed} for in-ROI objects."""
-        self.last_frame = frame_idx
+    def update(self, t, targets):
+        """Feed one frame's targets at wall-clock time `t` (seconds).
+        Returns {id: speed} for in-ROI objects.
+
+        File mode passes t = frame_idx / fps (video timeline); RTSP passes a
+        monotonic clock. Either way dt and dwell are computed from real seconds.
+        """
+        t = float(t)
+        self.last_t = t
         present = {}
         seen = set()
         if targets is not None and getattr(targets, "ndim", 0) == 2:
-            for t in targets:
-                if t.shape[0] < 5:
+            for tg in targets:
+                if tg.shape[0] < 5:
                     continue
-                fx, fy = self._foot(t[0], t[1], t[2], t[3])
-                tid = int(t[4])
+                fx, fy = self._foot(tg[0], tg[1], tg[2], tg[3])
+                tid = int(tg[4])
                 if not self._in_roi(fx, fy):
                     self._forget(tid)
                     continue
                 seen.add(tid)
-                self.first_seen.setdefault(tid, frame_idx)
-                dq = self.history.setdefault(tid, deque(maxlen=self.window + 1))
-                dq.append((frame_idx, fx, fy))
+                self.first_seen.setdefault(tid, t)
+                dq = self.history.setdefault(tid, deque())
+                dq.append((t, fx, fy))
+                while len(dq) > 1 and (t - dq[0][0]) > self.window_sec:
+                    dq.popleft()                 # keep only the last window_sec
 
                 spd = self._speed(dq)
                 self.speed[tid] = spd
@@ -106,11 +118,11 @@ class SpeedEstimator:
 
                 pf = self.prev.get(tid)          # acceleration
                 if pf is not None:
-                    pfi, ps = pf
-                    dt2 = (frame_idx - pfi) / self.fps
+                    pt, ps = pf
+                    dt2 = t - pt
                     if dt2 > 0:
                         self.accel[tid] = abs(spd - ps) / dt2
-                self.prev[tid] = (frame_idx, spd)
+                self.prev[tid] = (t, spd)
 
         for tid in list(self.history.keys()):
             if tid not in seen:
@@ -149,8 +161,8 @@ class SpeedEstimator:
         else:
             level, level_kr = "—", "—"
 
-        dwells = {tid: (self.last_frame - self.first_seen.get(tid, self.last_frame))
-                  / self.fps for tid in present}
+        dwells = {tid: (self.last_t - self.first_seen.get(tid, self.last_t))
+                  for tid in present}      # already in seconds
         dvals = list(dwells.values())
         accels = [self.accel.get(tid, 0.0) for tid in present]
 

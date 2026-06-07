@@ -9,6 +9,7 @@ import argparse
 import os
 import sys
 import time
+import threading
 from pathlib import Path
 
 import cv2
@@ -169,7 +170,8 @@ class BoostTrackGPUInference:
             cv2.putText(vis, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         return vis
 
-    def stream(self, input_video: str, reset: bool = True, draw: bool = True):
+    def stream(self, input_video: str, reset: bool = True, draw: bool = True,
+               live: bool = False, should_stop=None):
         """Generator form of run(): yields one dict per processed frame.
 
         Each item: {"index", "total", "fps", "width", "height", "frame" (BGR
@@ -178,53 +180,93 @@ class BoostTrackGPUInference:
         draw=True  -> "frame" has the default ID boxes drawn (run() / simple use).
         draw=False -> "frame" is the raw BGR frame and the caller draws its own
                       overlay using "targets" (used by the speed dashboard).
+
+        live=False -> read a finite file frame-by-frame (every frame).
+        live=True  -> treat input as a live source (e.g. rtsp://): a reader
+                      thread always holds the newest frame; we process the
+                      latest and DROP the backlog (real-time, no frame queue),
+                      running until should_stop() returns True or the source
+                      disconnects. total is 0 (unbounded).
         """
         cap = cv2.VideoCapture(input_video)
         if not cap.isOpened():
             raise FileNotFoundError(f"Cannot open video: {input_video}")
+        if live:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        total_frames = 0 if live else int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps_in = cap.get(cv2.CAP_PROP_FPS) or 0.0
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # Reset tracker state so each video starts fresh
+        # Reset tracker state so each source starts fresh
         if reset:
             KalmanBoxTracker.count = 0
             self.tracker.frame_count = 0
             self.tracker.trackers.clear()
 
         processed = 0
+
+        def _emit(frame):
+            nonlocal processed
+            padded, _ = preproc(frame, self.input_size, mean=None, std=None)
+            tensor = torch.from_numpy(padded).unsqueeze(0).cuda()
+            pred = self.detector.detect(tensor)
+            targets = self.tracker.update(pred, tensor, frame, f"inference:{processed + 1}")
+            if draw and targets.shape[0] > 0 and targets.shape[1] >= 6:
+                vis = self._draw_tracks(frame, targets)
+            else:
+                vis = frame
+            processed += 1
+            return {"index": processed, "total": total_frames, "fps": fps_in,
+                    "width": w, "height": h, "frame": vis, "targets": targets}
+
+        if not live:
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    yield _emit(frame)
+            finally:
+                cap.release()
+            return
+
+        # live: a reader thread OWNS the capture (reads + releases it). The main
+        # thread never touches cap, avoiding a release-while-reading segfault.
+        latest = {"frame": None, "seq": 0, "stop": False}
+
+        def _reader():
+            try:
+                while not latest["stop"]:
+                    ok, fr = cap.read()
+                    if not ok:
+                        latest["stop"] = True
+                        break
+                    latest["frame"] = fr
+                    latest["seq"] += 1
+            finally:
+                cap.release()
+
+        th = threading.Thread(target=_reader, daemon=True)
+        th.start()
+        last_seq = 0                             # 0 = no real frame consumed yet
         try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                padded, _ = preproc(frame, self.input_size, mean=None, std=None)
-                tensor = torch.from_numpy(padded).unsqueeze(0).cuda()
-                tag = f"inference:{processed + 1}"
-
-                pred = self.detector.detect(tensor)
-                targets = self.tracker.update(pred, tensor, frame, tag)
-
-                if draw and targets.shape[0] > 0 and targets.shape[1] >= 6:
-                    vis = self._draw_tracks(frame, targets)
-                else:
-                    vis = frame
-
-                processed += 1
-                yield {
-                    "index": processed,
-                    "total": total_frames,
-                    "fps": fps_in,
-                    "width": w,
-                    "height": h,
-                    "frame": vis,
-                    "targets": targets,
-                }
+            while not (should_stop and should_stop()):
+                seq = latest["seq"]
+                if seq == last_seq:              # no fresher frame yet
+                    if latest["stop"]:
+                        break
+                    time.sleep(0.003)
+                    continue
+                last_seq = seq
+                frame = latest["frame"]
+                if frame is None:
+                    continue                     # not ready; keep waiting
+                yield _emit(frame)
         finally:
-            cap.release()
+            latest["stop"] = True
+            th.join(timeout=2.0)                 # let reader release cap first
 
     def run(self, input_video: str, output_video: str) -> dict:
         os.makedirs(os.path.dirname(output_video) or ".", exist_ok=True)
