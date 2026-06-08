@@ -19,6 +19,7 @@
 9. **[09-rtsp-live.md](09-rtsp-live.md)** — RTSP 라이브 모드(프레임 스킵·정지·자동정지·견고성 한계)
 10. **[10-map-view.md](10-map-view.md)** — 2D 맵 뷰(top-down 점+방향벡터, 영상/맵 토글, 리소스 영향)
 11. **[11-in-out-counting.md](11-in-out-counting.md)** — 인·아웃 라인 카운팅(재실 추정, 선 2점+안쪽, 음수 경보)
+12. **[12-basic-viz-download.md](12-basic-viz-download.md)** — 기본 시각화(다운로드) 모드(ID+박스, H.264, 파일 전용) + 클린 라벨 통일(draw_utils)
 
 ## 한 줄 요약
 

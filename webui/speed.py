@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 
 from src.inference import _get_color
+from webui import draw_utils as du
 
 
 class SpeedEstimator:
@@ -233,12 +234,15 @@ class SpeedEstimator:
 
 
 def annotate(frame, targets, present, estimator):
-    """Draw ROI + per-object box, ID, speed label (foot-based)."""
+    """Draw ROI + per-object box, ID, speed label (foot-based) — clean style."""
     vis = frame.copy()
+    h = vis.shape[0]
+    fs = du.font_scale(h)
+    tt = du.txt_thickness(fs)
     unit = estimator.unit
     if estimator.roi is not None:
-        cv2.polylines(vis, [estimator.roi], isClosed=True,
-                      color=(255, 0, 0), thickness=2)
+        cv2.polylines(vis, [estimator.roi], isClosed=True, color=(255, 0, 0),
+                      thickness=du.box_thickness(h), lineType=cv2.LINE_AA)
     if targets is not None and getattr(targets, "ndim", 0) == 2:
         for t in targets:
             if t.shape[0] < 5:
@@ -247,13 +251,7 @@ def annotate(frame, targets, present, estimator):
             if tid not in present:
                 continue
             x1, y1, x2, y2 = int(t[0]), int(t[1]), int(t[2]), int(t[3])
-            color = _get_color(tid)
-            cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
-            label = f"ID:{tid}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            cv2.rectangle(vis, (x1, y1 - th - 6), (x1 + tw, y1), color, -1)
-            cv2.putText(vis, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (255, 255, 255), 2)
-            cv2.putText(vis, f"{present[tid]:.1f} {unit}", (x1, y2 + 18),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+            du.draw_id_box(vis, x1, y1, x2, y2, tid, fs=fs)
+            cv2.putText(vis, f"{present[tid]:.1f} {unit}", (x1 + 2, y2 + int(fs * 26)),
+                        du.FONT, fs * 0.85, (0, 255, 255), tt, cv2.LINE_AA)
     return vis

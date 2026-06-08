@@ -41,6 +41,7 @@ from src.inference_gpu import BoostTrackGPUInference   # noqa: E402
 from webui.speed import SpeedEstimator, annotate       # noqa: E402
 from webui.counter import LineCounter                   # noqa: E402
 from webui import depth_ground                          # noqa: E402
+from webui.basic_viz import draw_basic                   # noqa: E402
 
 BASE = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE / "_data" / "uploads"
@@ -86,6 +87,8 @@ class Job:
         self.ppm: float | None = None          # pixels per meter (linear mode)
         self.homography: list | None = None    # 3x3, image foot -> ground meters
         self.world_area_m2: float | None = None
+        # basic visualization (download-only mode): ID+box, H.264 result
+        self.basic = False
         # in/out line counting
         self.counting = False
         self.count_line: list | None = None     # [[x,y],[x,y]]
@@ -126,7 +129,9 @@ def _encode(frame):
 
 
 def _make_analyzer(job, item):
-    """LineCounter for in/out counting, else SpeedEstimator."""
+    """Sentinel for basic mode, LineCounter for counting, else SpeedEstimator."""
+    if job.basic:
+        return "basic"                 # no analyzer; _process draws ID boxes
     if job.counting:
         return LineCounter(job.count_line, job.count_inside,
                            segment_only=job.count_segment)
@@ -138,12 +143,39 @@ def _make_analyzer(job, item):
 
 def _process(analyzer, job, item, t_sec):
     """Run one frame through the analyzer -> (annotated_frame, metrics)."""
+    if job.basic:                      # download-only: ID + box, no metrics
+        n = int(item["targets"].shape[0]) if getattr(item["targets"], "ndim", 0) == 2 else 0
+        return draw_basic(item["frame"], item["targets"]), {"kind": "basic", "count": n}
     if job.counting:
         analyzer.update(item["targets"])
         return analyzer.draw(item["frame"], item["targets"]), analyzer.metrics()
     present = analyzer.update(t_sec, item["targets"])
     return (annotate(item["frame"], item["targets"], present, analyzer),
             analyzer.metrics(present))
+
+
+def _transcode_h264(path):
+    """Re-encode the result mp4 (OpenCV writes mp4v) to H.264 in place via ffmpeg
+    so the download plays everywhere (browsers, default players)."""
+    src = str(path)
+    tmp = src + ".tmp.mp4"
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", src,
+             "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+             "-movflags", "+faststart", "-an", tmp],
+            capture_output=True, text=True, timeout=900)
+    except FileNotFoundError:
+        return False
+    if r.returncode == 0 and os.path.exists(tmp):
+        os.replace(tmp, src)
+        return True
+    if os.path.exists(tmp):
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return False
 
 
 def _stop_other_live(keep_id=None):
@@ -184,6 +216,11 @@ def _worker(job: Job):
                 job.metrics = m
                 job.replay_metrics.append(m)   # keep per-frame for replay sync
                 job.processed = item["index"]
+        if job.basic and writer is not None:   # download mode: finalize as H.264
+            writer.release()
+            writer = None
+            job.status = "encoding"
+            _transcode_h264(job.output_path)
         job.status = "done"
     except Exception as exc:
         job.error = str(exc)
@@ -303,6 +340,14 @@ def start(job_id: str, body: dict = Body(default={})):
         raise HTTPException(404, "job not found")
     if job.status not in ("uploaded",):
         raise HTTPException(409, f"job already {job.status}")
+
+    # basic visualization (download-only): ID+box, no ROI/calibration/metrics
+    if body.get("basic"):
+        job.basic = True
+        _stop_other_live(keep_id=job_id)
+        job.status = "queued"
+        threading.Thread(target=_worker, args=(job,), daemon=True).start()
+        return {"job_id": job_id, "basic": True}
 
     # in/out line counting (independent of speed calibration)
     cnt = body.get("count")
@@ -480,8 +525,10 @@ async def stream(job_id: str):
 
 
 @app.get("/result/{job_id}")
-def result(job_id: str):
+def result(job_id: str, download: bool = False):
     job = _jobs.get(job_id)
-    if job is None or not job.output_path.exists():
+    path = job.output_path if job is not None else OUTPUT_DIR / f"{job_id}.mp4"
+    if not path.exists():
         raise HTTPException(404, "result not ready")
-    return FileResponse(str(job.output_path), media_type="video/mp4")
+    fname = f"tracked_{job_id}.mp4" if download else None   # attachment download
+    return FileResponse(str(path), media_type="video/mp4", filename=fname)

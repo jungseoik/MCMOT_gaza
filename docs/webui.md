@@ -14,6 +14,7 @@ README 워크플로(`python -m src.inference_gpu` 등)는 바뀌지 않습니다
 
 1. **입력**: 파일 업로드 **또는** RTSP 주소 "연결"(샘플 스트림 바로가기 제공). RTSP는 정지 버튼으로 종료.
 2. **세팅**: 분석 종류 선택
+   - **기본 시각화(다운로드)**: 파일 전용 — ID+박스만, 결과 H.264 저장·다운로드 (RTSP에선 안 보임)
    - **속도/밀도**: ROI(4점) + 속도 보정 — 없음(px/s)/보정선(2점)/ROI 실측(4점)/**Depth 자동**(사람키)
    - **인·아웃 카운팅**: 선 2점 + 안쪽 1점 클릭 (선분/무한선 토글)
 3. **분석**:
@@ -22,7 +23,8 @@ README 워크플로(`python -m src.inference_gpu` 등)는 바뀌지 않습니다
 
 보정·속도 공식은 [webui-dev/08](webui-dev/08-speed-and-calibration.md),
 RTSP는 [09](webui-dev/09-rtsp-live.md), 맵은 [10](webui-dev/10-map-view.md),
-인·아웃 카운팅은 [11](webui-dev/11-in-out-counting.md), Depth는 [07](webui-dev/07-depth-mode.md).
+인·아웃 카운팅은 [11](webui-dev/11-in-out-counting.md),
+기본 시각화(다운로드)는 [12](webui-dev/12-basic-viz-download.md), Depth는 [07](webui-dev/07-depth-mode.md).
 
 ---
 

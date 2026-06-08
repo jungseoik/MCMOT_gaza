@@ -110,12 +110,17 @@
         <p>분석 종류를 고르고 첫 프레임에 설정하세요.</p></div>
       <div class="tools">
         <span class="setinfo">분석:</span>
-        <label class="setinfo"><input type="radio" name="amode" value="speed" checked> 속도/밀도</label>
+        <label id="amBasic" class="setinfo"><input type="radio" name="amode" value="basic" checked> 기본 시각화 (다운로드)</label>
+        <label class="setinfo"><input type="radio" name="amode" value="speed"> 속도/밀도</label>
         <label class="setinfo"><input type="radio" name="amode" value="count"> 인·아웃 카운팅</label>
       </div>
       <canvas id="canvas"></canvas>
 
-      <div id="speedSetup">
+      <div id="basicSetup">
+        <div class="tools"><span class="setinfo">ID + 박스만 그려 추론하고, 결과를 H.264로 저장합니다. 설정 없이 바로 시작하세요. (완료 후 다운로드 버튼 제공)</span></div>
+      </div>
+
+      <div id="speedSetup" class="hidden">
         <div class="tools">
           <span class="setinfo">속도 보정:</span>
           <label class="setinfo"><input type="radio" name="mode" value="none" checked> 없음 (px/s)</label>
@@ -170,6 +175,7 @@
                   <span id="hudRes">—</span>
                   <span id="hudFps">— fps</span>
                   <button id="viewToggle" class="chip-h" style="pointer-events:auto;cursor:pointer;border:0;color:#e6e9ee">🗺 맵</button>
+                  <a id="dlBtn" class="chip-h" download style="display:none;pointer-events:auto;cursor:pointer;text-decoration:none;background:var(--pia-cyan);color:#06222a;font-weight:700">⬇ 결과 다운로드</a>
                 </span>
               </div>
               <div class="hud-bot">
@@ -276,13 +282,14 @@ $("changeSrc").onclick=()=>{ resetAll(); show("scrUpload"); };
 function resetAll(){
   clearInterval(pollTimer); clearInterval(replayTimer); replayArr=null;
   roiPts=[]; calPts=[]; avgHist=[]; countHist=[]; jobId=null; isLive=false; setMode('roi'); $("setupInfo").textContent="";
-  $("depthPanel").classList.add("hidden"); $("stopBtn").style.display="none";
+  $("depthPanel").classList.add("hidden"); $("stopBtn").style.display="none"; $("dlBtn").style.display="none";
   mapOn=false; lastMetrics=null; setView();
-  linePts=[]; insidePt=null; const sp=document.querySelector('input[name=amode][value=speed]'); if(sp){ sp.checked=true; applyAmode(); }
+  linePts=[]; insidePt=null; const sp=document.querySelector('input[name=amode][value=basic]'); if(sp){ sp.checked=true; applyAmode(); }
 }
-function curAmode(){ const e=document.querySelector('input[name=amode]:checked'); return e?e.value:"speed"; }
+function curAmode(){ const e=document.querySelector('input[name=amode]:checked'); return e?e.value:"basic"; }
 function applyAmode(){
   const a=curAmode();
+  $("basicSetup").classList.toggle("hidden", a!=="basic");
   $("speedSetup").classList.toggle("hidden", a!=="speed");
   $("countSetup").classList.toggle("hidden", a!=="count");
   roiPts=[]; calPts=[]; linePts=[]; insidePt=null;
@@ -352,6 +359,11 @@ function enterSetup(r, name){
   $("hudRes").textContent=origW+"×"+origH;
   img.onload=setupCanvas; img.src=r.first_frame;
   $("srcchip").querySelector(".ssub").textContent = isLive ? "RTSP" : "FILE";
+  // "기본 시각화(다운로드)"는 파일 전용 — RTSP(라이브)에선 숨기고 속도/밀도로 전환
+  $("amBasic").style.display = isLive ? "none" : "";
+  if(isLive && curAmode()==="basic"){
+    document.querySelector('input[name=amode][value=speed]').checked = true; applyAmode();
+  }
   show("scrSetup");
 }
 async function doUpload(f){
@@ -425,13 +437,14 @@ function roiBody(){ return roiPts.length===4 ? roiPts.map(p=>[p.x/scale,p.y/scal
 async function startJob(body){
   await fetch("/start/"+jobId,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   show("scrRun"); $("stopBtn").style.display = isLive ? "" : "none";
-  $("viewToggle").style.display = (curAmode()==="count") ? "none" : "";  // 맵은 속도모드만
-  if(curAmode()==="count"){ mapOn=false; setView(); }
+  $("viewToggle").style.display = (curAmode()==="speed") ? "" : "none";  // 맵은 속도모드만
+  if(curAmode()!=="speed"){ mapOn=false; setView(); }
   $("view").src="/stream/"+jobId+"?t="+Date.now(); poll();
 }
 
 // ---- start ----
 $("go").onclick=async()=>{
+  if(curAmode()==="basic"){ startJob({basic:true}); return; }   // 기본 시각화(다운로드)
   if(curAmode()==="count"){                     // in/out counting
     if(linePts.length!==2){ $("countInfo").textContent="· 선 2점을 찍으세요"; return; }
     if(!insidePt){ $("countInfo").textContent="· 안쪽 1점을 클릭하세요"; return; }
@@ -486,8 +499,10 @@ function poll(){ pollTimer=setInterval(async()=>{
   const pct=s.total?Math.round(s.processed/s.total*100):0;       // file: bounded + replay
   $("hudBar").style.width=pct+"%"; $("hudProg").textContent=pct+"%";
   if(s.status==="processing"){ $("hudPhase").textContent="추론 중"; $("liveLbl").textContent="LIVE"; }
+  else if(s.status==="encoding"){ $("hudPhase").textContent="H.264 인코딩 중..."; $("hudBar").style.width="100%"; $("hudProg").textContent="100%"; }
   else if(s.status==="done"){ clearInterval(pollTimer); $("hudPhase").textContent="완료 · 반복"; $("liveLbl").textContent="REPLAY";
     $("hudBar").style.width="100%"; $("hudProg").textContent="100%";
+    if(curAmode()==="basic"){ $("dlBtn").href="/result/"+jobId+"?download=1"; $("dlBtn").style.display="inline-flex"; }
     $("view").src="/stream/"+jobId+"?replay="+Date.now(); startReplayDash(jobId); }
   else if(s.status==="error"){ clearInterval(pollTimer); $("hudPhase").textContent="오류"; }
 },600); }
@@ -507,6 +522,9 @@ function renderCount(m){
 }
 function renderDash(m){
   lastMetrics=m;
+  const isBasic = (m.kind==="basic");
+  document.querySelector(".dash").style.display = isBasic ? "none" : "";  // 기본모드: 영상만, 대시보드 숨김
+  if(isBasic){ $("hudCount").textContent=m.count??0; return; }
   const isCount = (m.kind==="count");
   $("countDash").classList.toggle("hidden", !isCount);
   document.querySelectorAll(".dash-body .dgroup").forEach(g=>g.style.display=isCount?"none":"");

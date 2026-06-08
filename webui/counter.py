@@ -12,6 +12,7 @@ import numpy as np
 import cv2
 
 from src.inference import _get_color
+from webui import draw_utils as du
 
 
 class LineCounter:
@@ -114,31 +115,34 @@ class LineCounter:
         else:
             fl = self._frame_line(w, h)
             p1 = tuple(map(int, fl[0])); p2 = tuple(map(int, fl[1]))
-        cv2.line(vis, p1, p2, (255, 200, 0), 3)               # line (cyan-ish)
-        cv2.circle(vis, tuple(self.A.astype(int)), 5, (255, 200, 0), -1)
-        cv2.circle(vis, tuple(self.B.astype(int)), 5, (255, 200, 0), -1)
+        fs = du.font_scale(h)
+        tt = du.txt_thickness(fs)
+        lt = du.box_thickness(h)
+        cv2.line(vis, p1, p2, (255, 200, 0), lt, cv2.LINE_AA)   # line
+        cv2.circle(vis, tuple(self.A.astype(int)), lt + 2, (255, 200, 0), -1, cv2.LINE_AA)
+        cv2.circle(vis, tuple(self.B.astype(int)), lt + 2, (255, 200, 0), -1, cv2.LINE_AA)
         # "inside" arrow from midpoint toward the inside half
         M = (self.A + self.B) / 2.0
         n = np.array([-self.AB[1], self.AB[0]]) / self.L
         ins = M + self.inside_sign * n * 46
         cv2.arrowedLine(vis, tuple(M.astype(int)), tuple(ins.astype(int)),
-                        (60, 220, 60), 3, tipLength=0.3)
+                        (60, 220, 60), lt, tipLength=0.3, line_type=cv2.LINE_AA)
         cv2.putText(vis, "IN", tuple((ins + self.inside_sign * n * 14 - [10, 0]).astype(int)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 220, 60), 2)
-        # tracked people: foot dot + id
+                    du.FONT, fs, (60, 220, 60), tt, cv2.LINE_AA)
+        # tracked people: clean ID box + foot dot
         if targets is not None and getattr(targets, "ndim", 0) == 2:
             for tg in targets:
                 if tg.shape[0] < 5:
                     continue
                 tid = int(tg[4]); P = self._foot(tg).astype(int)
-                c = _get_color(tid)
-                x1, y1, x2, y2 = int(tg[0]), int(tg[1]), int(tg[2]), int(tg[3])
-                cv2.rectangle(vis, (x1, y1), (x2, y2), c, 2)
-                cv2.circle(vis, tuple(P), 4, c, -1)
-        # counters
+                c = du.draw_id_box(vis, int(tg[0]), int(tg[1]), int(tg[2]), int(tg[3]),
+                                   tid, fs=fs)
+                cv2.circle(vis, tuple(P), lt + 1, c, -1, cv2.LINE_AA)
+        # counters (bottom-left readout)
         occ = self.start + self.in_count - self.out_count
         bar = f"IN {self.in_count}   OUT {self.out_count}   in space {occ}"
-        cv2.rectangle(vis, (8, h - 40), (8 + 12 * len(bar), h - 10), (0, 0, 0), -1)
+        (bw, bh), bl = cv2.getTextSize(bar, du.FONT, fs, tt)
+        cv2.rectangle(vis, (8, h - bh - bl - 16), (16 + bw, h - 8), (0, 0, 0), -1, cv2.LINE_AA)
         col = (0, 0, 255) if occ < 0 else (0, 255, 255)
-        cv2.putText(vis, bar, (12, h - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
+        cv2.putText(vis, bar, (12, h - bl - 12), du.FONT, fs, col, tt, cv2.LINE_AA)
         return vis
