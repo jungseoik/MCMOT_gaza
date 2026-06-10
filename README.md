@@ -107,6 +107,7 @@ $ pip install -r webui/requirements.txt   # 웹 전용 의존성 (1회)
 $ python -m webui                          # http://localhost:8000
 ```
 
+- **사용 가이드(스크린샷 + 화면별 동작 + 지표 계산)**: [docs/guide/](docs/guide/)
 - 사용법(설치/실행/튜닝): [docs/webui.md](docs/webui.md)
 - **개발 문서(무엇으로·어떻게 만들었는지, 처음부터 재현 가이드 포함)**:
   [docs/webui-dev/](docs/webui-dev/) — 이 폴더의 문서만 따라가면 동일하게 다시
