@@ -1,0 +1,74 @@
+[
+  {
+    "channels": 1,
+    "round_ms": 35.6,
+    "detect_ms": 7.4,
+    "track_ms": 28.1,
+    "stack_ms": 0.1,
+    "per_channel_fps": 28.09,
+    "total_fps": 28.1
+  },
+  {
+    "channels": 2,
+    "round_ms": 72.4,
+    "detect_ms": 12.3,
+    "track_ms": 60.0,
+    "stack_ms": 0.1,
+    "per_channel_fps": 13.81,
+    "total_fps": 27.6
+  },
+  {
+    "channels": 4,
+    "round_ms": 150.5,
+    "detect_ms": 21.6,
+    "track_ms": 128.7,
+    "stack_ms": 0.2,
+    "per_channel_fps": 6.65,
+    "total_fps": 26.6
+  },
+  {
+    "channels": 6,
+    "round_ms": 227.9,
+    "detect_ms": 31.1,
+    "track_ms": 196.6,
+    "stack_ms": 0.2,
+    "per_channel_fps": 4.39,
+    "total_fps": 26.3
+  },
+  {
+    "channels": 8,
+    "round_ms": 302.3,
+    "detect_ms": 41.0,
+    "track_ms": 261.1,
+    "stack_ms": 0.3,
+    "per_channel_fps": 3.31,
+    "total_fps": 26.5
+  },
+  {
+    "channels": 10,
+    "round_ms": 379.4,
+    "detect_ms": 50.9,
+    "track_ms": 328.2,
+    "stack_ms": 0.3,
+    "per_channel_fps": 2.64,
+    "total_fps": 26.4
+  },
+  {
+    "channels": 12,
+    "round_ms": 449.6,
+    "detect_ms": 61.8,
+    "track_ms": 387.5,
+    "stack_ms": 0.4,
+    "per_channel_fps": 2.22,
+    "total_fps": 26.7
+  },
+  {
+    "channels": 15,
+    "round_ms": 563.4,
+    "detect_ms": 77.2,
+    "track_ms": 485.7,
+    "stack_ms": 0.4,
+    "per_channel_fps": 1.78,
+    "total_fps": 26.6
+  }
+]

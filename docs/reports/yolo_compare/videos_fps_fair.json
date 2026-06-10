@@ -1,0 +1,42 @@
+[
+  {
+    "combo": "yolo26m_bytetrack_fair",
+    "model": "yolo26m",
+    "tracker": "bytetrack.yaml",
+    "imgsz": 1600,
+    "conf": 0.1,
+    "max_det": 1000,
+    "frames": 646,
+    "fps": 35.2
+  },
+  {
+    "combo": "yolo26m_botsort_fair",
+    "model": "yolo26m",
+    "tracker": "botsort.yaml",
+    "imgsz": 1600,
+    "conf": 0.1,
+    "max_det": 1000,
+    "frames": 646,
+    "fps": 27.24
+  },
+  {
+    "combo": "yolo26l_bytetrack_fair",
+    "model": "yolo26l",
+    "tracker": "bytetrack.yaml",
+    "imgsz": 1600,
+    "conf": 0.1,
+    "max_det": 1000,
+    "frames": 646,
+    "fps": 35.43
+  },
+  {
+    "combo": "yolo26l_botsort_fair",
+    "model": "yolo26l",
+    "tracker": "botsort.yaml",
+    "imgsz": 1600,
+    "conf": 0.1,
+    "max_det": 1000,
+    "frames": 646,
+    "fps": 26.26
+  }
+]

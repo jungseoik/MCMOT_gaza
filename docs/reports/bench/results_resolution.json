@@ -1,0 +1,80 @@
+[
+  {
+    "h": 896,
+    "w": 1600,
+    "megapixels": 1.434,
+    "engine": "yolox_mot20_fp16.engine",
+    "levels": [
+      {
+        "procs": 1,
+        "per_ch_fps_mean": 12.42,
+        "per_ch_fps_min": 12.42,
+        "aggregate_fps": 12.4
+      },
+      {
+        "procs": 4,
+        "per_ch_fps_mean": 9.97,
+        "per_ch_fps_min": 9.34,
+        "aggregate_fps": 39.9
+      },
+      {
+        "procs": 8,
+        "per_ch_fps_mean": 6.8,
+        "per_ch_fps_min": 6.6,
+        "aggregate_fps": 54.4
+      }
+    ]
+  },
+  {
+    "h": 640,
+    "w": 1088,
+    "megapixels": 0.696,
+    "engine": "yolox_mot20_fp16_640x1088.engine",
+    "levels": [
+      {
+        "procs": 1,
+        "per_ch_fps_mean": 16.64,
+        "per_ch_fps_min": 16.64,
+        "aggregate_fps": 16.6
+      },
+      {
+        "procs": 4,
+        "per_ch_fps_mean": 11.81,
+        "per_ch_fps_min": 11.42,
+        "aggregate_fps": 47.2
+      },
+      {
+        "procs": 8,
+        "per_ch_fps_mean": 8.15,
+        "per_ch_fps_min": 7.79,
+        "aggregate_fps": 65.2
+      }
+    ]
+  },
+  {
+    "h": 576,
+    "w": 1024,
+    "megapixels": 0.59,
+    "engine": "yolox_mot20_fp16_576x1024.engine",
+    "levels": [
+      {
+        "procs": 1,
+        "per_ch_fps_mean": 18.41,
+        "per_ch_fps_min": 18.41,
+        "aggregate_fps": 18.4
+      },
+      {
+        "procs": 4,
+        "per_ch_fps_mean": 12.98,
+        "per_ch_fps_min": 12.26,
+        "aggregate_fps": 51.9
+      },
+      {
+        "procs": 8,
+        "per_ch_fps_mean": 8.42,
+        "per_ch_fps_min": 8.22,
+        "aggregate_fps": 67.4
+      }
+    ]
+  }
+]

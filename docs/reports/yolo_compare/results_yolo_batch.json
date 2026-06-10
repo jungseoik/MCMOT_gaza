@@ -1,0 +1,167 @@
+[
+  {
+    "model": "yolo26m",
+    "params_M": 21.9,
+    "batches": [
+      {
+        "batch": 1,
+        "ms_per_batch": 7.95,
+        "ms_per_frame": 7.95,
+        "fps": 125.8,
+        "peak_vram_GB": 0.1
+      },
+      {
+        "batch": 8,
+        "ms_per_batch": 10.17,
+        "ms_per_frame": 1.27,
+        "fps": 786.7,
+        "peak_vram_GB": 0.5
+      },
+      {
+        "batch": 16,
+        "ms_per_batch": 18.0,
+        "ms_per_frame": 1.13,
+        "fps": 888.8,
+        "peak_vram_GB": 1.0
+      },
+      {
+        "batch": 32,
+        "ms_per_batch": 34.95,
+        "ms_per_frame": 1.09,
+        "fps": 915.7,
+        "peak_vram_GB": 1.8
+      },
+      {
+        "batch": 64,
+        "ms_per_batch": 73.84,
+        "ms_per_frame": 1.15,
+        "fps": 866.7,
+        "peak_vram_GB": 3.6
+      },
+      {
+        "batch": 100,
+        "ms_per_batch": 118.23,
+        "ms_per_frame": 1.18,
+        "fps": 845.8,
+        "peak_vram_GB": 5.6
+      },
+      {
+        "batch": 150,
+        "ms_per_batch": 209.03,
+        "ms_per_frame": 1.39,
+        "fps": 717.6,
+        "peak_vram_GB": 8.3
+      }
+    ]
+  },
+  {
+    "model": "yolo26l",
+    "params_M": 26.3,
+    "batches": [
+      {
+        "batch": 1,
+        "ms_per_batch": 11.54,
+        "ms_per_frame": 11.54,
+        "fps": 86.6,
+        "peak_vram_GB": 0.2
+      },
+      {
+        "batch": 8,
+        "ms_per_batch": 12.57,
+        "ms_per_frame": 1.57,
+        "fps": 636.3,
+        "peak_vram_GB": 0.6
+      },
+      {
+        "batch": 16,
+        "ms_per_batch": 21.6,
+        "ms_per_frame": 1.35,
+        "fps": 740.7,
+        "peak_vram_GB": 1.1
+      },
+      {
+        "batch": 32,
+        "ms_per_batch": 41.28,
+        "ms_per_frame": 1.29,
+        "fps": 775.2,
+        "peak_vram_GB": 2.1
+      },
+      {
+        "batch": 64,
+        "ms_per_batch": 88.2,
+        "ms_per_frame": 1.38,
+        "fps": 725.6,
+        "peak_vram_GB": 4.0
+      },
+      {
+        "batch": 100,
+        "ms_per_batch": 145.46,
+        "ms_per_frame": 1.45,
+        "fps": 687.5,
+        "peak_vram_GB": 6.2
+      },
+      {
+        "batch": 150,
+        "ms_per_batch": 251.92,
+        "ms_per_frame": 1.68,
+        "fps": 595.4,
+        "peak_vram_GB": 9.3
+      }
+    ]
+  },
+  {
+    "model": "yolo26x",
+    "params_M": 59.0,
+    "batches": [
+      {
+        "batch": 1,
+        "ms_per_batch": 11.08,
+        "ms_per_frame": 11.08,
+        "fps": 90.3,
+        "peak_vram_GB": 0.3
+      },
+      {
+        "batch": 8,
+        "ms_per_batch": 20.84,
+        "ms_per_frame": 2.6,
+        "fps": 383.9,
+        "peak_vram_GB": 0.9
+      },
+      {
+        "batch": 16,
+        "ms_per_batch": 39.15,
+        "ms_per_frame": 2.45,
+        "fps": 408.7,
+        "peak_vram_GB": 1.6
+      },
+      {
+        "batch": 32,
+        "ms_per_batch": 74.92,
+        "ms_per_frame": 2.34,
+        "fps": 427.1,
+        "peak_vram_GB": 3.1
+      },
+      {
+        "batch": 64,
+        "ms_per_batch": 163.67,
+        "ms_per_frame": 2.56,
+        "fps": 391.0,
+        "peak_vram_GB": 6.0
+      },
+      {
+        "batch": 100,
+        "ms_per_batch": 261.05,
+        "ms_per_frame": 2.61,
+        "fps": 383.1,
+        "peak_vram_GB": 9.3
+      },
+      {
+        "batch": 150,
+        "ms_per_batch": 450.48,
+        "ms_per_frame": 3.0,
+        "fps": 333.0,
+        "peak_vram_GB": 13.8
+      }
+    ]
+  }
+]

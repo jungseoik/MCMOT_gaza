@@ -1,0 +1,94 @@
+[
+  {
+    "combo": "yolo26m_bytetrack",
+    "levels": [
+      {
+        "procs": 1,
+        "per_ch_fps_mean": 56.77,
+        "per_ch_fps_min": 56.77,
+        "aggregate_fps": 56.8
+      },
+      {
+        "procs": 4,
+        "per_ch_fps_mean": 24.48,
+        "per_ch_fps_min": 24.43,
+        "aggregate_fps": 97.9
+      },
+      {
+        "procs": 8,
+        "per_ch_fps_mean": 14.1,
+        "per_ch_fps_min": 14.07,
+        "aggregate_fps": 112.8
+      }
+    ]
+  },
+  {
+    "combo": "yolo26m_botsort",
+    "levels": [
+      {
+        "procs": 1,
+        "per_ch_fps_mean": 37.46,
+        "per_ch_fps_min": 37.46,
+        "aggregate_fps": 37.5
+      },
+      {
+        "procs": 4,
+        "per_ch_fps_mean": 19.47,
+        "per_ch_fps_min": 19.35,
+        "aggregate_fps": 77.9
+      },
+      {
+        "procs": 8,
+        "per_ch_fps_mean": 12.28,
+        "per_ch_fps_min": 12.27,
+        "aggregate_fps": 98.3
+      }
+    ]
+  },
+  {
+    "combo": "yolo26l_bytetrack",
+    "levels": [
+      {
+        "procs": 1,
+        "per_ch_fps_mean": 52.32,
+        "per_ch_fps_min": 52.32,
+        "aggregate_fps": 52.3
+      },
+      {
+        "procs": 4,
+        "per_ch_fps_mean": 20.29,
+        "per_ch_fps_min": 20.29,
+        "aggregate_fps": 81.2
+      },
+      {
+        "procs": 8,
+        "per_ch_fps_mean": 11.65,
+        "per_ch_fps_min": 11.64,
+        "aggregate_fps": 93.2
+      }
+    ]
+  },
+  {
+    "combo": "yolo26l_botsort",
+    "levels": [
+      {
+        "procs": 1,
+        "per_ch_fps_mean": 34.2,
+        "per_ch_fps_min": 34.2,
+        "aggregate_fps": 34.2
+      },
+      {
+        "procs": 4,
+        "per_ch_fps_mean": 16.79,
+        "per_ch_fps_min": 16.73,
+        "aggregate_fps": 67.2
+      },
+      {
+        "procs": 8,
+        "per_ch_fps_mean": 10.53,
+        "per_ch_fps_min": 10.51,
+        "aggregate_fps": 84.2
+      }
+    ]
+  }
+]

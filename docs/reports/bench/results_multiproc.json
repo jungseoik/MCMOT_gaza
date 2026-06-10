@@ -1,0 +1,34 @@
+[
+  {
+    "procs": 1,
+    "per_ch_fps_mean": 10.85,
+    "per_ch_fps_min": 10.85,
+    "per_ch_fps_max": 10.85,
+    "aggregate_fps": 10.9,
+    "wall_s": 15.9
+  },
+  {
+    "procs": 4,
+    "per_ch_fps_mean": 9.95,
+    "per_ch_fps_min": 9.3,
+    "per_ch_fps_max": 10.62,
+    "aggregate_fps": 39.8,
+    "wall_s": 18.5
+  },
+  {
+    "procs": 8,
+    "per_ch_fps_mean": 8.85,
+    "per_ch_fps_min": 7.95,
+    "per_ch_fps_max": 9.71,
+    "aggregate_fps": 70.8,
+    "wall_s": 21.2
+  },
+  {
+    "procs": 15,
+    "per_ch_fps_mean": 7.07,
+    "per_ch_fps_min": 6.47,
+    "per_ch_fps_max": 7.92,
+    "aggregate_fps": 106.1,
+    "wall_s": 26.2
+  }
+]

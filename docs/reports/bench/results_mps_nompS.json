@@ -1,0 +1,26 @@
+[
+  {
+    "procs": 1,
+    "per_ch_fps_mean": 12.41,
+    "per_ch_fps_min": 12.41,
+    "aggregate_fps": 12.4
+  },
+  {
+    "procs": 4,
+    "per_ch_fps_mean": 8.65,
+    "per_ch_fps_min": 8.05,
+    "aggregate_fps": 34.6
+  },
+  {
+    "procs": 8,
+    "per_ch_fps_mean": 6.4,
+    "per_ch_fps_min": 6.07,
+    "aggregate_fps": 51.2
+  },
+  {
+    "procs": 12,
+    "per_ch_fps_mean": 5.28,
+    "per_ch_fps_min": 4.94,
+    "aggregate_fps": 63.4
+  }
+]

@@ -186,3 +186,8 @@ cache/
 !assets/sample1.mp4
 # Claude Code personal/local settings
 .claude/settings.local.json
+
+# YOLO26 비교 실험 산출물 (대용량 — 스크립트/JSON만 추적)
+docs/reports/yolo_compare/weights/
+docs/reports/yolo_compare/runs/
+docs/reports/yolo_compare/videos/

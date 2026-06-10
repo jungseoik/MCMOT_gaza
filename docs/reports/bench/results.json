@@ -1,0 +1,99 @@
+{
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "detection": [
+    {
+      "channels": 1,
+      "engine": "fixed",
+      "batch_ms": 5.06,
+      "per_frame_ms": 5.06
+    },
+    {
+      "channels": 1,
+      "engine": "dynamic",
+      "batch_ms": 6.19,
+      "per_frame_ms": 6.19
+    },
+    {
+      "channels": 2,
+      "engine": "dynamic",
+      "batch_ms": 10.28,
+      "per_frame_ms": 5.14
+    },
+    {
+      "channels": 4,
+      "engine": "dynamic",
+      "batch_ms": 17.9,
+      "per_frame_ms": 4.48
+    },
+    {
+      "channels": 8,
+      "engine": "dynamic",
+      "batch_ms": 35.11,
+      "per_frame_ms": 4.39
+    },
+    {
+      "channels": 12,
+      "engine": "dynamic",
+      "batch_ms": 54.89,
+      "per_frame_ms": 4.57
+    },
+    {
+      "channels": 15,
+      "engine": "dynamic",
+      "batch_ms": 69.22,
+      "per_frame_ms": 4.61
+    }
+  ],
+  "reid": [
+    {
+      "crops": 1,
+      "batch_ms": 1.13,
+      "per_crop_ms": 1.1302
+    },
+    {
+      "crops": 8,
+      "batch_ms": 1.726,
+      "per_crop_ms": 0.2157
+    },
+    {
+      "crops": 16,
+      "batch_ms": 2.486,
+      "per_crop_ms": 0.1554
+    },
+    {
+      "crops": 32,
+      "batch_ms": 3.886,
+      "per_crop_ms": 0.1214
+    },
+    {
+      "crops": 50,
+      "batch_ms": 5.623,
+      "per_crop_ms": 0.1125
+    },
+    {
+      "crops": 64,
+      "batch_ms": 7.181,
+      "per_crop_ms": 0.1122
+    },
+    {
+      "crops": 128,
+      "batch_ms": 14.605,
+      "per_crop_ms": 0.1141
+    },
+    {
+      "crops": 256,
+      "batch_ms": 29.972,
+      "per_crop_ms": 0.1171
+    }
+  ],
+  "preproc": {
+    "preproc_ms": 29.35,
+    "frame_w": 960,
+    "frame_h": 540
+  },
+  "pipeline": {
+    "frames": 151,
+    "fps": 12.51,
+    "ms_per_frame": 79.9
+  }
+}

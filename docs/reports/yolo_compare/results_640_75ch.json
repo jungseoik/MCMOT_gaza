@@ -1,0 +1,104 @@
+{
+  "yolox_x_640_trt": [
+    {
+      "batch": 1,
+      "ms_per_batch": 3.9,
+      "ms_per_frame": 3.93,
+      "fps": 254.5,
+      "vram_GB": 0.0
+    },
+    {
+      "batch": 8,
+      "ms_per_batch": 11.4,
+      "ms_per_frame": 1.43,
+      "fps": 701.2,
+      "vram_GB": 0.0
+    },
+    {
+      "batch": 16,
+      "ms_per_batch": 19.5,
+      "ms_per_frame": 1.22,
+      "fps": 819.1,
+      "vram_GB": 0.1
+    },
+    {
+      "batch": 32,
+      "ms_per_batch": 40.4,
+      "ms_per_frame": 1.26,
+      "fps": 791.3,
+      "vram_GB": 0.2
+    },
+    {
+      "batch": 50,
+      "ms_per_batch": 66.1,
+      "ms_per_frame": 1.32,
+      "fps": 756.6,
+      "vram_GB": 0.4
+    },
+    {
+      "batch": 64,
+      "ms_per_batch": 84.7,
+      "ms_per_frame": 1.32,
+      "fps": 755.3,
+      "vram_GB": 0.6
+    },
+    {
+      "batch": 75,
+      "ms_per_batch": 100.8,
+      "ms_per_frame": 1.34,
+      "fps": 744.4,
+      "vram_GB": 0.7
+    }
+  ],
+  "yolo11m_640_torch": [
+    {
+      "batch": 1,
+      "ms_per_batch": 6.3,
+      "ms_per_frame": 6.31,
+      "fps": 158.4,
+      "vram_GB": 0.1
+    },
+    {
+      "batch": 8,
+      "ms_per_batch": 8.8,
+      "ms_per_frame": 1.1,
+      "fps": 909.5,
+      "vram_GB": 0.5
+    },
+    {
+      "batch": 16,
+      "ms_per_batch": 15.7,
+      "ms_per_frame": 0.98,
+      "fps": 1019.1,
+      "vram_GB": 1.0
+    },
+    {
+      "batch": 32,
+      "ms_per_batch": 30.3,
+      "ms_per_frame": 0.95,
+      "fps": 1055.3,
+      "vram_GB": 1.8
+    },
+    {
+      "batch": 50,
+      "ms_per_batch": 49.8,
+      "ms_per_frame": 1.0,
+      "fps": 1003.6,
+      "vram_GB": 2.8
+    },
+    {
+      "batch": 64,
+      "ms_per_batch": 64.7,
+      "ms_per_frame": 1.01,
+      "fps": 989.2,
+      "vram_GB": 3.6
+    },
+    {
+      "batch": 75,
+      "ms_per_batch": 76.6,
+      "ms_per_frame": 1.02,
+      "fps": 979.4,
+      "vram_GB": 4.2
+    }
+  ]
+}

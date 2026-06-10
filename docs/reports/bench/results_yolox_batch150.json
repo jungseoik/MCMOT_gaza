@@ -1,0 +1,44 @@
+[
+  {
+    "batch": 1,
+    "ms_per_batch": 6.2,
+    "ms_per_frame": 6.19,
+    "fps": 161.6,
+    "peak_vram_GB": 0.0
+  },
+  {
+    "batch": 4,
+    "ms_per_batch": 18.6,
+    "ms_per_frame": 4.65,
+    "fps": 215.0,
+    "peak_vram_GB": 0.1
+  },
+  {
+    "batch": 8,
+    "ms_per_batch": 35.1,
+    "ms_per_frame": 4.39,
+    "fps": 227.8,
+    "peak_vram_GB": 0.1
+  },
+  {
+    "batch": 16,
+    "ms_per_batch": 74.3,
+    "ms_per_frame": 4.64,
+    "fps": 215.3,
+    "peak_vram_GB": 0.3
+  },
+  {
+    "batch": 24,
+    "ms_per_batch": 113.0,
+    "ms_per_frame": 4.71,
+    "fps": 212.4,
+    "peak_vram_GB": 0.4
+  },
+  {
+    "batch": 32,
+    "ms_per_batch": 152.5,
+    "ms_per_frame": 4.76,
+    "fps": 209.9,
+    "peak_vram_GB": 0.6
+  }
+]
