@@ -326,6 +326,7 @@ function setView(){
 }
 $("viewToggle").onclick=()=>{ mapOn=!mapOn; setView(); if(mapOn&&lastMetrics) drawMap(lastMetrics); };
 
+function alignColor(a){ if(a==null)return "#8b949e"; if(a>0.4)return "#3FB950"; if(a<-0.2)return "#FF4A44"; return "#FFA62B"; }
 function drawMap(m){
   const cv=$("mapCanvas"); if(cv.style.display==="none") return;
   const W=cv.width=cv.clientWidth||960, H=cv.height=cv.clientHeight||540, ctx=cv.getContext("2d");
@@ -346,19 +347,38 @@ function drawMap(m){
   ctx.strokeStyle="#d0d7de"; ctx.lineWidth=1; ctx.strokeRect(TX(bx0),TY(by0),bw*s,bh*s);
   ctx.fillStyle="#8b949e"; ctx.font="11px sans-serif";
   ctx.fillText(m.map_metric?"top-down (m)":"image plane (보정 시 미터)",TX(bx0)+4,TY(by0)+14);
-  // objects: dot + small direction arrow
+  // objects: dot (ID color) + direction arrow (alignment color when active)
+  const hasA=!!m.has_align;
   objs.forEach(o=>{
     const X=TX(o.mx), Y=TY(o.my), c=`hsl(${(o.id*53)%360},70%,45%)`;
     if(o.dirx||o.diry){
+      const ac=(hasA&&o.align!=null)?alignColor(o.align):c;
       const L=16, ex=X+o.dirx*L, ey=Y+o.diry*L;
-      ctx.strokeStyle=c; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(X,Y); ctx.lineTo(ex,ey); ctx.stroke();
+      ctx.strokeStyle=ac; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(X,Y); ctx.lineTo(ex,ey); ctx.stroke();
       const a=Math.atan2(o.diry,o.dirx), h=5;             // arrowhead
       ctx.beginPath(); ctx.moveTo(ex,ey);
       ctx.lineTo(ex-h*Math.cos(a-0.5),ey-h*Math.sin(a-0.5));
-      ctx.lineTo(ex-h*Math.cos(a+0.5),ey-h*Math.sin(a+0.5)); ctx.closePath(); ctx.fillStyle=c; ctx.fill();
+      ctx.lineTo(ex-h*Math.cos(a+0.5),ey-h*Math.sin(a+0.5)); ctx.closePath(); ctx.fillStyle=ac; ctx.fill();
     }
     ctx.fillStyle=c; ctx.beginPath(); ctx.arc(X,Y,4,0,7); ctx.fill();
   });
+  // overall alignment: longer reference vector from the crowd centroid + 사잇각
+  if(hasA&&m.ref_dir){
+    let cxw,cyw;
+    if(objs.length){ cxw=objs.reduce((s,o)=>s+o.mx,0)/objs.length; cyw=objs.reduce((s,o)=>s+o.my,0)/objs.length; }
+    else { cxw=(bx0+bx1)/2; cyw=(by0+by1)/2; }
+    const Xc=TX(cxw),Yc=TY(cyw),L=48, ex=Xc+m.ref_dir[0]*L, ey=Yc+m.ref_dir[1]*L;
+    ctx.strokeStyle="#2E90FA"; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(Xc,Yc); ctx.lineTo(ex,ey); ctx.stroke();
+    const a=Math.atan2(ey-Yc,ex-Xc), h=11;
+    ctx.beginPath(); ctx.moveTo(ex,ey);
+    ctx.lineTo(ex-h*Math.cos(a-0.4),ey-h*Math.sin(a-0.4));
+    ctx.lineTo(ex-h*Math.cos(a+0.4),ey-h*Math.sin(a+0.4)); ctx.closePath(); ctx.fillStyle="#2E90FA"; ctx.fill();
+    ctx.fillStyle="#2E90FA"; ctx.beginPath(); ctx.arc(Xc,Yc,3,0,7); ctx.fill();
+    ctx.font="bold 12px sans-serif"; ctx.fillText("기준 방향",ex+6,ey+4);
+    const av=m.avg_align, deg=(av==null)?null:Math.round(Math.acos(Math.max(-1,Math.min(1,av)))*180/Math.PI);
+    ctx.fillStyle="#444"; ctx.font="12px sans-serif";
+    ctx.fillText(av==null?"정렬 평균 —":`정렬 평균 ${av>=0?"+":""}${av.toFixed(2)} · 사잇각 ${deg}°`,TX(bx0)+4,TY(by1)-8);
+  }
 }
 
 // ---- upload ----
