@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from src.inference import _get_color
+from webui import draw_utils as du
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -61,15 +62,28 @@ def render_map(m, width, height, label="2D MAP - motion vectors"):
     cv2.putText(img, tag, (TX(bx0) + 4, TY(by0) + 16), FONT, 0.45,
                 (158, 148, 139), 1, cv2.LINE_AA)
 
+    has_align = bool(m.get("has_align"))
     for o in objs:
         X, Y = TX(o["mx"]), TY(o["my"])
-        c = _get_color(int(o["id"]))
+        c = _get_color(int(o["id"]))           # dot keeps track-ID color
         dx, dy = o.get("dirx", 0.0), o.get("diry", 0.0)
         if dx or dy:
             L = 18
             ex, ey = int(round(X + dx * L)), int(round(Y + dy * L))
-            cv2.arrowedLine(img, (X, Y), (ex, ey), c, 2, cv2.LINE_AA, 0, 0.45)
+            # arrow colored by alignment when active, else track color
+            ac = du.align_color(o.get("align")) if has_align else c
+            cv2.arrowedLine(img, (X, Y), (ex, ey), ac, 2, cv2.LINE_AA, 0, 0.45)
         cv2.circle(img, (X, Y), 4, c, -1, cv2.LINE_AA)
+
+    if has_align:                              # corner reference arrow + avg readout
+        rd = m.get("ref_dir") or [0, 0]
+        cx, cy, rl = W - 64, H - 40, 26
+        ex, ey = int(cx + rd[0] * rl), int(cy + rd[1] * rl)
+        cv2.arrowedLine(img, (cx, cy), (ex, ey), (255, 80, 0), 3, cv2.LINE_AA, 0, 0.3)
+        cv2.putText(img, "EVAC", (cx - 30, cy - 14), FONT, 0.4, (255, 80, 0), 1, cv2.LINE_AA)
+        av = m.get("avg_align")
+        txt = f"align avg: {av:+.2f}" if av is not None else "align avg: --"
+        cv2.putText(img, txt, (8, H - 10), FONT, 0.5, (60, 60, 60), 1, cv2.LINE_AA)
 
     _panel_label(img, label)
     return img

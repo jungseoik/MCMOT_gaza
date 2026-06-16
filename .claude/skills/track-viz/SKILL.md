@@ -39,7 +39,12 @@ $PY tools/concat_viz.py vids/ --out results/myrun --max-width 1280
 
 # 인자 없이 실행하면 기본 2개 샘플(sample_example)로 스모크 테스트
 $PY tools/concat_viz.py
+
+# 방향성 정렬도(alignment) 시각화: 출구 방향 기준벡터(꼬리->머리, 원본 px)
+$PY tools/concat_viz.py vid.mp4 --align "tx,ty,hx,hy"
 ```
+`--align` 를 주면 우측 맵의 객체 화살표가 정렬색(녹=정렬/황=가로질러/적=역류)으로
+칠해지고 평균 정렬도가 표기된다. 안 주면 기존대로 동작(opt-in).
 - 출력: `<out>/<영상명>_concat.mp4`. 좌우 패널 각 `max-width` 이하로 다운스케일(4K 부담↓).
 - 배치가 오래 걸리면 **백그라운드로 실행**하고 `> <out>/_batch.log 2>&1` 로 로그를 남긴다.
 

@@ -28,6 +28,17 @@ def _contrast(color):
     return (0, 0, 0) if lum > 140 else (255, 255, 255)
 
 
+def align_color(a):
+    """Alignment cosine [-1..1] -> BGR. green=aligned, amber=cross, red=counter."""
+    if a is None:
+        return (160, 160, 160)
+    if a > 0.4:
+        return (0, 200, 0)
+    if a < -0.2:
+        return (0, 0, 230)
+    return (0, 170, 255)
+
+
 def draw_label(vis, x, y, text, color, fs, tt, below=False):
     """Filled tag + AA contrasting text. Tag sits above (default) or below y."""
     (tw, th), bl = cv2.getTextSize(text, FONT, fs, tt)

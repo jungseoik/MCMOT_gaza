@@ -134,12 +134,14 @@
           <div class="seg">
             <button id="mRoi" class="tag-btn">ROI 4점</button>
             <button id="mCal" class="tag-btn">보정선 2점</button>
+            <button id="mArr" class="tag-btn">정렬 방향 2점</button>
             <button id="clr" class="tag-btn">지우기</button>
           </div>
           <span id="lineInputs" class="setinfo hidden">거리 <input id="meters" type="number" min="0" step="0.1" value="1.0" /> m</span>
           <span id="homoInputs" class="setinfo hidden">실제 가로 <input id="rw" type="number" min="0" step="0.1" value="5.0" /> m × 세로 <input id="rh" type="number" min="0" step="0.1" value="3.0" /> m
             <span class="setinfo">(ROI는 좌상→우상→우하→좌하 순서로)</span></span>
           <span id="setupInfo" class="setinfo"></span>
+          <span class="setinfo" style="opacity:.7">· 정렬도(선택): "정렬 방향 2점"으로 출구 방향 꼬리→머리</span>
         </div>
         <div id="depthPanel" class="hidden" style="text-align:center;margin-top:6px;">
           <div id="depthStatus" class="setinfo"></div>
@@ -243,6 +245,11 @@
                 <div class="val"><b id="mMoving">0</b><span class="u">/ <span id="mStat">0</span></span></div>
                 <div class="sub"><span id="mRatio">0</span>% moving</div>
               </div>
+              <div class="metric" id="alignCard" style="display:none">
+                <div class="mh"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h12M13 7l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Alignment <span class="kr">정렬도</span></div>
+                <div class="val"><b id="mAlign">—</b></div>
+                <div class="sub">평균 코사인 (+1 정렬 · −1 역류)</div>
+              </div>
             </div>
           </div>
 
@@ -269,6 +276,7 @@ let jobId=null,origW=0,origH=0,scale=1,img=new Image(),fname="";
 let mode='roi',roiPts=[],calPts=[],pollTimer=null,replayTimer=null,replayArr=null,isLive=false;
 let avgHist=[],countHist=[],mapOn=false,lastMetrics=null;
 let linePts=[],insidePt=null;     // in/out counting setup
+let arrowPts=[];                  // alignment reference (tail->head), opt-in
 const cv=$("canvas"),ctx=cv.getContext("2d");
 
 // clock
@@ -288,7 +296,7 @@ window.addEventListener("beforeunload",()=>stopJob(jobId));
 $("changeSrc").onclick=()=>{ stopJob(jobId); resetAll(); show("scrUpload"); };
 function resetAll(){
   clearInterval(pollTimer); clearInterval(replayTimer); replayArr=null;
-  roiPts=[]; calPts=[]; avgHist=[]; countHist=[]; jobId=null; isLive=false; setMode('roi'); $("setupInfo").textContent="";
+  roiPts=[]; calPts=[]; arrowPts=[]; avgHist=[]; countHist=[]; jobId=null; isLive=false; setMode('roi'); $("setupInfo").textContent="";
   $("depthPanel").classList.add("hidden"); $("stopBtn").style.display="none"; $("dlBtn").style.display="none";
   mapOn=false; lastMetrics=null; setView();
   linePts=[]; insidePt=null; const sp=document.querySelector('input[name=amode][value=basic]'); if(sp){ sp.checked=true; applyAmode(); }
@@ -299,7 +307,7 @@ function applyAmode(){
   $("basicSetup").classList.toggle("hidden", a!=="basic");
   $("speedSetup").classList.toggle("hidden", a!=="speed");
   $("countSetup").classList.toggle("hidden", a!=="count");
-  roiPts=[]; calPts=[]; linePts=[]; insidePt=null;
+  roiPts=[]; calPts=[]; arrowPts=[]; linePts=[]; insidePt=null;
   $("depthPanel").classList.add("hidden");
   if(a==="speed") setMode('roi');
   if(img.complete) draw(); countInfo();
@@ -398,15 +406,17 @@ $("stopBtn").onclick=async()=>{ if(jobId){ try{ await fetch("/stop/"+jobId,{meth
 // ---- canvas ROI / calibration ----
 function setupCanvas(){ const maxW=Math.min(900,window.innerWidth-120);
   scale=Math.min(maxW/origW,1); cv.width=Math.round(origW*scale); cv.height=Math.round(origH*scale); draw(); }
-function setMode(m){ mode=m; $("mRoi").classList.toggle("on",m==='roi'); $("mCal").classList.toggle("on",m==='cal'); }
-$("mRoi").onclick=()=>setMode('roi'); $("mCal").onclick=()=>setMode('cal');
-$("clr").onclick=()=>{ if(mode==='roi')roiPts=[]; else calPts=[]; draw(); info(); };
+function setMode(m){ mode=m; $("mRoi").classList.toggle("on",m==='roi'); $("mCal").classList.toggle("on",m==='cal'); $("mArr").classList.toggle("on",m==='arr'); }
+$("mRoi").onclick=()=>setMode('roi'); $("mCal").onclick=()=>setMode('cal'); $("mArr").onclick=()=>setMode('arr');
+$("clr").onclick=()=>{ if(mode==='roi')roiPts=[]; else if(mode==='cal')calPts=[]; else arrowPts=[]; draw(); info(); };
 cv.onclick=e=>{ const rc=cv.getBoundingClientRect(),x=e.clientX-rc.left,y=e.clientY-rc.top;
   if(curAmode()==="count"){
     if(linePts.length<2) linePts.push({x,y}); else if(!insidePt) insidePt={x,y};
     draw(); countInfo(); return;
   }
-  if(mode==='roi'){ if(roiPts.length<4)roiPts.push({x,y}); } else { if(calPts.length<2)calPts.push({x,y}); }
+  if(mode==='roi'){ if(roiPts.length<4)roiPts.push({x,y}); }
+  else if(mode==='cal'){ if(calPts.length<2)calPts.push({x,y}); }
+  else { if(arrowPts.length<2)arrowPts.push({x,y}); }
   draw(); info(); };
 function draw(){ ctx.clearRect(0,0,cv.width,cv.height); if(img.complete)ctx.drawImage(img,0,0,cv.width,cv.height);
   if(curAmode()==="count"){
@@ -422,9 +432,17 @@ function draw(){ ctx.clearRect(0,0,cv.width,cv.height); if(img.complete)ctx.draw
     roiPts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4,0,7);ctx.fill();}); }
   if(calPts.length){ ctx.fillStyle="#FF4A44"; ctx.strokeStyle="#FF4A44"; ctx.lineWidth=2; ctx.beginPath();
     calPts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
-    calPts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4,0,7);ctx.fill();}); } }
+    calPts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4,0,7);ctx.fill();}); }
+  if(arrowPts.length){ ctx.fillStyle="#2E90FA"; ctx.strokeStyle="#2E90FA"; ctx.lineWidth=3; ctx.beginPath();
+    arrowPts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
+    arrowPts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4,0,7);ctx.fill();});
+    if(arrowPts.length===2){ const a=arrowPts[0],b=arrowPts[1],ang=Math.atan2(b.y-a.y,b.x-a.x),hl=15;
+      ctx.beginPath(); ctx.moveTo(b.x,b.y);
+      ctx.lineTo(b.x-hl*Math.cos(ang-0.4),b.y-hl*Math.sin(ang-0.4));
+      ctx.lineTo(b.x-hl*Math.cos(ang+0.4),b.y-hl*Math.sin(ang+0.4)); ctx.closePath(); ctx.fill(); } } }
 function info(){ let s=[]; s.push(roiPts.length===4?"ROI ✓":`ROI ${roiPts.length}/4`);
   if(calPts.length===2){ const p=calcPPM(); s.push(p?`보정 ${p.toFixed(1)}px/m`:"보정?"); } else s.push(`보정선 ${calPts.length}/2`);
+  if(arrowPts.length) s.push(arrowPts.length===2?"정렬↗ ✓":`정렬 ${arrowPts.length}/2`);
   $("setupInfo").textContent="· "+s.join(" · "); }
 function calcPPM(){ if(calPts.length!==2)return null; const m=parseFloat($("meters").value); if(!(m>0))return null;
   return (Math.hypot(calPts[1].x-calPts[0].x,calPts[1].y-calPts[0].y)/scale)/m; }
@@ -441,6 +459,7 @@ document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("cha
 }));
 
 function roiBody(){ return roiPts.length===4 ? roiPts.map(p=>[p.x/scale,p.y/scale]) : null; }
+function alignBody(){ return arrowPts.length===2 ? arrowPts.map(p=>[p.x/scale,p.y/scale]) : null; }
 async function startJob(body){
   await fetch("/start/"+jobId,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   show("scrRun"); $("stopBtn").style.display = isLive ? "" : "none";
@@ -461,6 +480,7 @@ $("go").onclick=async()=>{
     return;
   }
   const m=curMode(); const body={mode:m}; const roi=roiBody(); if(roi) body.roi=roi;
+  const av=alignBody(); if(av) body.align_vec=av;          // alignment (opt-in)
   if(m==="depth"){ prepareDepth(); return; }   // depth: analyze + confirm first
   if(m==="line"){ const ppm=calcPPM();
     if(!ppm){ $("setupInfo").textContent="· 보정선 2점과 거리를 입력하세요"; return; }
@@ -488,7 +508,7 @@ async function prepareDepth(){
   $("depthInfo").textContent=`초점 ${r.focal}px · 바닥평면 적합 ${Math.round(r.inlier*100)}% · 인원 ${r.people} · (사람키 1.7m 기준 추정)`;
   $("depthGo").classList.remove("hidden");
 }
-$("depthGo").onclick=()=>{ const body={mode:"depth"}; const roi=roiBody(); if(roi) body.roi=roi; startJob(body); };
+$("depthGo").onclick=()=>{ const body={mode:"depth"}; const roi=roiBody(); if(roi) body.roi=roi; const av=alignBody(); if(av) body.align_vec=av; startJob(body); };
 
 // ---- run ----
 function poll(){ pollTimer=setInterval(async()=>{
@@ -546,6 +566,11 @@ function renderDash(m){
   $("mAccel").textContent=m.accel??0;
   $("mDwell").textContent=m.avg_dwell??0; $("mDwellMax").textContent=m.max_dwell??0;
   $("mMoving").textContent=m.moving??0; $("mStat").textContent=m.stationary??0; $("mRatio").textContent=m.moving_ratio??0;
+  // alignment (opt-in: only when the user drew a direction arrow)
+  const hasA=!!m.has_align; $("alignCard").style.display=hasA?"":"none";
+  if(hasA){ const av=m.avg_align, ae=$("mAlign");
+    ae.textContent=(av==null)?"—":((av>=0?"+":"")+av.toFixed(2));
+    ae.style.color=(av==null)?"var(--text-2)":(av>0.4?"#3FB950":av<-0.2?"#FF4A44":"#FFA62B"); }
   // level pill
   const lv=m.level||"—", cls=lv==="High"?"pill-high":lv==="Low"?"pill-low":"pill-normal";
   for(const id of ["mLevel","mLevel2"]){ const e=$(id); e.className="pill "+cls; if(id==="mLevel")e.style.padding="1px 7px";

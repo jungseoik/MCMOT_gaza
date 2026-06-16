@@ -87,6 +87,8 @@ class Job:
         self.ppm: float | None = None          # pixels per meter (linear mode)
         self.homography: list | None = None    # 3x3, image foot -> ground meters
         self.world_area_m2: float | None = None
+        # alignment (opt-in): recommended evacuation direction the user drew
+        self.align_vec: list | None = None      # [[tx,ty],[hx,hy]] image px
         # basic visualization (download-only mode): ID+box, H.264 result
         self.basic = False
         # in/out line counting
@@ -138,6 +140,7 @@ def _make_analyzer(job, item):
     return SpeedEstimator(job.fps or 25.0, pixels_per_meter=job.ppm,
                           homography=job.homography, roi=job.roi,
                           world_area_m2=job.world_area_m2,
+                          reference_vec=job.align_vec,
                           frame_size=(item["width"], item["height"]))
 
 
@@ -409,6 +412,10 @@ def start(job_id: str, body: dict = Body(default={})):
             job.world_area_m2 = rw * rh
     # mode == "depth": homography was already built by /prepare_depth and stored
     # on the job; nothing to do here. If prepare wasn't run, falls back to px/s.
+
+    av = body.get("align_vec")                  # opt-in: [[tx,ty],[hx,hy]] image px
+    if av and len(av) == 2:
+        job.align_vec = av
 
     _stop_others(keep_id=job_id)   # free the model lock from any old live job
     job.status = "queued"

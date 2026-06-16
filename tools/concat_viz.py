@@ -70,7 +70,7 @@ def _transcode_h264(path):
         os.remove(tmp)
 
 
-def process(model, src_path, out_path, max_panel_w=MAX_PANEL_W):
+def process(model, src_path, out_path, max_panel_w=MAX_PANEL_W, reference_vec=None):
     est = writer = None
     pw = ph = 0
     fps = 25.0
@@ -80,7 +80,7 @@ def process(model, src_path, out_path, max_panel_w=MAX_PANEL_W):
             W, H = item["width"], item["height"]
             scale = min(1.0, max_panel_w / W)
             pw, ph = _even(W * scale), _even(H * scale)
-            est = SpeedEstimator(fps, frame_size=(W, H))
+            est = SpeedEstimator(fps, frame_size=(W, H), reference_vec=reference_vec)
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             writer = cv2.VideoWriter(str(out_path), fourcc, fps, (2 * pw, ph))
             print(f"  {W}x{H}@{fps:.1f} -> panel {pw}x{ph}, total {item['total']} frames")
@@ -124,7 +124,14 @@ def main():
     ap.add_argument("inputs", nargs="*", help="video files or folders (default: 2 samples)")
     ap.add_argument("--out", default=str(OUT_DIR), help="output dir")
     ap.add_argument("--max-width", type=int, default=MAX_PANEL_W, help="per-panel max width px")
+    ap.add_argument("--align", default=None,
+                    help="alignment ref vector 'tx,ty,hx,hy' in ORIGINAL px (tail->head)")
     args = ap.parse_args()
+
+    ref_vec = None
+    if args.align:
+        v = [float(x) for x in args.align.split(",")]
+        ref_vec = [[v[0], v[1]], [v[2], v[3]]]
 
     inputs = _expand(args.inputs) if args.inputs else [p for p in DEFAULT_INPUTS if p.exists()]
     if not inputs:
@@ -138,7 +145,8 @@ def main():
     for src_path in inputs:
         out_path = out_dir / f"{src_path.stem}_concat.mp4"
         print(f"[concat_viz] {src_path.name}")
-        process(model, src_path, out_path, max_panel_w=args.max_width)
+        process(model, src_path, out_path, max_panel_w=args.max_width,
+                reference_vec=ref_vec)
     print(f"[concat_viz] done -> {out_dir}")
 
 

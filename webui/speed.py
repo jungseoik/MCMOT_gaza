@@ -21,7 +21,7 @@ from webui import draw_utils as du
 
 class SpeedEstimator:
     def __init__(self, fps, pixels_per_meter=None, homography=None, roi=None,
-                 frame_size=None, world_area_m2=None,
+                 frame_size=None, world_area_m2=None, reference_vec=None,
                  window_sec=1.0, min_move_px=2.0):
         self.fps = float(fps) if fps else 25.0
         self.ppm = pixels_per_meter            # px per meter (linear mode)
@@ -45,6 +45,22 @@ class SpeedEstimator:
         self.seen_ids = set()
         self.prev = {}         # id -> (t, speed) for acceleration
         self.accel = {}
+
+        # Optional alignment reference: a directed vector (tail->head) the user
+        # drew on the map, pointing the recommended evacuation direction. Only
+        # active when provided -> alignment is opt-in (computed/shown on demand).
+        self.reference_vec = reference_vec     # [[tx,ty],[hx,hy]] image px, or None
+        self.ref_dir = None                    # unit dir in the SAME space as _obj_map
+        if reference_vec is not None:
+            (tx, ty), (hx, hy) = reference_vec
+            if self.H is not None:             # match object-direction space
+                tx, ty = self._world(tx, ty)
+                hx, hy = self._world(hx, hy)
+            dx, dy = hx - tx, hy - ty
+            L = (dx * dx + dy * dy) ** 0.5
+            if L > 1e-6:
+                self.ref_dir = (dx / L, dy / L)
+        self.has_align = self.ref_dir is not None
 
     @property
     def unit(self):
@@ -201,6 +217,12 @@ class SpeedEstimator:
         dvals = list(dwells.values())
         accels = [self.accel.get(tid, 0.0) for tid in present]
 
+        objects = [self._obj_entry(tid, s, dwells[tid])
+                   for tid, s in sorted(present.items(), key=lambda kv: -kv[1])]
+        aligns = [o["align"] for o in objects
+                  if o["align"] is not None and o["speed"] > self.move_thresh]
+        avg_align = round(sum(aligns) / len(aligns), 3) if aligns else None
+
         return {
             "unit": self.unit,
             "count": int(n),
@@ -219,18 +241,21 @@ class SpeedEstimator:
             "max_dwell": round(max(dvals), 1) if dvals else 0.0,
             "map_metric": self.H is not None,     # true top-down vs image-space
             "map_bounds": self._map_bounds(),
-            "objects": [
-                self._obj_entry(tid, s, dwells[tid])
-                for tid, s in sorted(present.items(), key=lambda kv: -kv[1])
-            ],
+            "has_align": self.has_align,          # alignment opt-in (arrow drawn)
+            "avg_align": avg_align,               # zone mean cosine (moving only)
+            "ref_dir": list(self.ref_dir) if self.ref_dir else None,
+            "objects": objects,
         }
 
     def _obj_entry(self, tid, s, dwell):
         mx, my, dx, dy = self._obj_map(tid)
+        align = None                            # cosine vs recommended dir
+        if self.ref_dir is not None and (dx or dy):
+            align = round(dx * self.ref_dir[0] + dy * self.ref_dir[1], 3)
         return {"id": int(tid), "speed": round(float(s), 1),
                 "dwell": round(float(dwell), 1),
                 "mx": round(mx, 2), "my": round(my, 2),
-                "dirx": round(dx, 2), "diry": round(dy, 2)}
+                "dirx": round(dx, 2), "diry": round(dy, 2), "align": align}
 
 
 def annotate(frame, targets, present, estimator):
@@ -243,6 +268,14 @@ def annotate(frame, targets, present, estimator):
     if estimator.roi is not None:
         cv2.polylines(vis, [estimator.roi], isClosed=True, color=(255, 0, 0),
                       thickness=du.box_thickness(h), lineType=cv2.LINE_AA)
+    # recommended evacuation direction (only when the user drew one)
+    if estimator.has_align and estimator.reference_vec is not None:
+        (tx, ty), (hx, hy) = estimator.reference_vec
+        cv2.arrowedLine(vis, (int(tx), int(ty)), (int(hx), int(hy)),
+                        (255, 80, 0), max(3, du.box_thickness(h)),
+                        cv2.LINE_AA, 0, 0.25)
+        cv2.putText(vis, "EVAC DIR", (int(hx) + 6, int(hy)), du.FONT,
+                    fs * 0.85, (255, 80, 0), tt, cv2.LINE_AA)
     if targets is not None and getattr(targets, "ndim", 0) == 2:
         for t in targets:
             if t.shape[0] < 5:
@@ -254,4 +287,9 @@ def annotate(frame, targets, present, estimator):
             du.draw_id_box(vis, x1, y1, x2, y2, tid, fs=fs)
             cv2.putText(vis, f"{present[tid]:.1f} {unit}", (x1 + 2, y2 + int(fs * 26)),
                         du.FONT, fs * 0.85, (0, 255, 255), tt, cv2.LINE_AA)
+            if estimator.has_align:            # alignment marker (green/amber/red)
+                _, _, dx, dy = estimator._obj_map(tid)
+                a = (dx * estimator.ref_dir[0] + dy * estimator.ref_dir[1]
+                     if (dx or dy) else None)
+                cv2.circle(vis, (x2 - 6, y1 + 6), 5, du.align_color(a), -1, cv2.LINE_AA)
     return vis
