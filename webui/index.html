@@ -280,7 +280,12 @@ function show(scr){
   $("srcchip").classList.toggle("hidden", !inSrc);
   $("changeSrc").style.display = inSrc?"":"none";
 }
-$("changeSrc").onclick=()=>{ resetAll(); show("scrUpload"); };
+// Tell the server to reap the running job so it releases the GPU/model lock.
+// sendBeacon survives page unload (refresh/close/navigate); fetch+keepalive is
+// the fallback. Server also reaps on the next source as a backstop.
+function stopJob(id){ if(!id) return; try{ if(navigator.sendBeacon) navigator.sendBeacon("/stop/"+id); else fetch("/stop/"+id,{method:"POST",keepalive:true}); }catch(e){} }
+window.addEventListener("beforeunload",()=>stopJob(jobId));
+$("changeSrc").onclick=()=>{ stopJob(jobId); resetAll(); show("scrUpload"); };
 function resetAll(){
   clearInterval(pollTimer); clearInterval(replayTimer); replayArr=null;
   roiPts=[]; calPts=[]; avgHist=[]; countHist=[]; jobId=null; isLive=false; setMode('roi'); $("setupInfo").textContent="";

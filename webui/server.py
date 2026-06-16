@@ -178,13 +178,23 @@ def _transcode_h264(path):
     return False
 
 
-def _stop_other_live(keep_id=None):
-    """Signal every other running LIVE job to stop, so it releases the model
-    lock. Live jobs never end on their own; without this a new job would queue
-    forever behind an orphaned live job (e.g. a viewer that just closed the tab)."""
+def _stop_others(keep_id=None):
+    """Single-user backstop: only one job should ever be active. Signal EVERY
+    other running job (file OR live) to stop so it releases the model lock, and
+    free finished jobs' replay buffers. This is the deterministic recovery point
+    after a refresh / abrupt tab close: the orphaned worker keeps running and
+    holds the lock until the next source arrives here and reaps it. Without it a
+    new job would queue forever behind the orphan -> black screen."""
     for jid, j in list(_jobs.items()):
-        if jid != keep_id and j.live and j.status in ("queued", "processing"):
+        if jid == keep_id:
+            continue
+        if j.status in ("queued", "processing"):
             j.stop = True
+        elif j.status == "done":
+            # finished file job keeps all replay JPEGs in RAM forever; once we
+            # move to a new source its loop replay is abandoned -> drop them.
+            j.replay_frames = []
+            j.replay_metrics = []
 
 
 def _worker(job: Job):
@@ -193,10 +203,14 @@ def _worker(job: Job):
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = None
     analyzer = None
+    stopped = False
     try:
         with _model_lock:                 # one inference at a time
             job.status = "processing"
             for item in _model.stream(str(job.input_path), draw=False):
+                if job.stop:              # /stop or a new source reaped this job
+                    stopped = True
+                    break
                 if analyzer is None:
                     job.total = item["total"]
                     job.fps = item["fps"] or 25.0
@@ -216,18 +230,31 @@ def _worker(job: Job):
                 job.metrics = m
                 job.replay_metrics.append(m)   # keep per-frame for replay sync
                 job.processed = item["index"]
-        if job.basic and writer is not None:   # download mode: finalize as H.264
+        if stopped:
+            job.status = "stopped"            # partial result: no download/replay
+        elif job.basic and writer is not None:   # download mode: finalize as H.264
             writer.release()
             writer = None
             job.status = "encoding"
             _transcode_h264(job.output_path)
-        job.status = "done"
+            job.status = "done"
+        else:
+            job.status = "done"
     except Exception as exc:
         job.error = str(exc)
         job.status = "error"
     finally:
         if writer is not None:
             writer.release()
+        if job.status in ("stopped", "error"):
+            # drop the partial output + replay buffers; nothing will consume them
+            job.replay_frames = []
+            job.replay_metrics = []
+            try:
+                if job.output_path.exists():
+                    job.output_path.unlink()
+            except OSError:
+                pass
         _push(job, None)
 
 
@@ -275,7 +302,7 @@ def index():
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    _stop_other_live()                 # adding a new source ends any old live job
+    _stop_others()                 # adding a new source ends any old live job
     job_id = uuid.uuid4().hex[:12]
     ext = os.path.splitext(file.filename or "")[1].lower() or ".mp4"
     dest = UPLOAD_DIR / f"{job_id}{ext}"
@@ -306,7 +333,7 @@ def rtsp(body: dict = Body(default={})):
     url = (body.get("url") or "").strip()
     if not url:
         raise HTTPException(400, "rtsp url required")
-    _stop_other_live()                 # adding a new source ends any old live job
+    _stop_others()                 # adding a new source ends any old live job
     cap = cv2.VideoCapture(url)
     ok, frame = cap.read()
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -344,7 +371,7 @@ def start(job_id: str, body: dict = Body(default={})):
     # basic visualization (download-only): ID+box, no ROI/calibration/metrics
     if body.get("basic"):
         job.basic = True
-        _stop_other_live(keep_id=job_id)
+        _stop_others(keep_id=job_id)
         job.status = "queued"
         threading.Thread(target=_worker, args=(job,), daemon=True).start()
         return {"job_id": job_id, "basic": True}
@@ -356,7 +383,7 @@ def start(job_id: str, body: dict = Body(default={})):
         job.count_line = cnt["line"]
         job.count_inside = cnt["inside"]
         job.count_segment = bool(cnt.get("segment", True))
-        _stop_other_live(keep_id=job_id)
+        _stop_others(keep_id=job_id)
         job.status = "queued"
         threading.Thread(target=_worker, args=(job,), daemon=True).start()
         return {"job_id": job_id, "counting": True}
@@ -383,7 +410,7 @@ def start(job_id: str, body: dict = Body(default={})):
     # mode == "depth": homography was already built by /prepare_depth and stored
     # on the job; nothing to do here. If prepare wasn't run, falls back to px/s.
 
-    _stop_other_live(keep_id=job_id)   # free the model lock from any old live job
+    _stop_others(keep_id=job_id)   # free the model lock from any old live job
     job.status = "queued"
     threading.Thread(target=_worker, args=(job,), daemon=True).start()
     return {"job_id": job_id, "roi": job.roi, "pixels_per_meter": job.ppm}
@@ -527,6 +554,8 @@ async def stream(job_id: str):
 @app.get("/result/{job_id}")
 def result(job_id: str, download: bool = False):
     job = _jobs.get(job_id)
+    if job is not None and job.status != "done":
+        raise HTTPException(409, f"result not available (job {job.status})")
     path = job.output_path if job is not None else OUTPUT_DIR / f"{job_id}.mp4"
     if not path.exists():
         raise HTTPException(404, "result not ready")
