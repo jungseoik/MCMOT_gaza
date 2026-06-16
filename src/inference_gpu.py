@@ -108,11 +108,14 @@ class BoostTrackGPUInference:
     """Video inference with TRT engines + GPU-accelerated preprocessing.
 
     Optimization over BoostTrackTRTInference:
-      - preproc: CPU cv2 → GPU tensor ops
-      - ReID crop+resize: CPU cv2 loop (536ms) → GPU roi_align (~5ms)
-      - Detection + ReID model: TRT engines
+      - Detection + ReID model: TRT engines (FP16)
+      - ReID embedding: per-crop tensor + torch.cat (536ms) → pre-allocated
+        numpy buffer + single bulk GPU transfer (~15ms). cv2 crop/resize is
+        kept on CPU (identical to original output) — see GPUEmbeddingComputer.
 
     Same tracking logic, equivalent output.
+    (preproc stays on CPU cv2; GPU preproc was tried and dropped —
+     see docs/optimization-report.md.)
     """
 
     def __init__(

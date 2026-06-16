@@ -1,4 +1,4 @@
-name: boostTrack
+name: boosttrack
 channels:
   - pytorch
   - nvidia

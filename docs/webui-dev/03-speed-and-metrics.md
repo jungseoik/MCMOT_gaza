@@ -11,33 +11,44 @@
 ## 생성자
 
 ```python
-SpeedEstimator(fps, pixels_per_meter=None, roi=None, frame_size=None,
+SpeedEstimator(fps, pixels_per_meter=None, homography=None, roi=None,
+               frame_size=None, world_area_m2=None,
                window_sec=1.0, min_move_px=2.0)
 ```
 
-- `pixels_per_meter`(ppm): 있으면 **km/h**, 없으면 **px/s** (`unit` 프로퍼티가 결정)
+- `pixels_per_meter`(ppm) **또는** `homography` 중 하나라도 있으면 **km/h**, 둘 다 없으면
+  **px/s** (`unit` 프로퍼티 = `metric = (H is not None) or (ppm is not None)`로 결정)
+- `homography`: 이미지 발끝점 → 지면 미터 변환(원근보정, ROI 실측/Depth 모드)
 - `roi`: 4점 폴리곤(원본 px 좌표). 없으면 전체 프레임
+- `world_area_m2`: 호모그래피 모드에서 ROI의 실제 면적(밀도 명/m² 산출용)
+
+> ⚠️ 세 번째 위치인자는 `roi`가 아니라 **`homography`**다. 서버는 혼동을 막으려고
+> `SpeedEstimator(job.fps, pixels_per_meter=…, homography=…, roi=…, …)`처럼 전부 키워드
+> 인자로 호출한다(`webui/server.py`).
 - `window_sec`: 속도 산출 슬라이딩 윈도우(기본 1초 = `round(fps*1)` 프레임)
 - `min_move_px`: 이보다 작은 이동은 노이즈로 보고 0 처리
 
 ## 속도 계산 (슬라이딩 윈도우)
 
-객체별로 최근 `window+1` 프레임의 중심점 큐를 유지하고, 큐의 처음↔끝으로 산출:
+객체별로 **발끝점**(bbox bottom-center — 지면에 닿는 점)의 시간 큐 `deque[(t, fx, fy)]`를
+유지하고(시간 `t`는 **초**), `window_sec`보다 오래된 샘플은 버린 뒤 큐의 처음↔끝으로 산출:
 
 ```
-dt   = (f_last - f_first) / fps          # 윈도우의 실제 경과 시간(초)
-dist = ||center_last - center_first||    # 픽셀 이동거리
-px_per_s = dist / dt
-speed = (px_per_s / ppm) * 3.6   if ppm  # m/s → km/h
-      = px_per_s                  otherwise
+dt   = t_last - t_first                  # 윈도우의 실제 경과 시간(초)
+# km/h (ppm 또는 homography 모드): 발끝점을 미터로 변환 후 거리
+dist_m = ||world(foot_last) - world(foot_first)||   # homography 또는 dist_px/ppm
+speed  = (dist_m / dt) * 3.6                         # m/s → km/h
+# px/s (둘 다 없음): 픽셀 거리 그대로
+speed  = ||foot_last - foot_first|| / dt
 ```
 
-> 원형의 "3초마다 시작점 리셋" 배치 대신, 매 프레임 윈도우로 산출해 대시보드가
-> 부드럽게 갱신된다.
+> `t`는 벽시계 초다. 파일 모드는 `frame_idx/fps`를, RTSP는 `time.monotonic()`을 넘긴다
+> (프레임 스킵이 불균일해도 dt가 정확 → [08](08-speed-and-calibration.md)).
+> 원형의 "3초마다 시작점 리셋" 배치 대신 매 프레임 윈도우로 산출해 대시보드가 부드럽다.
 
 ## ROI 필터
 
-`cv2.pointPolygonTest(roi, center) >= 0`인 객체만 측정. ROI를 벗어나면 그 객체의
+`cv2.pointPolygonTest(roi, foot) >= 0`인 객체(발끝점 기준)만 측정. ROI를 벗어나면 그 객체의
 이력(속도/체류/가속 상태)을 즉시 폐기(`_forget`). ROI 없으면 전체 객체.
 
 ## 거리 보정 (km/h)
@@ -50,7 +61,7 @@ ppm(미터당 픽셀)은 프론트의 **보정선 2점 + 실제거리(m)** 로 �
 
 | 키 | 의미 | 산식 |
 |----|------|------|
-| `unit` | 속도 단위 | ppm 있으면 `km/h`, 없으면 `px/s` |
+| `unit` | 속도 단위 | ppm **또는** homography 있으면 `km/h`, 둘 다 없으면 `px/s` |
 | `count` | 현재 인원 | ROI 내 present 수 |
 | `cumulative` | 누적 인원 | 지금까지 본 고유 ID 수(`seen_ids`) |
 | `avg` / `max` | 평균 / 최고 속도 | present 속도들 |

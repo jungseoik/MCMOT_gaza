@@ -81,8 +81,8 @@ FastAPI (webui/server.py)
 `src/inference_gpu.py`의 `stream()` 제너레이터:
 
 ```python
-def stream(self, input_video, reset=True, draw=True):
-    # ... 프레임마다 ...
+def stream(self, input_video, reset=True, draw=True, live=False, should_stop=None):
+    # ... 프레임마다 ...   (live=True는 RTSP 모드 → 09 참고)
     yield {"index","total","fps","width","height","frame","targets"}
 ```
 

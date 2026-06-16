@@ -115,9 +115,16 @@ $ python -m webui                          # http://localhost:8000
 
 <br>
 
-## MOT 데이터셋 평가
+## MOT 데이터셋 평가 (⚠️ 미포함 / WIP)
 
-`main.py`로 MOT17/MOT20 벤치마크 평가를 수행합니다. 백엔드는 `--engine` 인자로 선택합니다.
+> **현재 저장소에는 평가 글루 코드(`src/eval_common.py`, `src/eval_torch.py`,
+> `src/eval_trt.py`, `src/eval_trt_opt.py`)가 포함되어 있지 않습니다.** `main.py`는
+> 이 모듈들을 import하므로 **그대로 실행하면 `ModuleNotFoundError`로 즉시 실패**합니다.
+> 아래는 평가 진입점(`main.py`)이 제공하기로 설계된 인터페이스 명세이며, 실제 동작에는
+> `src/eval_*.py` 구현과 MOT GT(`results/gt/…`, 일부 동봉)·TRT 엔진이 필요합니다.
+> 평가 채점 엔진 자체(TrackEval)는 `external/TrackEval/`에 포함돼 있습니다.
+
+`main.py`는 MOT17/MOT20 벤치마크 평가의 진입점으로, 백엔드를 `--engine` 인자로 선택하도록 설계돼 있습니다.
 
 | 엔진 | 설명 | 검출기 | ReID 전처리 |
 |------|------|--------|------------|
@@ -144,8 +151,8 @@ $ python main.py --dataset mot20 --engine trt_opt  --exp_name BTPP_trt_opt
 
 **`--test_dataset` 사용 시 GT가 없으므로 TrackEval 자동 평가가 건너뛰어집니다.** `--no_eval`로 평가만 끌 수도 있습니다.
 
-상세한 사용법, 주의사항(필요한 weights/엔진), 시간/메트릭 해석:
-[docs/eval-pipeline.md](docs/eval-pipeline.md)
+> 위 명령을 실행하려면 먼저 `src/eval_*.py` 4개 모듈을 구현/복원해야 합니다(미포함).
+> 상세 가이드 문서(`docs/eval-pipeline.md`)도 아직 작성되지 않았습니다.
 
 <br>
 
@@ -158,20 +165,20 @@ src/                           # 추론 + 평가 모듈
   inference_gpu.py             # TRT + GPU 최적화 추론 (영상, x20)
   build_trt.py                 # ONNX export + TRT 엔진 빌드
   benchmark.py                 # 속도/정확도 비교 벤치마크
-  eval_common.py               # MOT 평가 공통 유틸 (타이밍, 결과 저장, 후처리)
-  eval_torch.py                # MOT 평가 — PyTorch 백엔드
-  eval_trt.py                  # MOT 평가 — TRT 기본 백엔드
-  eval_trt_opt.py              # MOT 평가 — TRT FP16 + GPU 최적화 백엔드
+  # ── 아래 4개는 미포함(WIP). main.py가 import하므로 구현 전엔 평가 명령 실행 불가 ──
+  # eval_common.py             # MOT 평가 공통 유틸 (타이밍, 결과 저장, 후처리)
+  # eval_torch.py              # MOT 평가 — PyTorch 백엔드
+  # eval_trt.py                # MOT 평가 — TRT 기본 백엔드
+  # eval_trt_opt.py            # MOT 평가 — TRT FP16 + GPU 최적화 백엔드
 webui/                         # 실시간 추적 웹 UI (독립 모듈, FastAPI)
   server.py                    # FastAPI 앱 (upload/stream/status/result)
   index.html                   # 프론트엔드
   __main__.py                  # python -m webui 진입점
 docs/
   optimization-report.md       # 최적화 상세 보고서
-  eval-pipeline.md             # MOT 평가 파이프라인 가이드
   webui.md                     # 실시간 추적 웹 UI 사용법
   webui-dev/                   # 웹 UI 개발 문서(재현 가이드 포함)
-main.py                        # MOT 평가 진입점 (--engine 분기)
+main.py                        # MOT 평가 진입점 (--engine 분기, src/eval_* 미포함 → WIP)
 tracker/                       # 핵심 추적 알고리즘 (변경 없음)
 external/                      # 외부 모듈 (변경 없음)
 ```
@@ -185,5 +192,6 @@ external/                      # 외부 모듈 (변경 없음)
 - `n` 키로 ROI 좌표 출력
 
 ### 결과 저장
-- 추적 비디오: `data/output/output_video.mp4`
-- 속도 로그: `data/output/speed_log.txt`
+- 추적 비디오: `--output`/`-o`로 지정한 경로에 저장(예: `python -m src -i in.mp4 -o out.mp4`).
+  Python API에서는 `run(input, output)`의 두 번째 인자로 지정.
+- 속도/밀도 등 지표는 추론 코어가 파일로 남기지 않으며, 실시간 지표는 웹 UI 대시보드에서 표출.

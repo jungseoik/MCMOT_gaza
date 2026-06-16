@@ -26,9 +26,10 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 | 경로 | 내용 |
 |------|------|
 | `docs/requirements/` | **북극성 요구사항** (위 참조) |
+| `docs/architecture/` | 기술스택 결정 기록(ADR) |
 | `docs/wbs/` | 기능별 난이도 매트릭스 · 4개월 WBS · 시수 산정 (경영 보고용) |
 | `docs/webui-dev/` | 웹 UI 개발 문서(아키텍처·스트리밍·속도·캘리브·맵·카운팅 등) |
-| `docs/reports/` | YOLO26·해상도·다채널 비교 실측 보고서 + 벤치 스크립트 |
+| `docs/reports/` | YOLO26·해상도·다채널 비교 실측 보고서 + 요구사항 점검 + 벤치 스크립트 |
 | `docs/guide/` | 웹 UI 사용 가이드(스크린샷 기반) |
 | `docs/optimization-report.md` | 추론 최적화 보고서 |
 

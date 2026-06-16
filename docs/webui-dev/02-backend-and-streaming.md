@@ -10,13 +10,13 @@
 | POST | `/upload` | 비디오 파일 저장 + 첫 프레임 | `{job_id, width, height, first_frame(dataURL)}` |
 | POST | `/rtsp` | RTSP/라이브 소스 열기 + 첫 프레임 | `{job_id, width, height, first_frame, live:true}` |
 | POST | `/start/{id}` | ROI·보정·모드 받고 워커 기동 | `{job_id, roi, pixels_per_meter}` |
-| POST | `/stop/{id}` | 라이브 잡 정지 | `{ok:true}` |
+| POST | `/stop/{id}` | 잡 정지(파일·라이브 공통, `job.stop=True`) | `{ok:true}` |
 | POST | `/prepare_depth/{id}` | (Depth) 첫 프레임 깊이→평면→호모그래피 | `{ok, vis, focal, inlier, people}` |
 | GET | `/depthvis/{id}` | Depth 미리보기(컬러 깊이맵) | `image/png` |
 | GET | `/status/{id}` | 진행률 + 최신 지표 | `{status, live, processed, total, fps, error, metrics}` |
 | GET | `/stream/{id}` | MJPEG 라이브→(파일)루프 | `multipart/x-mixed-replace` |
 | GET | `/metrics_all/{id}` | 프레임별 지표 전체(파일 재생 동기화) | `{fps, total, frames:[metrics,...]}` |
-| GET | `/result/{id}` | 결과 mp4(파일, 원본 해상도) | `video/mp4` (VLC 등) |
+| GET | `/result/{id}?download=1` | 결과 mp4(basic 모드는 H.264 트랜스코딩됨). `download=1`이면 첨부 다운로드. **`done`이 아니면 409** | `video/mp4` |
 | GET | `/static/*` | 디자인 자산 | `StaticFiles` 마운트 |
 
 > 파일 모드 흐름은 아래(이 문서), RTSP 라이브 모드는 **[09-rtsp-live.md](09-rtsp-live.md)**,
@@ -28,13 +28,17 @@
 class Job:
     id, input_path, output_path
     queue            # 라이브 MJPEG용 JPEG 큐 (maxsize=128, 가득 차면 오래된 것 드롭)
-    replay_frames[]  # 모든 JPEG (루프 재생용)
+    replay_frames[]  # 모든 JPEG (루프 재생용). 중단/완료-후-새소스 진입 시 비움
     replay_metrics[] # 프레임별 metrics (재생 동기화용)
-    status           # uploaded|queued|processing|done|error|stopped(라이브)
+    status           # uploaded|queued|processing|encoding|done|stopped|error
+                     #   encoding = basic 모드 H.264 트랜스코딩 중
+                     #   stopped  = /stop 또는 새 소스가 회수(파일·라이브 공통)
     processed,total,fps,error
     live, stop       # RTSP 라이브 여부 / 정지 플래그
     roi, ppm         # /start에서 설정 (보정선 모드)
     homography, world_area_m2   # ROI 실측/Depth 모드의 지면 변환·면적
+    basic            # 기본 시각화(다운로드) 모드 — ID+박스만, 지표/ROI 없음
+    counting, count_line, count_inside, count_segment   # 인·아웃 카운팅 모드
     metrics          # 최신 프레임 지표 스냅샷
 ```
 
@@ -61,22 +65,34 @@ GIL 해제됨). 동시 다중 사용자가 필요하면 트래커 인스턴스�
 
 ## 워커 한 프레임 처리
 
+워커는 첫 프레임에서 모드별 **analyzer**를 lazy init(`_make_analyzer`: speed / counting /
+basic 분기)하고, 프레임마다 `_process`로 오버레이+지표를 뽑는다. 매 프레임 `job.stop`을
+검사해 `/stop`이나 새 소스 회수 시 즉시 중단(`stopped`)한다.
+
 ```python
+stopped = False
 for item in _model.stream(job.input_path, draw=False):
-    if est is None:                      # 첫 프레임에 lazy init
+    if job.stop:                         # /stop 또는 새 소스가 이 잡을 회수
+        stopped = True; break
+    if analyzer is None:                 # 첫 프레임 lazy init
         job.fps = item["fps"] or 25.0
-        est = SpeedEstimator(job.fps, job.ppm, job.roi,
-                             frame_size=(item["width"], item["height"]))
+        analyzer = _make_analyzer(job, item)   # speed/count/basic 분기
         writer = cv2.VideoWriter(..., fourcc("mp4v"), job.fps, (w,h))
-    present = est.update(item["index"], item["targets"])   # 객체별 속도
-    frame   = annotate(item["frame"], item["targets"], present, est)  # 오버레이
+    t_sec = item["index"] / job.fps      # 파일 모드의 벽시계 초
+    frame, m = _process(analyzer, job, item, t_sec)   # 오버레이 + metrics
     writer.write(frame)                  # 결과 mp4 (원본 해상도)
     jpg = _encode(frame)                 # 다운스케일 + JPEG
     job.replay_frames.append(jpg); _push(job, jpg)   # 루프용 + 라이브용
-    m = est.metrics(present)
     job.metrics = m; job.replay_metrics.append(m)
     job.processed = item["index"]
+# 종료 분기: stopped → status="stopped"(결과/replay 폐기, /result 409),
+#            basic   → writer flush 후 encoding→H.264 트랜스코딩→done,
+#            그 외   → done
 ```
+
+> SpeedEstimator는 `_make_analyzer` 안에서 키워드 인자로 생성된다
+> (`SpeedEstimator(job.fps, pixels_per_meter=…, homography=…, roi=…, world_area_m2=…, frame_size=…)`).
+> 라이브(RTSP) 워커는 `_worker_live`가 따로 처리하며 `t`로 `time.monotonic()`을 쓴다([09](09-rtsp-live.md)).
 
 ## MJPEG 스트리밍 — 라이브 → 루프 (핵심)
 

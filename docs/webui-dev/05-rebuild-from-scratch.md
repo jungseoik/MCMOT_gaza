@@ -41,8 +41,9 @@ pip install -r webui/requirements.txt
 
 - 시작 시 `BoostTrackGPUInference()` 1회 로드, `/static` 마운트
 - `Job` 모델 + `_jobs` 레지스트리 + `_model_lock`
-- 엔드포인트: `/`, `/upload`(첫프레임 반환), `/start/{id}`, `/status/{id}`,
-  `/stream/{id}`(async, 라이브→루프), `/metrics_all/{id}`, `/result/{id}`
+- 엔드포인트: `/`, `/upload`(첫프레임 반환), `/rtsp`(라이브 소스), `/start/{id}`,
+  `/stop/{id}`, `/status/{id}`, `/stream/{id}`(async, 라이브→루프),
+  `/metrics_all/{id}`, `/result/{id}`, `/prepare_depth/{id}`·`/depthvis/{id}`(Depth)
 - 워커 스레드: `model.stream(draw=False)` → `SpeedEstimator` → `annotate` →
   mp4 write + JPEG(`replay_frames`/큐) + `metrics`/`replay_metrics`
 - 스트림 페이싱은 **async + asyncio.sleep + 고정 스케줄**, 프레임은 **다운스케일+JPEG**
@@ -57,7 +58,9 @@ import uvicorn; uvicorn.run("webui.server:app", host="0.0.0.0", port=8000)
 ```bash
 JOB=$(curl -s -F file=@assets/sample1.mp4 localhost:8000/upload | jq -r .job_id)
 curl -s -X POST localhost:8000/start/$JOB -H 'Content-Type: application/json' \
-  -d '{"roi":[[0,0],[960,0],[960,540],[0,540]],"pixels_per_meter":50}'
+  -d '{"roi":[[0,0],[960,0],[960,540],[0,540]],"mode":"line","pixels_per_meter":50}'
+# km/h를 내려면 mode를 명시해야 한다. mode 생략 시 기본 "none"(px/s)이라 ppm이 무시됨.
+# 모드: none(px/s) | line(+pixels_per_meter) | homography(+real_w,real_h) | depth
 curl -s localhost:8000/status/$JOB | jq .metrics    # count/avg/density 등 변동 확인
 curl -s localhost:8000/metrics_all/$JOB | jq '.total'  # 프레임 수만큼 저장됐는지
 ```

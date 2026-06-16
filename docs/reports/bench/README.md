@@ -29,6 +29,11 @@ python -m src.build_trt --fp16       # external/weights/trt/*.engine 생성(최�
 | `build_resolution_engines.py` | 해상도별 고정배치 FP16 엔진 빌드 | — | (해상도 보고서) |
 | `bench_resolution.py` | 해상도별 단일/병렬 fps(단일 GPU) | `results_resolution.json` | (해상도 보고서) |
 | `bench_mps.py` | 단일 GPU 멀티채널 fps (MPS off/on 비교용) | `results_mps_{tag}.json` | 3.H |
+| `bench_yolox_batch150.py` | 실제 검출기(YOLOX-X 896×1600 TRT FP16)의 배치 1~32 지연/VRAM | `results_yolox_batch150.json` | (배치 곡선 참고) |
+
+> `bench_mps.py {tag}`의 `{tag}`가 파일명에 그대로 들어간다. 커밋된 원자료는
+> `results_mps_mps.json`(MPS on)과 `results_mps_nompS.json`(MPS off)이다 — 후자의
+> `nompS`는 실행 시 넘긴 태그 문자열 그대로이며 오타(`nomps`가 의도)지만 결과 내용은 정상.
 
 ## 2. 실행 순서 (전체 재현)
 
