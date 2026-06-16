@@ -12,7 +12,7 @@
 
 ```python
 SpeedEstimator(fps, pixels_per_meter=None, homography=None, roi=None,
-               frame_size=None, world_area_m2=None,
+               frame_size=None, world_area_m2=None, reference_vec=None,
                window_sec=1.0, min_move_px=2.0)
 ```
 
@@ -21,6 +21,8 @@ SpeedEstimator(fps, pixels_per_meter=None, homography=None, roi=None,
 - `homography`: 이미지 발끝점 → 지면 미터 변환(원근보정, ROI 실측/Depth 모드)
 - `roi`: 4점 폴리곤(원본 px 좌표). 없으면 전체 프레임
 - `world_area_m2`: 호모그래피 모드에서 ROI의 실제 면적(밀도 명/m² 산출용)
+- `reference_vec`: (선택) 권장 피난 방향 `[[tx,ty],[hx,hy]]`(이미지 px, 꼬리→머리). 주면
+  **방향성 정렬도**를 계산(opt-in, 안 주면 기존 동작 그대로) → [13-alignment](13-alignment.md)
 
 > ⚠️ 세 번째 위치인자는 `roi`가 아니라 **`homography`**다. 서버는 혼동을 막으려고
 > `SpeedEstimator(job.fps, pixels_per_meter=…, homography=…, roi=…, …)`처럼 전부 키워드
@@ -71,7 +73,10 @@ ppm(미터당 픽셀)은 프론트의 **보정선 2점 + 실제거리(m)** 로 �
 | `density` + `density_unit` | 밀도 | count ÷ 면적. 보정 시 `명/m²`(면적=ROI/전체 px → m²), 미보정 시 `명/Mpx` |
 | `level` / `level_kr` | 혼잡도 | 명/m² 기준 <0.4 Low/여유, <1.0 Normal/보통, ≥1.0 High/혼잡 |
 | `avg_dwell` / `max_dwell` | 체류시간(s) | `(현재프레임 - 첫등장프레임)/fps` |
-| `objects[]` | 객체별 | `{id, speed, dwell}` (속도 내림차순) |
+| `has_align` | 정렬도 활성 | `reference_vec` 줬을 때만 true (UI 표출 게이트) |
+| `avg_align` | 평균 정렬도 | 이동 객체의 코사인 평균(정지 제외), 없으면 `null` |
+| `ref_dir` | 기준 단위벡터 | 맵 기준 화살표용 `[dx,dy]`(객체와 같은 좌표계), 없으면 `null` |
+| `objects[]` | 객체별 | `{id, speed, dwell, mx, my, dirx, diry, align}` (속도 내림차순) |
 
 면적 산출: ROI 있으면 `cv2.contourArea(roi)`, 없으면 `width*height` (px²). 보정 시
 `m² = px² / ppm²`.
@@ -83,6 +88,7 @@ ppm(미터당 픽셀)은 프론트의 **보정선 2점 + 실제거리(m)** 로 �
 
 - ROI 폴리곤(파란선)
 - present 객체만: ID별 색 박스 + `ID:n` + `x.x km/h` 라벨
+- (정렬도 활성 시) 기준 방향 화살표(EVAC DIR) + 박스 모서리 정렬 점(녹=정렬/황/적=역류)
 - **집계(count/avg)는 영상에 안 그린다** → 대시보드를 단일 기준으로(영상↔대시보드 불일치 방지)
 
 `color`는 `src.inference._get_color(track_id)`를 재사용해 기존 파이프라인과 색 일관성 유지.

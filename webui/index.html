@@ -362,7 +362,7 @@ function drawMap(m){
     }
     ctx.fillStyle=c; ctx.beginPath(); ctx.arc(X,Y,4,0,7); ctx.fill();
   });
-  // overall alignment: longer reference vector from the crowd centroid + 사잇각
+  // overall alignment: longer reference vector from the crowd centroid
   if(hasA&&m.ref_dir){
     let cxw,cyw;
     if(objs.length){ cxw=objs.reduce((s,o)=>s+o.mx,0)/objs.length; cyw=objs.reduce((s,o)=>s+o.my,0)/objs.length; }
@@ -375,9 +375,6 @@ function drawMap(m){
     ctx.lineTo(ex-h*Math.cos(a+0.4),ey-h*Math.sin(a+0.4)); ctx.closePath(); ctx.fillStyle="#2E90FA"; ctx.fill();
     ctx.fillStyle="#2E90FA"; ctx.beginPath(); ctx.arc(Xc,Yc,3,0,7); ctx.fill();
     ctx.font="bold 12px sans-serif"; ctx.fillText("기준 방향",ex+6,ey+4);
-    const av=m.avg_align, deg=(av==null)?null:Math.round(Math.acos(Math.max(-1,Math.min(1,av)))*180/Math.PI);
-    ctx.fillStyle="#444"; ctx.font="12px sans-serif";
-    ctx.fillText(av==null?"정렬 평균 —":`정렬 평균 ${av>=0?"+":""}${av.toFixed(2)} · 사잇각 ${deg}°`,TX(bx0)+4,TY(by1)-8);
   }
 }
 

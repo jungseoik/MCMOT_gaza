@@ -11,8 +11,6 @@ valid. With homography set, map_bounds/positions are true ground meters.
 
 Note: OpenCV's Hershey fonts are ASCII-only, so all labels are English.
 """
-import math
-
 import cv2
 import numpy as np
 
@@ -77,7 +75,7 @@ def render_map(m, width, height, label="2D MAP - motion vectors"):
             cv2.arrowedLine(img, (X, Y), (ex, ey), ac, 2, cv2.LINE_AA, 0, 0.45)
         cv2.circle(img, (X, Y), 4, c, -1, cv2.LINE_AA)
 
-    if has_align and m.get("ref_dir"):         # long reference vector + 사잇각 readout
+    if has_align and m.get("ref_dir"):         # long reference vector (no text readout)
         rd = m["ref_dir"]
         if objs:
             cxw = sum(o["mx"] for o in objs) / len(objs)
@@ -89,13 +87,6 @@ def render_map(m, width, height, label="2D MAP - motion vectors"):
         cv2.arrowedLine(img, (Xc, Yc), (ex, ey), (250, 120, 0), 4, cv2.LINE_AA, 0, 0.3)
         cv2.circle(img, (Xc, Yc), 3, (250, 120, 0), -1, cv2.LINE_AA)
         cv2.putText(img, "EVAC", (ex + 5, ey + 4), FONT, 0.45, (250, 120, 0), 1, cv2.LINE_AA)
-        av = m.get("avg_align")
-        if av is not None:
-            deg = round(math.degrees(math.acos(max(-1.0, min(1.0, av)))))
-            txt = f"align avg {av:+.2f} / {deg}deg"
-        else:
-            txt = "align avg --"
-        cv2.putText(img, txt, (8, H - 10), FONT, 0.5, (60, 60, 60), 1, cv2.LINE_AA)
 
     _panel_label(img, label)
     return img
