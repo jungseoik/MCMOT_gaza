@@ -1,0 +1,70 @@
+# C-LAB PoC WBS 변경이력 (CHANGELOG)
+
+WBS(`C-lab_PoC_WBS_vN.xlsx`)는 **바이너리(xlsx)라 git diff가 안 되므로**, 버전 간
+"무엇이 / 어디가 / 왜" 바뀌었는지를 이 파일에 **사람이 읽을 수 있게** 누적 기록한다.
+
+- **버전 컨벤션**: 매주 점검 후 수정이 있으면 `vN → vN+1`로 올린다.
+- **최신본 위치**: 그 주차 폴더 `docs/weekly/YYYY-MM-N주차/C-lab_PoC_WBS_vN.xlsx`.
+  (예전 버전 아카이브는 `docs/wbs/`에 보관 — 현재 `v3`·`v4`)
+- **점검 절차**: `/wbs-review` 스킬 → 진척 보고서 `docs/weekly/<주차>/WBS-진척점검.md` 생성.
+- 컬럼: `상태`(H열) = 예정 / 진행중 / 완료. `완료 일정`(G열).
+
+> **현재 최신**: **v5** @ `docs/weekly/2026-06-3주차/` (06-3주차 점검 반영, 완료 12/진행중 7/예정 66)
+
+---
+
+## v5 — 2026-06-17 (6월 3주차)
+
+주차별 관리 컨벤션 시작(v4 사본 → `docs/weekly/2026-06-3주차/`)에 더해, 06-3주차 점검으로
+**6건을 진행중 → 완료** 처리. xlsx는 openpyxl로 상태(H)·완료일정(G) 셀만 in-place 편집.
+
+**완료(진행중→완료, 완료일 2026-06-17) — 6건:**
+| WBS | 항목 | 근거 |
+|-----|------|------|
+| 3.1.4 | 성능 테스트(처리량·VRAM·지연) | `docs/reports/` 벤치, `optimization-report.md` |
+| 3.2.1 | RTSP 스트림 연동 | `webui/server.py` `/rtsp`, `src/inference_gpu` `stream(live)` |
+| 4.1.3 | 이동 궤적 정규화 | `webui/speed.py` history + ROI/`_world` 보정 |
+| 4.3.2 | 출입 방향 판별 | `webui/counter.py` 부호거리 + inside_sign |
+| 4.3.3 | 잔류인원 산출 | `webui/counter.py` `occ=start+in−out` |
+| 4.4.2 | 좌표 변환(Homography) | `webui/depth_ground.py` + 수동 4점 |
+
+**모델명 정정(내용 D셀)**: WBS 표기를 실제 구현 모델로 수정 — `3.1.3`·`4.1.1` 탐지
+`YOLOv8x/RT-DETR-L → YOLOX-MOT20`, `3.1.3`·`4.1.2` 추적 `BoT-SORT/ByteTrack → BoostTrack++`,
+`3.1.3` 재식별 `CLIP-ReID → FastReID(SBS-S50)`.
+
+**셀 변경(v4→v5 diff, 총 16셀)**: 위 6행 각 `상태(H)=완료`·`완료일정(G)=2026-06-17`(+ 완료셀
+색을 초록 `C6EFCE`로 통일), 내용(D) 3셀(모델명), 버전 셀(C5)
+`v4 (…) → v5 (2026-06-17 갱신: 06-3주차 점검, 완료 6건 추가)`. (그 외 셀 불변)
+
+**진척 요약(85개)**: **완료 12 / 진행중 7 / 예정 66**. 상세·정합성(모델명 불일치 플래그)은
+[WBS-진척점검](../weekly/2026-06-3주차/WBS-진척점검.md) 참조.
+
+## v4 — 2026-06-16 (구현현황 1차 반영)
+
+v1 이후 실제 코드/엔진 구현 상태를 WBS 상태컬럼에 처음 반영. **상태 변경 25건**.
+
+**완료(예정→완료, 완료일 2026-06-16) — 6건, 전부 `4. AI 분석 기능 개발`:**
+| WBS | 항목 | 레포 근거 |
+|-----|------|-----------|
+| 4.1.1 | 객체 탐지 (Person Detection, TensorRT) | `src/inference_trt.py`(TRTDetector), YOLOX-MOT20 엔진 |
+| 4.1.2 | 단일 카메라 추적 (MOT, Kalman) | `tracker/`, `src/inference_gpu.py`(BoostTrack++) |
+| 4.1.4 | 이동 특성 산출 (이동거리·속도·방향·체류) | `webui/speed.py`(SpeedEstimator) |
+| 4.1.5 | 통행량 분석 (Line Crossing In/Out) | `webui/counter.py` |
+| 4.2.1 | 속도 지표 (Pixel-to-Meter / Homography) | `webui/speed.py`, `webui/depth_ground.py` |
+| 4.2.2 | 체류 지표 (Dwell Time) | `webui/speed.py`(dwell) |
+
+**진행중(예정→진행중) — 19건:**
+- `3.1.4` 성능 테스트, `3.2.1` RTSP 스트림 연동
+- `4.1.3` 이동 궤적 정규화, `4.2.3` 혼잡도 지표, `4.2.5` 대시보드 연동,
+  `4.3.2` 출입 방향 판별, `4.3.3` 잔류인원 산출,
+  `4.4.2` 좌표 변환, `4.4.3` 구역 상태 시각화, `4.4.4` 이동 흐름 표현,
+  `4.5.4` 대피 경로 시각화
+- `5.1.1` 인원 현황 시각화, `5.1.2` 혼잡도 표시
+
+**버전 셀**: `v1` → `v4 (2026-06-16 갱신: 구현현황 반영)`
+
+## v1~v3 — 2026-06-04 (초안)
+
+- v1: 최초 WBS 작성(85개 작업, 7개 대분류, 4개월 일정). 전 항목 `예정`.
+- v2·v3: 구조/표현 보정(상태 변경 없음).
+- 아카이브로 `docs/wbs/`에 `v3` 보관(v1·v2 파일은 별도 미보관).
