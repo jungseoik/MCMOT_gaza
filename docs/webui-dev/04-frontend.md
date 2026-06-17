@@ -5,7 +5,8 @@ React/빌드/번들러 없음.
 
 ## 디자인 시스템 이식
 
-외부 시안(`sample_ui`, React 목업)에서 **CSS와 폰트만** 가져왔다(React는 안 씀).
+초기 디자인 시안(React 목업)에서 **CSS와 폰트만** `webui/static/`으로 가져왔다(React는 안 씀).
+시안 원본(`sample_ui/`)은 런타임 미사용·자산 중복이라 정리·삭제했다(필요 시 git 히스토리에서 복구).
 
 - `static/colors_and_type.css` — 색/타입 토큰, Pretendard 폰트 `@font-face`
 - `static/app.css` — 레이아웃·컴포넌트 클래스(`.app .rail .topbar .metric .bigcard .ppl .hud` 등)
