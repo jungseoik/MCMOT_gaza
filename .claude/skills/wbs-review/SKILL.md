@@ -94,6 +94,63 @@ for k in B:                                  # 공통 항목의 셀 변경
 PYEOF
 ```
 
+## 항목 추가/삭제 (행 삽입 + 병합 재구성)
+
+WBS 항목을 추가할 때는 **맨 아래 append가 아니라 번호순 위치에 행을 삽입**한다. 단,
+이 시트는 `대분류(B)`·`중분류(C)`가 블록 단위로 **세로 병합**돼 있어 주의가 필요하다.
+
+**openpyxl 특성/함정**
+- `ws.insert_rows(idx, n)`은 **셀 값·서식(색 포함)은 자동으로 아래로 밀어주지만**, 병합셀
+  범위·차트·데이터검증은 **자동으로 안 옮긴다** → 병합은 수동 재구성 필요.
+- **`unmerge_cells()`를 쓰지 말 것** — 삽입 후 미생성(unmaterialized) 셀을 지우려다
+  `KeyError`로 죽는다. 대신 `ws.merged_cells.ranges.clear()`로 목록만 비우고 다시 `merge_cells`.
+- 새 행은 위 블록의 **대분류/중분류 병합에 포함**돼야 한다: 대분류(B)는 삽입 위치가 범위 안이면
+  자동 확장되지만, **중분류(C) 블록이 삽입행 바로 위에서 끝나면 그 병합을 수동으로 1행 확장**해야
+  새 행의 중분류가 빈칸이 되지 않는다.
+
+**절차 (검증된 방식)**
+1. 편집 전 스냅샷 복사. 삽입 위치 결정(예: `4.1.6`은 `4.1.5`(R42) 뒤 = R43).
+2. `orig=[(m.min_col,m.min_row,m.max_col,m.max_row) ...]`로 병합 캡처 → `ws.merged_cells.ranges.clear()`.
+3. `ws.insert_rows(ins,cnt)` (여러 곳이면 순서대로; 이후 삽입의 행번호는 앞 삽입 반영분).
+4. 새 행: 위 블록 행에서 `cell._style` 복사, **B·C(중분류) 값은 설정 안 함**(병합에 흡수),
+   간트열(I~)은 값=None·`fill=PatternFill(fill_type=None)`(계획 V 없음), `A/D/E/G/H`만 채움,
+   상태 색(완료=초록 `C6EFCE` / 진행중 `FFEB9C` / 예정 무채색).
+5. 캡처한 병합을 삽입량만큼 시프트(`min_row>=ins`면 +cnt) / 확장(`min_row<ins<=max_row`면 max_row+cnt)
+   해서 재병합. **중분류 블록이 새 행 바로 위에서 끝나면 그 범위의 max_row를 새 행까지 확장**.
+6. 검증: 번호 기준 diff(추가/삭제·기존 무변경), **각 새 행이 올바른 대/중분류 블록에 속하는지**
+   (그 행을 덮는 C 병합 앵커 값 확인), 총 항목 수, 상태 색. → Excel 육안 검토 요청.
+
+```python
+import openpyxl; from copy import copy; from openpyxl.styles import PatternFill
+wb=openpyxl.load_workbook(F); ws=wb["Sheet1"]; MAXC=ws.max_column
+orig=[(m.min_col,m.min_row,m.max_col,m.max_row) for m in ws.merged_cells.ranges]
+ws.merged_cells.ranges.clear()
+INS=[(43,1)]                                  # (삽입행, 개수) — 여러 곳이면 순서대로
+for ins,cnt in INS: ws.insert_rows(ins,cnt)
+def style_row(r,src):                          # src(위 행) 스타일 복사
+    for c in range(1,MAXC+1):
+        ws.cell(r,c)._style=copy(ws.cell(src,c)._style)
+        if c>=9: ws.cell(r,c).value=None; ws.cell(r,c).fill=PatternFill(fill_type=None)
+style_row(43,42)
+ws.cell(43,1).value="4.1.6"; ws.cell(43,4).value="..."; ws.cell(43,8).value="완료"
+ws.cell(43,8).fill=copy(ws.cell(38,8).fill)    # 완료 초록 복사
+def shift(b,ins,cnt):
+    mnc,mnr,mxc,mxr=b
+    if mnr>=ins: mnr+=cnt;mxr+=cnt
+    elif mnr<ins<=mxr: mxr+=cnt
+    return (mnc,mnr,mxc,mxr)
+EXTEND={(3,38,3,42):43}                         # 중분류 블록을 새 행까지 확장: {원본범위:새max_row}
+for b in orig:
+    for ins,cnt in INS: b=shift(b,ins,cnt)
+    mnc,mnr,mxc,mxr=b
+    if b in EXTEND: mxr=EXTEND[b]
+    if (mnr,mnc)!=(mxr,mxc): ws.merge_cells(start_row=mnr,start_column=mnc,end_row=mxr,end_column=mxc)
+wb.save(F)
+```
+
+> **항목 삭제**도 같은 원리(`delete_rows` + 병합 시프트/축소). 삭제 시 그 행이 단독으로
+> 속한 중분류 블록이면 병합 범위를 1행 줄인다. 추가/삭제는 변경이력에 `추가/삭제 WBS 번호`로 기록.
+
 ## 진척 보고서 템플릿
 ```markdown
 # WBS 진척 점검 — <YYYY년 M월 N주차> (vN 기준)
