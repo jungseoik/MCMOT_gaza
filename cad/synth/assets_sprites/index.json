@@ -1,0 +1,98 @@
+[
+  {
+    "file": "person_000.png",
+    "src_track": 23,
+    "h": 147,
+    "w": 90
+  },
+  {
+    "file": "person_001.png",
+    "src_track": 1,
+    "h": 146,
+    "w": 83
+  },
+  {
+    "file": "person_002.png",
+    "src_track": 2,
+    "h": 138,
+    "w": 84
+  },
+  {
+    "file": "person_003.png",
+    "src_track": 49,
+    "h": 135,
+    "w": 84
+  },
+  {
+    "file": "person_004.png",
+    "src_track": 10,
+    "h": 131,
+    "w": 80
+  },
+  {
+    "file": "person_005.png",
+    "src_track": 64,
+    "h": 130,
+    "w": 79
+  },
+  {
+    "file": "person_006.png",
+    "src_track": 15,
+    "h": 128,
+    "w": 76
+  },
+  {
+    "file": "person_007.png",
+    "src_track": 77,
+    "h": 129,
+    "w": 73
+  },
+  {
+    "file": "person_008.png",
+    "src_track": 9,
+    "h": 144,
+    "w": 64
+  },
+  {
+    "file": "person_009.png",
+    "src_track": 25,
+    "h": 122,
+    "w": 70
+  },
+  {
+    "file": "person_010.png",
+    "src_track": 53,
+    "h": 122,
+    "w": 68
+  },
+  {
+    "file": "person_011.png",
+    "src_track": 3,
+    "h": 112,
+    "w": 70
+  },
+  {
+    "file": "person_012.png",
+    "src_track": 50,
+    "h": 115,
+    "w": 68
+  },
+  {
+    "file": "person_013.png",
+    "src_track": 72,
+    "h": 114,
+    "w": 68
+  },
+  {
+    "file": "person_014.png",
+    "src_track": 28,
+    "h": 117,
+    "w": 59
+  },
+  {
+    "file": "person_015.png",
+    "src_track": 14,
+    "h": 90,
+    "w": 56
+  }
+]

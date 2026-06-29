@@ -191,3 +191,12 @@ cache/
 docs/reports/yolo_compare/weights/
 docs/reports/yolo_compare/runs/
 docs/reports/yolo_compare/videos/
+
+# 항만/대피 합성 영상 작업물
+results/clab_concat/                 # 238MB 샘플 mp4 모음 — 추적 제외
+cad/synth/out/                       # 재생성 가능한 합성 산출물(영상/GT/프리뷰)
+cad/ODATrial.tar.gz                  # ODA 체험판 SDK(3자 바이너리) — 절대 커밋 금지
+# 원본 CAD(대용량 바이너리) — 로컬 보관/필요시 Git LFS. synth 실행엔 17F.dxf 필요
+cad/17F.dwg
+cad/17F.dxf
+cad/17F_Egress Route.pdf
