@@ -13,6 +13,7 @@
 ```python
 SpeedEstimator(fps, pixels_per_meter=None, homography=None, roi=None,
                frame_size=None, world_area_m2=None, reference_vec=None,
+               units_per_px=1.0, reference_vec_is_world=False, map_size=None,
                window_sec=1.0, min_move_px=2.0)
 ```
 
@@ -23,6 +24,9 @@ SpeedEstimator(fps, pixels_per_meter=None, homography=None, roi=None,
 - `world_area_m2`: 호모그래피 모드에서 ROI의 실제 면적(밀도 명/m² 산출용)
 - `reference_vec`: (선택) 권장 피난 방향 `[[tx,ty],[hx,hy]]`(이미지 px, 꼬리→머리). 주면
   **방향성 정렬도**를 계산(opt-in, 안 주면 기존 동작 그대로) → [13-alignment](13-alignment.md)
+- **지도 정합 모드**([14](14-map-registration.md)): `homography`가 **CCTV px→지도 px**일 때
+  `units_per_px`(=m/px)로 속도를 미터 환산, `map_size=(W,H)`로 맵뷰 배경=지도 전체,
+  `reference_vec_is_world=True`(기준벡터를 지도 좌표로 그대로 사용)
 
 > ⚠️ 세 번째 위치인자는 `roi`가 아니라 **`homography`**다. 서버는 혼동을 막으려고
 > `SpeedEstimator(job.fps, pixels_per_meter=…, homography=…, roi=…, …)`처럼 전부 키워드
@@ -76,6 +80,8 @@ ppm(미터당 픽셀)은 프론트의 **보정선 2점 + 실제거리(m)** 로 �
 | `has_align` | 정렬도 활성 | `reference_vec` 줬을 때만 true (UI 표출 게이트) |
 | `avg_align` | 평균 정렬도 | 이동 객체의 코사인 평균(정지 제외), 없으면 `null` |
 | `ref_dir` | 기준 단위벡터 | 맵 기준 화살표용 `[dx,dy]`(객체와 같은 좌표계), 없으면 `null` |
+| `map_image` | 지도 정합 모드 | true면 맵뷰 배경=업로드 지도(객체 좌표=지도 px) |
+| `count_addon` + `in`/`out`/`occupancy`/`count_alert` | in/out 애드온 | 통과선 그렸을 때만(`_process`가 LineCounter 병합) |
 | `objects[]` | 객체별 | `{id, speed, dwell, mx, my, dirx, diry, align}` (속도 내림차순) |
 
 면적 산출: ROI 있으면 `cv2.contourArea(roi)`, 없으면 `width*height` (px²). 보정 시
