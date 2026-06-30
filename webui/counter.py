@@ -146,3 +146,32 @@ class LineCounter:
         col = (0, 0, 255) if occ < 0 else (0, 255, 255)
         cv2.putText(vis, bar, (12, h - bl - 12), du.FONT, fs, col, tt, cv2.LINE_AA)
         return vis
+
+    def draw_line(self, vis):
+        """Overlay ONLY the line + inside arrow + counter bar onto an already-drawn
+        frame (used as an add-on in speed/map mode; per-object boxes are drawn by
+        the speed annotate, so we don't redraw them here). Mutates `vis` in place."""
+        h, w = vis.shape[:2]
+        if self.segment_only:
+            p1, p2 = tuple(self.A.astype(int)), tuple(self.B.astype(int))
+        else:
+            fl = self._frame_line(w, h)
+            p1 = tuple(map(int, fl[0])); p2 = tuple(map(int, fl[1]))
+        fs = du.font_scale(h); tt = du.txt_thickness(fs); lt = du.box_thickness(h)
+        cv2.line(vis, p1, p2, (255, 200, 0), lt, cv2.LINE_AA)
+        cv2.circle(vis, tuple(self.A.astype(int)), lt + 2, (255, 200, 0), -1, cv2.LINE_AA)
+        cv2.circle(vis, tuple(self.B.astype(int)), lt + 2, (255, 200, 0), -1, cv2.LINE_AA)
+        M = (self.A + self.B) / 2.0
+        n = np.array([-self.AB[1], self.AB[0]]) / self.L
+        ins = M + self.inside_sign * n * 46
+        cv2.arrowedLine(vis, tuple(M.astype(int)), tuple(ins.astype(int)),
+                        (60, 220, 60), lt, tipLength=0.3, line_type=cv2.LINE_AA)
+        cv2.putText(vis, "IN", tuple((ins + self.inside_sign * n * 14 - [10, 0]).astype(int)),
+                    du.FONT, fs, (60, 220, 60), tt, cv2.LINE_AA)
+        occ = self.start + self.in_count - self.out_count
+        bar = f"IN {self.in_count}  OUT {self.out_count}  in {occ}"
+        (bw, bh), bl = cv2.getTextSize(bar, du.FONT, fs, tt)
+        cv2.rectangle(vis, (8, h - bh - bl - 16), (16 + bw, h - 8), (0, 0, 0), -1, cv2.LINE_AA)
+        col = (0, 0, 255) if occ < 0 else (0, 255, 255)
+        cv2.putText(vis, bar, (12, h - bl - 12), du.FONT, fs, col, tt, cv2.LINE_AA)
+        return vis

@@ -15,7 +15,7 @@
   .mh svg{ width:13px; height:13px; }
   /* setup (ROI / calibration) screen */
   .setup{ flex:1; min-width:0; min-height:0; display:flex; flex-direction:column;
-          align-items:center; justify-content:center; padding:28px; gap:16px; overflow:auto;
+          align-items:safe center; justify-content:safe center; padding:28px; gap:16px; overflow:auto;
           background:radial-gradient(900px 460px at 50% -8%, rgba(42,41,237,.14), transparent 60%), var(--bg-base); }
   .setup .hd{ text-align:center; }
   .setup .hd h2{ font:var(--display-28); margin:0 0 4px; }
@@ -102,6 +102,12 @@
               <div class="th"></div><div><div class="nm">inout_sample2</div><div class="mt">인·아웃 카운팅 데모 2</div></div></button>
             <button class="samplecard" data-url="rtsp://172.168.45.235:8554/arxiepiskopi">
               <div class="th"></div><div><div class="nm">arxiepiskopi</div><div class="mt">보행자 궤적 데모</div></div></button>
+            <button class="samplecard" data-url="rtsp://172.168.45.235:8554/1_v1">
+              <div class="th"></div><div><div class="nm">1_v1</div><div class="mt">신규 스트림 1</div></div></button>
+            <button class="samplecard" data-url="rtsp://172.168.45.235:8554/2_v1">
+              <div class="th"></div><div><div class="nm">2_v1</div><div class="mt">신규 스트림 2</div></div></button>
+            <button class="samplecard" data-url="rtsp://172.168.45.235:8554/3_v1">
+              <div class="th"></div><div><div class="nm">3_v1</div><div class="mt">신규 스트림 3</div></div></button>
           </div>
         </div>
         <div id="upInfo" class="small" style="margin-top:12px;color:var(--text-3)"></div>
@@ -131,6 +137,7 @@
           <label class="setinfo"><input type="radio" name="mode" value="line"> 보정선(2점)</label>
           <label class="setinfo"><input type="radio" name="mode" value="homography"> ROI 실측(4점)</label>
           <label class="setinfo"><input type="radio" name="mode" value="depth"> Depth 자동 (사람키)</label>
+          <label class="setinfo"><input type="radio" name="mode" value="map"> 지도 정합(N점)</label>
         </div>
         <div class="tools">
           <div class="seg">
@@ -150,6 +157,29 @@
           <img id="depthImg" style="max-width:520px;width:100%;border-radius:8px;margin-top:8px;display:none" />
           <div id="depthInfo" class="setinfo" style="margin-top:6px"></div>
           <button class="btn cyan hidden" id="depthGo" style="margin-top:8px">이 깊이로 측정 시작 →</button>
+        </div>
+        <div id="mapSetup" class="hidden" style="margin-top:8px">
+          <div class="tools">
+            <span class="setinfo">지도 이미지</span>
+            <input id="mapFile" type="file" accept="image/*" />
+            <span class="setinfo">점 개수 <input id="nPts" type="number" min="4" max="30" step="1" value="10" style="width:54px"/></span>
+          </div>
+          <div class="tools">
+            <div class="seg">
+              <button id="mStepCctv" class="tag-btn on">① CCTV 점</button>
+              <button id="mStepMap" class="tag-btn">② 지도 점</button>
+              <button id="mStepScale" class="tag-btn">③ 축척(2점)</button>
+              <button id="mStepAlign" class="tag-btn">④ 정렬방향(선택)</button>
+              <button id="mStepCount" class="tag-btn">⑤ 통과선(선택)</button>
+              <button id="mClr" class="tag-btn">지우기</button>
+            </div>
+            <span class="setinfo">실거리 <input id="scaleM" type="number" min="0" step="0.1" value="1.0"/> m</span>
+            <span id="mapInfo" class="setinfo"></span>
+          </div>
+          <div class="tools" style="align-items:flex-start">
+            <canvas id="mapCv" style="max-width:48%;border:1px solid #30363d;border-radius:8px;background:#fff;cursor:crosshair"></canvas>
+            <span class="setinfo" style="max-width:320px;opacity:.85">①위 CCTV 첫프레임에 <b>바닥 지점</b> N개를 순서대로 → ②지도에 <b>같은 순서</b>로 N개 → ③지도에서 거리 아는 2점 + 실거리(m) → ④(선택) 출구 방향 꼬리→머리 2점.</span>
+          </div>
         </div>
       </div>
 
@@ -252,6 +282,11 @@
                 <div class="val"><b id="mAlign">—</b></div>
                 <div class="sub">평균 코사인 (+1 정렬 · −1 역류)</div>
               </div>
+              <div class="metric" id="countAddon" style="display:none">
+                <div class="mh"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M5 7h14M5 17h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> In/Out <span class="kr">통과·재실</span></div>
+                <div class="val"><b id="mOcc">0</b><span class="u">재실</span></div>
+                <div class="sub">IN <b id="mIn">0</b> · OUT <b id="mOut">0</b></div>
+              </div>
             </div>
           </div>
 
@@ -280,6 +315,10 @@ let avgHist=[],countHist=[],mapOn=false,lastMetrics=null;
 let linePts=[],insidePt=null;     // in/out counting setup
 let arrowPts=[];                  // alignment reference (tail->head), opt-in
 const cv=$("canvas"),ctx=cv.getContext("2d");
+// --- 지도 정합(map registration) 상태 ---
+let mapImg=null, mapScale=1, cctvPts=[], mapPts=[], scalePts=[], alignMapPts=[], nPts=10, mapStep='cctv';
+let countLinePts=[], countInsidePt=null;   // 지도 모드 in/out 통과선(선택), CCTV 좌표
+const mapCv=$("mapCv");
 
 // clock
 setInterval(()=>{ const d=new Date(); $("clock").textContent=d.toTimeString().slice(0,8); },1000);
@@ -299,6 +338,9 @@ $("changeSrc").onclick=()=>{ stopJob(jobId); resetAll(); show("scrUpload"); };
 function resetAll(){
   clearInterval(pollTimer); clearInterval(replayTimer); replayArr=null;
   roiPts=[]; calPts=[]; arrowPts=[]; avgHist=[]; countHist=[]; jobId=null; isLive=false; setMode('roi'); $("setupInfo").textContent="";
+  mapImg=null; cctvPts=[]; mapPts=[]; scalePts=[]; alignMapPts=[]; countLinePts=[]; countInsidePt=null; mapStep='cctv'; $("mapSetup").classList.add("hidden");
+  if(mapCv){ mapCv.width=0; mapCv.height=0; }            // 옛 지도 잔상 제거
+  const _mf=$("mapFile"); if(_mf) _mf.value=""; if($("mapInfo")) $("mapInfo").textContent="";
   $("depthPanel").classList.add("hidden"); $("stopBtn").style.display="none"; $("dlBtn").style.display="none";
   mapOn=false; lastMetrics=null; setView();
   linePts=[]; insidePt=null; const sp=document.querySelector('input[name=amode][value=basic]'); if(sp){ sp.checked=true; applyAmode(); }
@@ -310,6 +352,7 @@ function applyAmode(){
   $("speedSetup").classList.toggle("hidden", a!=="speed");
   $("countSetup").classList.toggle("hidden", a!=="count");
   roiPts=[]; calPts=[]; arrowPts=[]; linePts=[]; insidePt=null;
+  cctvPts=[]; mapPts=[]; scalePts=[]; alignMapPts=[]; countLinePts=[]; countInsidePt=null; if(a!=="speed") $("mapSetup").classList.add("hidden");
   $("depthPanel").classList.add("hidden");
   if(a==="speed") setMode('roi');
   if(img.complete) draw(); countInfo();
@@ -343,10 +386,12 @@ function drawMap(m){
   const pad=24, s=Math.min((W-2*pad)/bw,(H-2*pad)/bh);
   const ox=(W-bw*s)/2-bx0*s, oy=(H-bh*s)/2-by0*s;
   const TX=x=>ox+x*s, TY=y=>oy+y*s;
-  // bounds rect + light grid (every ~1 unit)
+  // 지도 정합 모드: 업로드한 지도 이미지를 배경으로
+  if(m.map_image && mapImg){ ctx.drawImage(mapImg, TX(bx0),TY(by0), bw*s, bh*s); }
+  // bounds rect + label
   ctx.strokeStyle="#d0d7de"; ctx.lineWidth=1; ctx.strokeRect(TX(bx0),TY(by0),bw*s,bh*s);
   ctx.fillStyle="#8b949e"; ctx.font="11px sans-serif";
-  ctx.fillText(m.map_metric?"top-down (m)":"image plane (보정 시 미터)",TX(bx0)+4,TY(by0)+14);
+  ctx.fillText(m.map_image?"uploaded map":(m.map_metric?"top-down (m)":"image plane (보정 시 미터)"),TX(bx0)+4,TY(by0)+14);
   // objects: dot (ID color) + direction arrow (alignment color when active)
   const hasA=!!m.has_align;
   objs.forEach(o=>{
@@ -428,7 +473,12 @@ function setupCanvas(){ const maxW=Math.min(900,window.innerWidth-120);
 function setMode(m){ mode=m; $("mRoi").classList.toggle("on",m==='roi'); $("mCal").classList.toggle("on",m==='cal'); $("mArr").classList.toggle("on",m==='arr'); }
 $("mRoi").onclick=()=>setMode('roi'); $("mCal").onclick=()=>setMode('cal'); $("mArr").onclick=()=>setMode('arr');
 $("clr").onclick=()=>{ if(mode==='roi')roiPts=[]; else if(mode==='cal')calPts=[]; else arrowPts=[]; draw(); info(); };
-cv.onclick=e=>{ const rc=cv.getBoundingClientRect(),x=e.clientX-rc.left,y=e.clientY-rc.top;
+cv.onclick=e=>{ const rc=cv.getBoundingClientRect(),x=(e.clientX-rc.left)*(cv.width/rc.width),y=(e.clientY-rc.top)*(cv.height/rc.height);
+  if(curAmode()==="speed" && curMode()==="map"){          // 지도 정합 (CCTV 측 클릭)
+    if(mapStep==='cctv' && cctvPts.length<nPts){ cctvPts.push({x,y}); }
+    else if(mapStep==='count'){ if(countLinePts.length<2) countLinePts.push({x,y}); else if(!countInsidePt) countInsidePt={x,y}; }
+    draw(); mapRegInfo(); return;
+  }
   if(curAmode()==="count"){
     if(linePts.length<2) linePts.push({x,y}); else if(!insidePt) insidePt={x,y};
     draw(); countInfo(); return;
@@ -438,6 +488,15 @@ cv.onclick=e=>{ const rc=cv.getBoundingClientRect(),x=e.clientX-rc.left,y=e.clie
   else { if(arrowPts.length<2)arrowPts.push({x,y}); }
   draw(); info(); };
 function draw(){ ctx.clearRect(0,0,cv.width,cv.height); if(img.complete)ctx.drawImage(img,0,0,cv.width,cv.height);
+  if(curAmode()==="speed" && curMode()==="map"){
+    drawNumbered(ctx, cctvPts, "#30DCFB");
+    if(countLinePts.length){ ctx.strokeStyle="#FFC800"; ctx.fillStyle="#FFC800"; ctx.lineWidth=3; ctx.beginPath();
+      countLinePts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
+      countLinePts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,5,0,7);ctx.fill();}); }
+    if(countInsidePt){ ctx.fillStyle="#3FB950"; ctx.beginPath(); ctx.arc(countInsidePt.x,countInsidePt.y,7,0,7); ctx.fill();
+      ctx.font="13px sans-serif"; ctx.fillText("안쪽(IN)",countInsidePt.x+10,countInsidePt.y+4); }
+    return;
+  }
   if(curAmode()==="count"){
     if(linePts.length){ ctx.strokeStyle="#FFC800"; ctx.fillStyle="#FFC800"; ctx.lineWidth=3; ctx.beginPath();
       linePts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
@@ -473,9 +532,74 @@ document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener("cha
   $("lineInputs").classList.toggle("hidden", m!=="line");
   $("homoInputs").classList.toggle("hidden", m!=="homography");
   if(m!=="depth") $("depthPanel").classList.add("hidden");
+  $("mapSetup").classList.toggle("hidden", m!=="map");
   $("go").textContent = (m==="depth") ? "깊이 분석 →" : "측정 시작 →";
   if(m==="line") setMode('cal'); else if(m==="homography") setMode('roi');
+  if(m==="map"){ setMapStep('cctv'); if(mapImg) fitMapCanvas(); }
+  draw();
 }));
+
+// ---- 지도 정합 (map registration) ----
+function drawNumbered(c, pts, color){
+  if(!pts.length) return;
+  c.strokeStyle=color; c.lineWidth=2; c.beginPath();
+  pts.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y));
+  if(pts.length>=3) c.closePath(); c.stroke();
+  c.font="bold 12px sans-serif";
+  pts.forEach((p,i)=>{ c.fillStyle=color; c.beginPath(); c.arc(p.x,p.y,4,0,7); c.fill();
+    c.fillStyle="#111"; c.fillText(i+1, p.x+6, p.y-6); });
+}
+function fitMapCanvas(){
+  if(!mapImg) return;
+  const maxW=Math.min(520, (window.innerWidth||1000)*0.45);
+  mapScale=Math.min(maxW/mapImg.naturalWidth, 1);
+  mapCv.width=Math.round(mapImg.naturalWidth*mapScale);
+  mapCv.height=Math.round(mapImg.naturalHeight*mapScale);
+  drawMapSetup();
+}
+function drawMapSetup(){
+  if(!mapImg) return;
+  const c=mapCv.getContext("2d"); c.clearRect(0,0,mapCv.width,mapCv.height);
+  c.drawImage(mapImg,0,0,mapCv.width,mapCv.height);
+  drawNumbered(c, mapPts, "#30DCFB");                       // 정합점 폴리곤
+  if(scalePts.length){ c.strokeStyle="#FF4A44"; c.fillStyle="#FF4A44"; c.lineWidth=2; c.beginPath();
+    scalePts.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y)); c.stroke();
+    scalePts.forEach(p=>{c.beginPath();c.arc(p.x,p.y,4,0,7);c.fill();}); }
+  if(alignMapPts.length){ c.strokeStyle="#2E90FA"; c.fillStyle="#2E90FA"; c.lineWidth=3; c.beginPath();
+    alignMapPts.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y)); c.stroke();
+    if(alignMapPts.length===2){ const a=alignMapPts[0],b=alignMapPts[1],ang=Math.atan2(b.y-a.y,b.x-a.x),hl=14;
+      c.beginPath(); c.moveTo(b.x,b.y);
+      c.lineTo(b.x-hl*Math.cos(ang-0.4),b.y-hl*Math.sin(ang-0.4));
+      c.lineTo(b.x-hl*Math.cos(ang+0.4),b.y-hl*Math.sin(ang+0.4)); c.closePath(); c.fill(); } }
+}
+function mapRegInfo(){
+  if(!(curAmode()==="speed"&&curMode()==="map")) return;
+  let s=`CCTV ${cctvPts.length}/${nPts} · 지도 ${mapPts.length}/${nPts} · 축척 ${scalePts.length}/2 · 정렬 ${alignMapPts.length}/2 · 통과선 ${countLinePts.length}/2${countInsidePt?'+안쪽':''}`;
+  if(!mapImg) s="지도 이미지 업로드 필요 · "+s;
+  $("mapInfo").textContent="· "+s;
+}
+function setMapStep(s){ mapStep=s;
+  [["mStepCctv","cctv"],["mStepMap","map"],["mStepScale","scale"],["mStepAlign","align"],["mStepCount","count"]]
+    .forEach(([id,v])=>$(id).classList.toggle("on", v===s));
+  mapRegInfo();
+}
+$("mStepCctv").onclick=()=>setMapStep('cctv');
+$("mStepMap").onclick=()=>setMapStep('map');
+$("mStepScale").onclick=()=>setMapStep('scale');
+$("mStepAlign").onclick=()=>setMapStep('align');
+$("mStepCount").onclick=()=>setMapStep('count');
+$("mClr").onclick=()=>{ if(mapStep==='cctv')cctvPts=[]; else if(mapStep==='map')mapPts=[];
+  else if(mapStep==='scale')scalePts=[]; else if(mapStep==='align')alignMapPts=[];
+  else { countLinePts=[]; countInsidePt=null; } draw(); drawMapSetup(); mapRegInfo(); };
+$("nPts").addEventListener("change",()=>{ nPts=Math.max(4,parseInt($("nPts").value)||10);
+  cctvPts=[]; mapPts=[]; draw(); drawMapSetup(); mapRegInfo(); });
+$("mapFile").addEventListener("change",e=>{ const f=e.target.files[0]; if(!f)return;
+  const im=new Image(); im.onload=()=>{ mapImg=im; fitMapCanvas(); mapRegInfo(); }; im.src=URL.createObjectURL(f); });
+mapCv.onclick=e=>{ if(!mapImg)return; const rc=mapCv.getBoundingClientRect(),x=(e.clientX-rc.left)*(mapCv.width/rc.width),y=(e.clientY-rc.top)*(mapCv.height/rc.height);
+  if(mapStep==='map'){ if(mapPts.length<nPts)mapPts.push({x,y}); }
+  else if(mapStep==='scale'){ if(scalePts.length<2)scalePts.push({x,y}); }
+  else if(mapStep==='align'){ if(alignMapPts.length<2)alignMapPts.push({x,y}); }
+  drawMapSetup(); mapRegInfo(); };
 
 function roiBody(){ return roiPts.length===4 ? roiPts.map(p=>[p.x/scale,p.y/scale]) : null; }
 function alignBody(){ return arrowPts.length===2 ? arrowPts.map(p=>[p.x/scale,p.y/scale]) : null; }
@@ -497,6 +621,22 @@ $("go").onclick=async()=>{
                       inside: [insidePt.x/scale, insidePt.y/scale],
                       segment: $("cSeg").checked }});
     return;
+  }
+  if(curMode()==="map"){                        // 지도 정합
+    if(!mapImg){ $("mapInfo").textContent="· 지도 이미지를 업로드하세요"; return; }
+    if(cctvPts.length!==nPts||mapPts.length!==nPts){ $("mapInfo").textContent=`· CCTV/지도 각 ${nPts}점을 찍으세요`; return; }
+    if(scalePts.length!==2){ $("mapInfo").textContent="· ③ 지도에 축척 2점을 찍으세요"; return; }
+    const sm=parseFloat($("scaleM").value); if(!(sm>0)){ $("mapInfo").textContent="· 실거리(m)를 입력하세요"; return; }
+    const spx=Math.hypot((scalePts[1].x-scalePts[0].x)/mapScale,(scalePts[1].y-scalePts[0].y)/mapScale);
+    const b={ mode:"map",
+      cctv_pts: cctvPts.map(p=>[p.x/scale,p.y/scale]),
+      map_pts: mapPts.map(p=>[p.x/mapScale,p.y/mapScale]),
+      map_w: mapImg.naturalWidth, map_h: mapImg.naturalHeight, scale_px: spx, scale_m: sm };
+    if(alignMapPts.length===2) b.align_vec_map = alignMapPts.map(p=>[p.x/mapScale,p.y/mapScale]);
+    if(countLinePts.length===2 && countInsidePt)  // in/out 통과선(선택), CCTV 좌표
+      b.count_addon={ line: countLinePts.map(p=>[p.x/scale,p.y/scale]),
+                      inside:[countInsidePt.x/scale, countInsidePt.y/scale], segment:true };
+    startJob(b); return;                         // mapImg는 화면3 맵 배경으로 그대로 사용
   }
   const m=curMode(); const body={mode:m}; const roi=roiBody(); if(roi) body.roi=roi;
   const av=alignBody(); if(av) body.align_vec=av;          // alignment (opt-in)
@@ -590,6 +730,10 @@ function renderDash(m){
   if(hasA){ const av=m.avg_align, ae=$("mAlign");
     ae.textContent=(av==null)?"—":((av>=0?"+":"")+av.toFixed(2));
     ae.style.color=(av==null)?"var(--text-2)":(av>0.4?"#3FB950":av<-0.2?"#FF4A44":"#FFA62B"); }
+  // in/out 통과선 애드온 (opt-in: 통과선 그렸을 때만)
+  const hasC=!!m.count_addon; $("countAddon").style.display=hasC?"":"none";
+  if(hasC){ $("mIn").textContent=m.in??0; $("mOut").textContent=m.out??0;
+    const oe=$("mOcc"); oe.textContent=m.occupancy??0; oe.style.color=m.count_alert?"#FF4A44":"var(--text-1)"; }
   // level pill
   const lv=m.level||"—", cls=lv==="High"?"pill-high":lv==="Low"?"pill-low":"pill-normal";
   for(const id of ["mLevel","mLevel2"]){ const e=$(id); e.className="pill "+cls; if(id==="mLevel")e.style.padding="1px 7px";

@@ -92,8 +92,8 @@ button { font-family: inherit; }
 .fld input::placeholder { color: var(--text-placeholder); font-family: var(--font-sans); }
 .samples { margin-top: 26px; }
 .samples .lbl { font: var(--caption-12); color: var(--text-3); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 10px; }
-.samplerow { display: flex; gap: 10px; }
-.samplecard { flex: 1; display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: var(--r-lg); background: var(--bg-2); border: 1px solid var(--stroke-2); cursor: pointer; text-align: left; transition: border-color var(--dur-fast), background var(--dur-fast); }
+.samplerow { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.samplecard { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: var(--r-lg); background: var(--bg-2); border: 1px solid var(--stroke-2); cursor: pointer; text-align: left; transition: border-color var(--dur-fast), background var(--dur-fast); }
 .samplecard:hover { border-color: var(--stroke-4); background: var(--bg-3); }
 .samplecard .th { width: 46px; height: 32px; border-radius: 6px; flex: none; background: linear-gradient(118deg,#141821 0 8px,#10131a 8px 16px); border: 1px solid var(--stroke-2); position: relative; overflow: hidden; }
 .samplecard .th .b { position: absolute; border: 1.4px solid var(--pia-cyan); border-radius: 2px; }

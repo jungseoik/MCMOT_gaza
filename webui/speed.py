@@ -22,6 +22,7 @@ from webui import draw_utils as du
 class SpeedEstimator:
     def __init__(self, fps, pixels_per_meter=None, homography=None, roi=None,
                  frame_size=None, world_area_m2=None, reference_vec=None,
+                 units_per_px=1.0, reference_vec_is_world=False, map_size=None,
                  window_sec=1.0, min_move_px=2.0):
         self.fps = float(fps) if fps else 25.0
         self.ppm = pixels_per_meter            # px per meter (linear mode)
@@ -31,6 +32,10 @@ class SpeedEstimator:
                     if roi else None)          # (4,2) polygon
         self.fw, self.fh = frame_size or (0, 0)
         self.world_area_m2 = world_area_m2     # ROI real area (homography mode)
+        # map-registration mode: H outputs MAP pixels (not meters); multiply by
+        # units_per_px (m/px) for real distance, and the map view = full map image.
+        self.units_per_px = float(units_per_px)
+        self.map_size = map_size               # (W,H) of map image, or None
         self.window_sec = window_sec           # sliding window length in SECONDS
         self.min_move_px = min_move_px
         self.metric = (self.H is not None) or (self.ppm is not None)
@@ -53,9 +58,10 @@ class SpeedEstimator:
         self.ref_dir = None                    # unit dir in the SAME space as _obj_map
         if reference_vec is not None:
             (tx, ty), (hx, hy) = reference_vec
-            if self.H is not None:             # match object-direction space
+            if self.H is not None and not reference_vec_is_world:  # image -> output
                 tx, ty = self._world(tx, ty)
                 hx, hy = self._world(hx, hy)
+            # reference_vec_is_world: arrow already drawn in output(map) space -> as-is
             dx, dy = hx - tx, hy - ty
             L = (dx * dx + dy * dy) ** 0.5
             if L > 1e-6:
@@ -92,10 +98,10 @@ class SpeedEstimator:
         px_dist = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
         if dt <= 0 or px_dist < self.min_move_px:
             return 0.0
-        if self.H is not None:                  # ground meters
+        if self.H is not None:                  # output units -> meters (×units_per_px)
             wx0, wy0 = self._world(x0, y0)
             wx1, wy1 = self._world(x1, y1)
-            m = ((wx1 - wx0) ** 2 + (wy1 - wy0) ** 2) ** 0.5
+            m = (((wx1 - wx0) ** 2 + (wy1 - wy0) ** 2) ** 0.5) * self.units_per_px
             return (m / dt) * 3.6                # m/s -> km/h
         if self.ppm:                            # global scale
             return ((px_dist / self.ppm) / dt) * 3.6
@@ -175,6 +181,8 @@ class SpeedEstimator:
     def _map_bounds(self):
         """[x0,y0,x1,y1] for the map view. ROI(+H) -> stable rect; whole-frame
         depth -> None (client auto-fits); no calibration -> image pixel space."""
+        if self.map_size is not None:           # map mode: full uploaded-map extent
+            return [0.0, 0.0, float(self.map_size[0]), float(self.map_size[1])]
         if self.H is not None and self.roi is not None:
             pts = self.roi.astype(np.float32).reshape(-1, 1, 2)
             w = cv2.perspectiveTransform(pts, self.H).reshape(-1, 2)
@@ -240,6 +248,7 @@ class SpeedEstimator:
             "avg_dwell": round(sum(dvals) / len(dvals), 1) if dvals else 0.0,
             "max_dwell": round(max(dvals), 1) if dvals else 0.0,
             "map_metric": self.H is not None,     # true top-down vs image-space
+            "map_image": self.map_size is not None,  # map view = uploaded image bg
             "map_bounds": self._map_bounds(),
             "has_align": self.has_align,          # alignment opt-in (arrow drawn)
             "avg_align": avg_align,               # zone mean cosine (moving only)

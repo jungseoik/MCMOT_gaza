@@ -88,7 +88,14 @@ class Job:
         self.homography: list | None = None    # 3x3, image foot -> ground meters
         self.world_area_m2: float | None = None
         # alignment (opt-in): recommended evacuation direction the user drew
-        self.align_vec: list | None = None      # [[tx,ty],[hx,hy]] image px
+        self.align_vec: list | None = None      # [[tx,ty],[hx,hy]] image px (or map px)
+        self.align_is_world = False              # align_vec given in output(map) space
+        # map registration (지도 정합): H outputs map px, scale gives m/px
+        self.units_per_px: float = 1.0           # meters per output unit (map: m/px)
+        self.map_size: list | None = None        # [W,H] of uploaded map image
+        # in/out line counter add-on (opt-in, runs alongside speed/map)
+        self.count_addon = False
+        self._counter = None                     # LineCounter instance (set in worker)
         # basic visualization (download-only mode): ID+box, H.264 result
         self.basic = False
         # in/out line counting
@@ -137,10 +144,17 @@ def _make_analyzer(job, item):
     if job.counting:
         return LineCounter(job.count_line, job.count_inside,
                            segment_only=job.count_segment)
+    # speed/map mode — optional in/out line counter add-on (runs alongside)
+    job._counter = (LineCounter(job.count_line, job.count_inside,
+                                segment_only=job.count_segment)
+                    if job.count_addon and job.count_line and job.count_inside else None)
     return SpeedEstimator(job.fps or 25.0, pixels_per_meter=job.ppm,
                           homography=job.homography, roi=job.roi,
                           world_area_m2=job.world_area_m2,
                           reference_vec=job.align_vec,
+                          units_per_px=job.units_per_px,
+                          reference_vec_is_world=job.align_is_world,
+                          map_size=job.map_size,
                           frame_size=(item["width"], item["height"]))
 
 
@@ -153,8 +167,16 @@ def _process(analyzer, job, item, t_sec):
         analyzer.update(item["targets"])
         return analyzer.draw(item["frame"], item["targets"]), analyzer.metrics()
     present = analyzer.update(t_sec, item["targets"])
-    return (annotate(item["frame"], item["targets"], present, analyzer),
-            analyzer.metrics(present))
+    frame = annotate(item["frame"], item["targets"], present, analyzer)
+    m = analyzer.metrics(present)
+    if getattr(job, "_counter", None) is not None:   # in/out add-on (opt-in)
+        job._counter.update(item["targets"])
+        cm = job._counter.metrics()
+        m["count_addon"] = True
+        m["in"], m["out"], m["occupancy"] = cm["in"], cm["out"], cm["occupancy"]
+        m["count_alert"] = cm["alert"]
+        job._counter.draw_line(frame)                # overlay line on annotated frame
+    return frame, m
 
 
 def _transcode_h264(path):
@@ -410,11 +432,46 @@ def start(job_id: str, body: dict = Body(default={})):
             H = cv2.getPerspectiveTransform(img, world)
             job.homography = H.tolist()
             job.world_area_m2 = rw * rh
+    elif mode == "map":
+        # 지도 정합: CCTV N점 ↔ 지도 N점 대응 → 호모그래피(CCTV px → 지도 px).
+        # 지도 이미지는 클라이언트가 보관·렌더하므로 서버엔 점·축척만 온다.
+        import numpy as np
+        cctv = body.get("cctv_pts") or []        # N점, 원본 CCTV px (= ROI 폴리곤)
+        mpts = body.get("map_pts") or []         # N점, 지도 px (같은 순서)
+        if len(cctv) >= 4 and len(cctv) == len(mpts):
+            job.roi = cctv                        # N각형 그대로 ROI로 사용
+            H = cv2.findHomography(np.array(cctv, np.float32),
+                                   np.array(mpts, np.float32))[0]
+            job.homography = H.tolist()
+            mw, mh = float(body.get("map_w", 0)), float(body.get("map_h", 0))
+            if mw > 0 and mh > 0:
+                job.map_size = [mw, mh]
+            # 축척 A: 지도 위 2점 픽셀거리 + 실거리(m) → m/px
+            sp, sm = body.get("scale_px"), body.get("scale_m")
+            if sp and sm and float(sp) > 0:
+                job.units_per_px = float(sm) / float(sp)
+            # 밀도 면적: CCTV ROI → 지도 px 폴리곤 → m²
+            roi_map = cv2.perspectiveTransform(np.array([cctv], np.float32), H)[0]
+            area_px = abs(float(cv2.contourArea(roi_map.astype(np.float32))))
+            if area_px > 0 and job.units_per_px:
+                job.world_area_m2 = area_px * (job.units_per_px ** 2)
+            # 정렬도(선택): 지도 위에 그린 기준벡터 → 출력(지도) 좌표계
+            amap = body.get("align_vec_map")
+            if amap and len(amap) == 2:
+                job.align_vec = amap
+                job.align_is_world = True
+            # in/out 통과선(선택): CCTV 좌표의 선 2점 + 안쪽 1점 (애드온, 별도 키)
+            ca = body.get("count_addon")
+            if ca and ca.get("line") and ca.get("inside"):
+                job.count_line = ca["line"]
+                job.count_inside = ca["inside"]
+                job.count_segment = bool(ca.get("segment", True))
+                job.count_addon = True
     # mode == "depth": homography was already built by /prepare_depth and stored
     # on the job; nothing to do here. If prepare wasn't run, falls back to px/s.
 
     av = body.get("align_vec")                  # opt-in: [[tx,ty],[hx,hy]] image px
-    if av and len(av) == 2:
+    if av and len(av) == 2 and not job.align_vec:
         job.align_vec = av
 
     _stop_others(keep_id=job_id)   # free the model lock from any old live job
