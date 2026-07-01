@@ -24,16 +24,21 @@ cad/
 ## CAD 변환 재현 (DWG → DXF → PNG)
 
 도면 변환·척도 PNG 생성은 **재현 가능한 스크립트 + 스킬**로 관리한다.
-설치 절차와 상세는 **`.claude/skills/cad-convert/SKILL.md`** 참조.
+설치·백엔드·상세는 **`.claude/skills/cad-convert/SKILL.md`** 참조.
 
 ```bash
 PY=~/miniconda3/envs/boosttrack/bin/python
-# DWG → DXF (ODAFileConverter를 xvfb 헤드리스로)
+# (새 서버) 설치 — OSS libredwg 자동 / ODA는 .deb 주입(선택)
+bash tools/setup_cad_convert.sh                                   # OSS만
+# ODA_DEB=/path/ODAFileConverter_*.deb bash tools/setup_cad_convert.sh   # +ODA
+
+# DWG → DXF (엔진 auto: ODA 있으면 ODA, 없으면 libredwg)
 $PY tools/cad_convert.py dwg2dxf --in cad/17F.dwg --out cad/
-# DXF → 깨끗한 도면 + 미터 척도 PNG
+# DXF → 깨끗한 도면 + 미터 척도 PNG (단위 자동감지, 블록 전개)
 $PY tools/cad_convert.py dxf2png --dxf cad/17F.dxf --out-prefix cad/17F_plan
 ```
-- **DWG↔DXF**: `ODAFileConverter`(시스템 설치, GUI라 `xvfb-run`으로 실행).
+- **DWG→DXF 백엔드**: `libredwg`(오픈소스, apt 자동설치) 기본, `ODAFileConverter`
+  (독점 프리웨어, .deb 외부 주입 — 정합도 최상, 이 머신엔 이미 설치됨) 선택.
 - **DXF→PNG**: `ezdxf`(파싱) + `matplotlib`(렌더). `17F_plan.png`/`_scale.png` 산출.
 
 ## synth/ — 합성영상 모듈 구조
