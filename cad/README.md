@@ -21,6 +21,21 @@ cad/
 > **주의**: `17F.dxf`(18MB)는 용량 때문에 git에서 제외돼 있다. `synth/`를 돌리려면
 > 이 파일이 `cad/`에 있어야 한다(로컬 보관, 또는 필요 시 Git LFS로 별도 관리).
 
+## CAD 변환 재현 (DWG → DXF → PNG)
+
+도면 변환·척도 PNG 생성은 **재현 가능한 스크립트 + 스킬**로 관리한다.
+설치 절차와 상세는 **`.claude/skills/cad-convert/SKILL.md`** 참조.
+
+```bash
+PY=~/miniconda3/envs/boosttrack/bin/python
+# DWG → DXF (ODAFileConverter를 xvfb 헤드리스로)
+$PY tools/cad_convert.py dwg2dxf --in cad/17F.dwg --out cad/
+# DXF → 깨끗한 도면 + 미터 척도 PNG
+$PY tools/cad_convert.py dxf2png --dxf cad/17F.dxf --out-prefix cad/17F_plan
+```
+- **DWG↔DXF**: `ODAFileConverter`(시스템 설치, GUI라 `xvfb-run`으로 실행).
+- **DXF→PNG**: `ezdxf`(파싱) + `matplotlib`(렌더). `17F_plan.png`/`_scale.png` 산출.
+
 ## synth/ — 합성영상 모듈 구조
 
 ```
