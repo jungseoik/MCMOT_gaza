@@ -22,16 +22,36 @@ SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 echo "== [1/3] 파이썬 렌더 의존성 =="
 "$PYTHON" -m pip install --quiet --upgrade ezdxf matplotlib && echo "  ezdxf/matplotlib OK"
 
-echo "== [2/3] OSS 백엔드(libredwg) + 폰트 + (ODA용 xvfb/xcb) =="
+echo "== [2/3] 시스템 의존성(폰트 + ODA용 xvfb/xcb + 빌드도구) =="
 if command -v apt-get >/dev/null 2>&1; then
   $SUDO apt-get update -y
   $SUDO apt-get install -y \
-    libredwg-tools \
     fonts-noto-cjk \
-    xvfb libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 || \
+    xvfb libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 \
+    git gcc make autoconf automake libtool pkg-config texinfo || \
     echo "  [warn] 일부 패키지 설치 실패 — 배포판 패키지명 확인"
 else
-  echo "  [warn] apt-get 없음 — libredwg를 배포판 방식으로 설치하라(예: dnf install libredwg)"
+  echo "  [warn] apt-get 없음 — 위 의존성을 배포판 방식으로 설치하라"
+fi
+
+echo "== [2.5/3] OSS 변환 백엔드 libredwg(dwg2dxf) =="
+if command -v dwg2dxf >/dev/null 2>&1; then
+  echo "  이미 있음: $(command -v dwg2dxf)"
+elif command -v apt-get >/dev/null 2>&1 && apt-cache show libredwg-tools >/dev/null 2>&1; then
+  echo "  apt로 설치(libredwg-tools 제공 배포판: Debian/일부 Ubuntu)"
+  $SUDO apt-get install -y libredwg-tools
+else
+  # Ubuntu 24.04(noble) 등 apt에 없는 배포판 → 소스 빌드
+  echo "  apt에 libredwg 없음 → 소스 빌드(GitHub). 수 분 소요."
+  BUILD="${LIBREDWG_SRC:-/tmp/libredwg-build}"
+  rm -rf "$BUILD"
+  if git clone --depth 1 https://github.com/LibreDWG/libredwg.git "$BUILD"; then
+    ( cd "$BUILD" && sh autogen.sh && ./configure --disable-bindings --disable-shared \
+        && make -j"$(nproc)" && $SUDO make install ) \
+      && $SUDO ldconfig 2>/dev/null || echo "  [warn] libredwg 빌드 실패 — ODA를 대신 쓰라"
+  else
+    echo "  [warn] GitHub 접근 불가 — libredwg 생략(ODA 사용)"
+  fi
 fi
 
 echo "== [3/3] ODA File Converter (선택, 독점 프리웨어) =="

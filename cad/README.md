@@ -37,8 +37,9 @@ $PY tools/cad_convert.py dwg2dxf --in cad/17F.dwg --out cad/
 # DXF → 깨끗한 도면 + 미터 척도 PNG (단위 자동감지, 블록 전개)
 $PY tools/cad_convert.py dxf2png --dxf cad/17F.dxf --out-prefix cad/17F_plan
 ```
-- **DWG→DXF 백엔드**: `libredwg`(오픈소스, apt 자동설치) 기본, `ODAFileConverter`
-  (독점 프리웨어, .deb 외부 주입 — 정합도 최상, 이 머신엔 이미 설치됨) 선택.
+- **DWG→DXF 백엔드**: `libredwg`(오픈소스; Debian은 apt, Ubuntu 24.04는 setup 스크립트가
+  소스빌드) / `ODAFileConverter`(독점 프리웨어, `.deb`를 `dpkg -i`로 외부 주입 — 정합도
+  최상, 이 머신엔 이미 그렇게 설치됨). `--engine auto`가 상황에 맞게 선택.
 - **DXF→PNG**: `ezdxf`(파싱) + `matplotlib`(렌더). `17F_plan.png`/`_scale.png` 산출.
 
 ## synth/ — 합성영상 모듈 구조

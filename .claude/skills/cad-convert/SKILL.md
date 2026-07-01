@@ -15,15 +15,19 @@ AutoCAD `.dwg`를 열 수 있는 `.dxf`로 변환하고, 그 도면을 (1)깨끗
 (2)미터 척도·격자·스케일바가 붙은 PNG로 렌더한다. 정합(호모그래피)·합성영상
 (`cad/synth/`)이 모두 이 좌표계를 공유한다. **아래 커밋된 스크립트를 쓸 것.**
 
-## 변환 백엔드 2가지 (오픈소스 기본 + ODA 선택)
+## 변환 백엔드 2가지 (오픈소스 + ODA)
 | 엔진 | 라이선스 | 설치 | 정합도 | 비고 |
 |------|----------|------|--------|------|
-| **libredwg** (`dwg2dxf`) | 오픈소스(GPL) | **apt 자동** | 보통 | 주입 불필요, 새 서버 기본값 |
-| **ODAFileConverter** | 독점 프리웨어 | **수동 .deb 주입** | 최상 | 최신 DWG(2018+) 안정, xvfb 필요 |
+| **libredwg** (`dwg2dxf`) | 오픈소스(GPL) | apt(있는 배포판) / **소스빌드**(Ubuntu 24.04) | 보통 | 주입 불필요 |
+| **ODAFileConverter** | 독점 프리웨어 | **수동 .deb 주입**(`dpkg -i`) | 최상 | 최신 DWG 안정, xvfb 필요 |
 
 > **ODA는 오픈소스가 아니다.** 무료지만 EULA상 재배포 금지 → 레포에 못 담고,
 > [opendesign.com](https://www.opendesign.com/guestfiles/oda_file_converter)에서
-> 직접 받아 **외부에서 주입**해야 한다. `cad/ODATrial.tar.gz`는 SDK라 변환기와 무관.
+> 직접 받아 **외부 주입**(`sudo dpkg -i ODAFileConverter_*.deb`)해야 한다. 이 머신도
+> 그렇게 설치됨(dpkg -i, apt 아님). `cad/ODATrial.tar.gz`는 SDK라 변환기와 무관.
+>
+> **libredwg는 Ubuntu 24.04(noble) apt엔 없다** → `setup_cad_convert.sh`가 GitHub에서
+> 소스 빌드한다(수 분, 검증됨: dwg2dxf 0.14로 17F.dwg 변환 확인). Debian 등은 apt로 설치.
 > `dwg2dxf`(변환기 CLI)는 `--engine auto`가 ODA 있으면 ODA, 없으면 libredwg를 쓴다.
 
 ## 새 서버에서 처음부터 (설치 → 변환)
