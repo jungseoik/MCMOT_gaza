@@ -66,21 +66,27 @@ class KalmanBoxTracker(object):
 
     count = 0
 
-    def __init__(self, bbox, emb: Optional[np.ndarray] = None):
+    def __init__(self, bbox, emb: Optional[np.ndarray] = None, new_id: Optional[int] = None):
         """
         Kalman 필터를 사용하여 객체를 추적하는 클래스 초기화
 
         Args:
             bbox (np.ndarray): 초기 바운딩 박스
             emb (np.ndarray, optional): 객체의 임베딩 벡터
+            new_id (int, optional): 트랙 ID 명시 지정 — 멀티카메라에서 BoostTrack
+                인스턴스별 독립 ID 공간을 쓸 때 전달. None이면 기존과 동일하게
+                클래스(전역) 카운터 사용 (단일영상 경로 하위호환).
         """
 
         self.bbox_to_z_func = convert_bbox_to_z
         self.x_to_bbox_func = convert_x_to_bbox
 
         self.time_since_update = 0
-        self.id = KalmanBoxTracker.count
-        KalmanBoxTracker.count += 1
+        if new_id is None:
+            self.id = KalmanBoxTracker.count
+            KalmanBoxTracker.count += 1
+        else:
+            self.id = new_id
 
         self.kf = KalmanFilter(self.bbox_to_z_func(bbox))
         self.emb = emb
@@ -145,18 +151,28 @@ class BoostTrack(object):
     """
     BoostTrack 객체 추적 클래스
     """
-    def __init__(self, video_name: Optional[str] = None):
+    def __init__(self, video_name: Optional[str] = None,
+                 per_instance_ids: bool = False,
+                 max_age: Optional[int] = None):
         """
         BoostTrack 객체를 초기화
 
         Args:
             video_name (str, optional): 추적할 비디오 파일 이름
+            per_instance_ids (bool): True면 트랙 ID를 이 인스턴스 내부 카운터로
+                발급 — 멀티카메라에서 카메라별 트래커 인스턴스의 ID 공간을
+                격리한다. False(기본)면 기존 KalmanBoxTracker.count(전역) 사용.
+            max_age (int, optional): 최대 추적 유지 프레임 수 직접 지정 —
+                저fps 입력(예: 5fps) 시간 환산용. None이면 기존 규칙.
         """
 
         self.frame_count = 0 # 처리된 프레임 수
         self.trackers: List[KalmanBoxTracker] = [] # 활성화된 추적기 리스트
 
-        self.max_age = GeneralSettings.max_age(video_name) # 최대 추적 유지 시간
+        self.per_instance_ids = per_instance_ids
+        self._id_count = 0  # per_instance_ids=True일 때 이 인스턴스의 다음 트랙 ID
+
+        self.max_age = max_age if max_age is not None else GeneralSettings.max_age(video_name) # 최대 추적 유지 시간
         self.iou_threshold = GeneralSettings['iou_threshold'] # IOU 임계값
         self.det_thresh = GeneralSettings['det_thresh'] # 탐지 신뢰도 임계값
         self.min_hits = GeneralSettings['min_hits'] # 트래커가 활성화되기 위한 최소 감지 횟수
@@ -286,7 +302,12 @@ class BoostTrack(object):
         # 매칭되지 않은 탐지 결과 중 신뢰도가 높은 경우 새로운 Kalman 필터 기반 트래커를 생성
         for i in unmatched_dets:
             if dets[i, 4] >= self.det_thresh:
-                self.trackers.append(KalmanBoxTracker(dets[i, :], emb=dets_embs[i]))
+                if self.per_instance_ids:
+                    new_id = self._id_count
+                    self._id_count += 1
+                else:
+                    new_id = None  # 기존 경로: KalmanBoxTracker.count(전역) 사용
+                self.trackers.append(KalmanBoxTracker(dets[i, :], emb=dets_embs[i], new_id=new_id))
 
         # trk.time_since_update > self.max_age: 일정 시간 이상 갱신되지 않은 객체 삭제
         # trk.hit_streak >= self.min_hits: 일정 횟수 이상 감지된 객체만 유지
