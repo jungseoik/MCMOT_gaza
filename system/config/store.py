@@ -1,0 +1,85 @@
+"""사이트/카메라 설정 영속화 — data/sites/<site_id>/ (요구사항 D-10).
+
+레이아웃:
+  data/sites/<site_id>/
+    site.json            # SiteConfig (맵·경로·구역·병목·출입구·임계값)
+    map.png              # 업로드된 맵 이미지 (site.json map.image가 가리킴)
+    cameras/<cam_id>.json  # CameraConfig
+
+원자적 쓰기(tmp→rename), 저장 시 site version 자동 증가.
+git으로 diff/버전 추적 가능한 순수 JSON.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from .schema import CameraConfig, SiteConfig
+
+_JSON_KW = dict(ensure_ascii=False, indent=2)
+
+
+class SiteStore:
+    def __init__(self, root: str | Path = "data/sites"):
+        self.root = Path(root)
+
+    # ------------------------------------------------------------ 경로
+    def site_dir(self, site_id: str) -> Path:
+        return self.root / site_id
+
+    def _site_json(self, site_id: str) -> Path:
+        return self.site_dir(site_id) / "site.json"
+
+    def _cam_json(self, site_id: str, cam_id: str) -> Path:
+        return self.site_dir(site_id) / "cameras" / f"{cam_id}.json"
+
+    @staticmethod
+    def _atomic_write(path: Path, data: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, **_JSON_KW), encoding="utf-8")
+        tmp.rename(path)
+
+    # ------------------------------------------------------------ 사이트
+    def list_sites(self) -> list[str]:
+        if not self.root.is_dir():
+            return []
+        return sorted(p.name for p in self.root.iterdir() if (p / "site.json").is_file())
+
+    def load_site(self, site_id: str) -> SiteConfig | None:
+        p = self._site_json(site_id)
+        if not p.is_file():
+            return None
+        return SiteConfig.model_validate_json(p.read_text(encoding="utf-8"))
+
+    def save_site(self, cfg: SiteConfig, bump_version: bool = True) -> SiteConfig:
+        if bump_version:
+            prev = self.load_site(cfg.site_id)
+            cfg.version = (prev.version if prev else 0) + 1
+        self._atomic_write(self._site_json(cfg.site_id), cfg.model_dump())
+        return cfg
+
+    # ------------------------------------------------------------ 카메라
+    def list_cameras(self, site_id: str) -> list[CameraConfig]:
+        d = self.site_dir(site_id) / "cameras"
+        if not d.is_dir():
+            return []
+        return [CameraConfig.model_validate_json(p.read_text(encoding="utf-8"))
+                for p in sorted(d.glob("*.json"))]
+
+    def load_camera(self, site_id: str, cam_id: str) -> CameraConfig | None:
+        p = self._cam_json(site_id, cam_id)
+        if not p.is_file():
+            return None
+        return CameraConfig.model_validate_json(p.read_text(encoding="utf-8"))
+
+    def save_camera(self, site_id: str, cam: CameraConfig) -> CameraConfig:
+        self._atomic_write(self._cam_json(site_id, cam.cam_id), cam.model_dump())
+        return cam
+
+    def delete_camera(self, site_id: str, cam_id: str) -> bool:
+        p = self._cam_json(site_id, cam_id)
+        if p.is_file():
+            p.unlink()
+            return True
+        return False
