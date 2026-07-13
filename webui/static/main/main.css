@@ -121,9 +121,10 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .modalbox img{ max-width:100%; border-radius:var(--r-md); display:block; }
 
 /* ---------------- 세션(4대 지표) 대시보드 카드 ---------------- */
-/* 세션 패널 표시 중에는 우측 패널을 넓혀 2열 정사각 카드 그리드 */
-.side.metrics.sesswide{ width:520px; }
-@media (max-width:1500px){ .side.metrics.sesswide{ width:400px; } }
+/* 우측 지표 패널 — 기본도 살짝 넓게, 세션 카드 표시 중엔 확폭(2열 그리드) */
+.side.metrics{ width:340px; }
+.side.metrics.sesswide{ width:660px; }
+@media (max-width:1600px){ .side.metrics.sesswide{ width:520px; } }
 
 .sessmeta{ font-size:12px; color:var(--text-2); padding:2px 2px 10px; line-height:1.5;
   border-bottom:1px solid var(--stroke-2); margin-bottom:10px; }
@@ -132,9 +133,10 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 
 .mgrid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; align-content:start; }
 @media (max-width:1500px){ .mgrid{ grid-template-columns:1fr; } }
+/* 정사각 '근사' — 내용이 넘치면 카드가 자연스럽게 늘어나도록 강제 비율·클리핑 없음 */
 .mcard{ background:var(--bg-2); border:1px solid var(--stroke-2); border-radius:var(--r-lg);
   padding:10px 12px; display:flex; flex-direction:column; gap:6px;
-  min-width:0; aspect-ratio:1/1; min-height:210px; overflow:hidden; }
+  min-width:0; min-height:240px; }
 .mhead{ display:flex; align-items:baseline; gap:6px; }
 .mhead b{ font-size:14px; letter-spacing:.3px; }
 .msub{ font-size:11px; color:var(--text-3); flex:1; min-width:0;
@@ -152,7 +154,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 
 /* SEI 출구 분포 바 */
 .mbars{ display:flex; flex-direction:column; gap:4px; font-size:11px;
-  overflow-y:auto; min-height:0; }
+  overflow-y:auto; min-height:0; max-height:170px; }
 .bhead{ display:flex; gap:8px; justify-content:flex-end; color:var(--text-3); font-size:10px; }
 .bk.a::before{ content:"■ "; color:var(--cyan, #30DCFB); }
 .bk.d::before{ content:"■ "; color:var(--text-3); }
@@ -167,7 +169,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .bval{ position:absolute; right:4px; top:0; font-size:9px; line-height:12px; color:var(--text-1); }
 
 /* CBS 병목 목록 */
-.mbnlist{ display:flex; flex-direction:column; gap:4px; overflow-y:auto; min-height:0; }
+.mbnlist{ display:flex; flex-direction:column; gap:4px; overflow-y:auto; min-height:0; max-height:170px; }
 .bnrow{ display:flex; flex-direction:column; gap:2px; }
 .bnlab{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-2); gap:6px; }
 .bnval{ color:var(--text-1); }
@@ -175,7 +177,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .risk.low{ color:var(--green, #3FB950); } .risk.mid{ color:#F5A623; } .risk.high{ color:#FF5B5B; }
 
 /* IDR 표 */
-.mtblwrap{ flex:1; min-height:0; overflow:auto; }
+.mtblwrap{ flex:1; min-height:0; max-height:200px; overflow:auto; }
 .mtbl{ width:100%; border-collapse:collapse; font-size:11px; }
 .mtbl th{ text-align:left; color:var(--text-3); font-weight:600; padding:2px 4px;
   border-bottom:1px solid var(--stroke-2); position:sticky; top:0; background:var(--bg-2); }
