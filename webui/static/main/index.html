@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MACS — 멀티카메라 맵 운영</title>
+<link rel="stylesheet" href="/static/colors_and_type.css" />
+<link rel="stylesheet" href="/static/main/main.css" />
+</head>
+<body>
+<div class="app">
+
+  <!-- 상단 바 -->
+  <header class="topbar">
+    <img class="brandlogo" src="/static/pia-logo.png" alt="PIA" />
+    <div class="crumb"><b>MACS 멀티카메라</b><span>공통 2D 맵 · 다중 채널 운영</span></div>
+    <nav class="viewnav">
+      <button class="vbtn on" data-view="map">① 맵 설정</button>
+      <button class="vbtn" data-view="cams">② 카메라 등록·매핑</button>
+      <button class="vbtn" data-view="live">③ 운영 뷰</button>
+    </nav>
+    <span class="sp"></span>
+    <span class="chip" id="siteChip">site: — · v0</span>
+    <span class="clock t-num" id="clock">--:--:--</span>
+  </header>
+
+  <!-- ============================ 화면 1: 맵 설정 ============================ -->
+  <section id="viewMap" class="view">
+    <div class="workarea">
+      <div class="canvaswrap">
+        <div class="toolbar">
+          <label class="btn primary sm" for="mapUpload">맵 이미지 업로드</label>
+          <input type="file" id="mapUpload" accept="image/*" hidden />
+          <span class="vsep"></span>
+          <div class="seg" id="mapTools">
+            <button class="tag-btn on" data-tool="pan">이동</button>
+            <button class="tag-btn" data-tool="scale">축척 2점</button>
+            <button class="tag-btn" data-tool="route">피난경로</button>
+            <button class="tag-btn" data-tool="zone">구역</button>
+            <button class="tag-btn" data-tool="bottleneck">병목</button>
+            <button class="tag-btn" data-tool="exit">출입구</button>
+            <button class="tag-btn" data-tool="graph">그래프</button>
+          </div>
+          <span class="fieldlab">실거리 <input id="scaleMeters" type="number" min="0.1" step="0.1" value="10" /> m</span>
+          <span class="fieldlab">임계밀도 <input id="rhoCrit" type="number" min="0.1" step="0.1" value="2.0" /> 명/m²</span>
+          <span class="fieldlab">이름 <input id="elName" type="text" placeholder="(선택)" style="width:110px" /></span>
+          <button class="tag-btn" id="drawDone">완료 ⏎</button>
+          <button class="tag-btn" id="drawCancel">취소 Esc</button>
+        </div>
+        <div class="hint" id="mapHint">맵 이미지를 업로드하고, 축척 2점을 지정한 뒤 요소를 그리세요. (휠: 줌 · 드래그: 팬 · 더블클릭/⏎: 완료)</div>
+        <canvas id="mapSetupCv" class="mapcv"></canvas>
+      </div>
+
+      <aside class="side">
+        <div class="sidehead">사이트 설정</div>
+        <div class="sidebody">
+          <div class="group">
+            <div class="gtitle">맵 · 축척</div>
+            <div class="grow" id="mapMeta">맵 없음</div>
+            <div class="grow" id="scaleMeta">축척 미지정</div>
+          </div>
+          <div class="group">
+            <div class="gtitle">피난경로 <span class="cnt" id="cntRoutes">0</span></div>
+            <div id="listRoutes" class="ellist"></div>
+          </div>
+          <div class="group">
+            <div class="gtitle">구역 <span class="cnt" id="cntZones">0</span></div>
+            <div id="listZones" class="ellist"></div>
+          </div>
+          <div class="group">
+            <div class="gtitle">병목 <span class="cnt" id="cntBottlenecks">0</span></div>
+            <div id="listBottlenecks" class="ellist"></div>
+          </div>
+          <div class="group">
+            <div class="gtitle">출입구 <span class="cnt" id="cntExits">0</span></div>
+            <div id="listExits" class="ellist"></div>
+          </div>
+          <div class="group">
+            <div class="gtitle">공간그래프 (IDR) <span class="cnt" id="cntGraph">0</span></div>
+            <div id="listGraph" class="ellist"></div>
+            <div class="grow" id="graphMeta"></div>
+          </div>
+          <div class="group">
+            <div class="gtitle">판정 임계값</div>
+            <div class="thgrid">
+              <label>v_th <input id="thV" type="number" step="0.1" /> m/s</label>
+              <label>a_th <input id="thA" type="number" step="0.05" /> cos</label>
+              <label>r_th <input id="thR" type="number" step="0.05" /></label>
+              <label>dt_hold <input id="thDt" type="number" step="0.5" /> s</label>
+              <label>d_allow <input id="thD" type="number" step="0.5" /> m</label>
+            </div>
+          </div>
+        </div>
+        <div class="sidefoot">
+          <span class="savemsg" id="mapSaveMsg"></span>
+          <button class="btn primary" id="siteSave">사이트 저장</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ====================== 화면 2: 카메라 등록·매핑 ====================== -->
+  <section id="viewCams" class="view hidden">
+    <div class="workarea">
+      <aside class="side left">
+        <div class="sidehead">카메라 목록</div>
+        <div class="sidebody">
+          <div id="camList" class="camlist"></div>
+          <div class="group">
+            <div class="gtitle">카메라 추가</div>
+            <input id="newCamName" type="text" placeholder="이름 (예: 1층 로비)" />
+            <input id="newCamRtsp" type="text" placeholder="rtsp://..." />
+            <button class="btn primary sm" id="camAdd" style="width:100%">+ 추가 후 연결 테스트</button>
+            <div class="grow" id="camAddMsg"></div>
+          </div>
+        </div>
+      </aside>
+
+      <div class="canvaswrap">
+        <div class="toolbar" id="mapToolbar2">
+          <span class="fieldlab" id="selCamLabel">카메라를 선택하세요</span>
+          <span class="vsep"></span>
+          <div class="seg" id="camTools">
+            <button class="tag-btn on" data-mode="pair">대응점 (4+쌍)</button>
+            <button class="tag-btn" data-mode="roi">유효 ROI</button>
+            <button class="tag-btn" data-mode="pan">이동</button>
+          </div>
+          <button class="tag-btn" id="pairUndo">↶ 마지막 취소</button>
+          <button class="tag-btn" id="pairClear">지우기</button>
+          <span class="vsep"></span>
+          <button class="tag-btn" id="camRetest">연결 테스트 ↻</button>
+          <button class="btn primary sm" id="mappingSave">매핑 저장</button>
+        </div>
+        <div class="hint" id="camHint">좌측 카메라 프레임 → 우측 맵 순서로 같은 지점을 번갈아 클릭하세요 (최소 4쌍).</div>
+        <div class="duo">
+          <div class="duobox"><div class="duolab">카메라 프레임</div><canvas id="camFrameCv" class="mapcv"></canvas></div>
+          <div class="duobox"><div class="duolab">맵</div><canvas id="camMapCv" class="mapcv"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ 화면 3: 운영 뷰 ============================ -->
+  <section id="viewLive" class="view hidden">
+    <div class="workarea">
+      <aside class="side left">
+        <div class="sidehead">카메라 <span class="conn" id="liveConn">연결 중…</span></div>
+        <div class="sidebody"><div id="liveCamList" class="camlist"></div></div>
+      </aside>
+
+      <div class="canvaswrap">
+        <div class="toolbar">
+          <button class="btn primary sm" id="sessBtn">🔔 경보 시작</button>
+          <span class="fieldlab" id="sessHint"></span>
+          <span class="sp"></span>
+          <button class="tag-btn" id="graphToggle" title="IDR 공간그래프 표시">공간그래프</button>
+        </div>
+        <div class="hint" id="liveHint">SSE 실시간 맵 — 객체 점·방향, 구역/병목 상태, 통과 카운트. (휠: 줌 · 드래그: 팬)</div>
+        <canvas id="liveCv" class="mapcv"></canvas>
+      </div>
+
+      <aside class="side metrics" id="liveSide">
+        <div class="sidehead">
+          <span>지표</span>
+          <span class="seg">
+            <button class="tag-btn" id="pmSess">4대 지표 평가</button>
+            <button class="tag-btn on" id="pmRt">실시간</button>
+          </span>
+        </div>
+        <div class="sidebody">
+          <div id="rtPanel">
+            <div class="group">
+              <div class="gtitle">전체</div>
+              <div class="metricrow"><span>맵 위 객체</span><b class="t-num" id="mObjects">0</b></div>
+              <div class="metricrow"><span>사이트 버전</span><b class="t-num" id="mVersion">—</b></div>
+              <div class="metricrow"><span>갱신 시각</span><b class="t-num" id="mTs">—</b></div>
+            </div>
+            <div class="group"><div class="gtitle">구역 밀도</div><div id="mZones"></div></div>
+            <div class="group"><div class="gtitle">병목</div><div id="mBottlenecks"></div></div>
+            <div class="group"><div class="gtitle">출입구 통과</div><div id="mExits"></div></div>
+          </div>
+
+          <div id="sessPanel" class="hidden">
+            <div class="grow" id="sessNone">세션 없음 — 상단 [🔔 경보 시작]으로 평가 세션을 시작하세요.</div>
+            <div class="sessmeta hidden" id="sessMeta"></div>
+            <div class="mgrid hidden" id="sessGrid">
+              <div class="mcard" id="cardSei">
+                <div class="mhead"><b>SEI</b><span class="msub">출구 활용 효율</span><span class="mela t-num"></span></div>
+                <div class="mgaugewrap"><canvas id="seiGauge"></canvas></div>
+                <canvas class="mspark" id="seiSpark" title="SEI 추이"></canvas>
+                <div class="mbars" id="seiBars"></div>
+              </div>
+              <div class="mcard" id="cardCbs">
+                <div class="mhead"><b>CBS</b><span class="msub">병목 혼잡 누적</span><span class="mela t-num"></span></div>
+                <div class="mbig t-num" id="cbsVal">0</div>
+                <canvas class="mspark" id="cbsSpark" title="총 CBS 추이"></canvas>
+                <div class="mbnlist" id="cbsBn"></div>
+              </div>
+              <div class="mcard" id="cardEpfi">
+                <div class="mhead"><b>EPFI</b><span class="msub">경로 충실도</span><span class="mela t-num"></span></div>
+                <div class="mbig t-num" id="epfiVal">—</div>
+                <canvas class="mspark" id="epfiSpark" title="평균 EPFI 추이"></canvas>
+                <div class="mhistwrap"><canvas id="epfiHist"></canvas><div class="mnote" id="epfiNote"></div></div>
+              </div>
+              <div class="mcard" id="cardIdr">
+                <div class="mhead"><b>IDR</b><span class="msub">구역 피난 반응</span><span class="mela t-num"></span></div>
+                <div class="mbig t-num" id="idrProg">0/0</div>
+                <div class="mtblwrap" id="idrTblWrap"></div>
+              </div>
+            </div>
+            <div class="sessfoot hidden" id="sessFoot">
+              <button class="tag-btn" id="resReopen">결과 요약</button>
+              <a class="tag-btn" id="footJson" href="/api/session/export?format=json" download>JSON</a>
+              <a class="tag-btn" id="footCsv" href="/api/session/export?format=csv" download>CSV</a>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+</div>
+
+<!-- 스냅샷 팝업 -->
+<div id="snapModal" class="modal hidden">
+  <div class="modalbox">
+    <div class="modalhead"><b id="snapTitle">스냅샷</b><button class="tag-btn" id="snapClose">닫기 ✕</button></div>
+    <img id="snapImg" alt="snapshot" />
+  </div>
+</div>
+
+<!-- 세션 결과 요약 모달 -->
+<div id="resultModal" class="modal hidden">
+  <div class="modalbox wide">
+    <div class="modalhead"><b id="resTitle">평가 세션 결과</b><button class="tag-btn" id="resClose">닫기 ✕</button></div>
+    <div id="resBody" class="resbody"></div>
+    <div class="resfoot">
+      <a class="btn primary sm" id="resJson" href="/api/session/export?format=json" download>JSON 내보내기</a>
+      <a class="tag-btn" id="resCsv" href="/api/session/export?format=csv" download>CSV 내보내기</a>
+    </div>
+  </div>
+</div>
+
+<script src="/static/main/api.js"></script>
+<script src="/static/main/mapcanvas.js"></script>
+<script src="/static/main/session.js"></script>
+<script src="/static/main/view_map.js"></script>
+<script src="/static/main/view_cams.js"></script>
+<script src="/static/main/view_live.js"></script>
+<script src="/static/main/app.js"></script>
+</body>
+</html>

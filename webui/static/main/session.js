@@ -1,0 +1,447 @@
+/* 평가 세션(4대 지표 IDR·EPFI·CBS·SEI) — 컨트롤·카드 대시보드·결과 모달.
+ * CONTRACT v1.2 /api/session/* + MapState.session(SSE) + TimelinePoint 폴링.
+ * 렌더는 전부 vanilla JS + canvas. 세션 종료 후에도 timeline/result로 카드 유지. */
+"use strict";
+
+const Session = (() => {
+  const $ = (id) => document.getElementById(id);
+  let live = null;         // SessionLive | null
+  let result = null;       // EvaluationResult | null
+  let timeline = [];       // TimelinePoint[]
+  let placing = false;     // 경보 위치 클릭 대기
+  let pollT = null;
+  let stoppedId = null;    // stop 직후 지연 SSE 스냅샷 무시용
+  let onMapRender = null;  // 맵 canvas 다시 그리기 콜백
+  let inited = false;
+
+  // ================================================== 수신·상태
+  async function bootstrap() {
+    try { live = await API.getSession(); } catch (e) { live = null; }
+    try { result = await API.getSessionResult(); } catch (e) { result = null; }
+    try { timeline = await API.getSessionTimeline(); } catch (e) { timeline = []; }
+    if (live) { startPoll(); switchPanel("sess"); }
+    else if (result) switchPanel("sess");
+    updateUI();
+  }
+
+  /** SSE MapState 수신 시 view_live가 호출. */
+  function onState(st) {
+    const s = st && st.session;
+    if (s && s.session_id !== stoppedId) {
+      const wasNew = !live;
+      live = s;
+      if (wasNew) { result = null; startPoll(); switchPanel("sess"); }
+      updateUI();
+    } else if (!s && live) {              // 다른 클라이언트가 종료한 경우
+      live = null;
+      stopPoll();
+      refreshFinal();
+    }
+  }
+
+  function startPoll() {
+    stopPoll();
+    pollT = setInterval(async () => {
+      try { timeline = await API.getSessionTimeline(); updateCards(); }
+      catch (e) { /* 일시 오류 무시 */ }
+    }, 2000);
+  }
+  function stopPoll() { if (pollT) { clearInterval(pollT); pollT = null; } }
+
+  async function refreshFinal() {
+    try { result = await API.getSessionResult(); } catch (e) { /* keep */ }
+    try { timeline = await API.getSessionTimeline(); } catch (e) { /* keep */ }
+    updateUI();
+  }
+
+  // ================================================== 컨트롤
+  function init(opts) {
+    onMapRender = (opts && opts.onMapRender) || null;
+    if (inited) return;
+    inited = true;
+    $("sessBtn").onclick = onBtn;
+    $("pmSess").onclick = () => switchPanel("sess");
+    $("pmRt").onclick = () => switchPanel("rt");
+    $("resClose").onclick = () => $("resultModal").classList.add("hidden");
+    $("resultModal").onclick = (e) => {
+      if (e.target === $("resultModal")) $("resultModal").classList.add("hidden");
+    };
+    $("resReopen").onclick = () => { if (result) showResultModal(); };
+  }
+
+  function onBtn() {
+    if (live) { stop(); return; }
+    if (placing) { placing = false; setBtn(); hint(""); return; }
+    placing = true;
+    setBtn();
+    hint("맵에서 경보 발생 위치를 클릭하세요 (버튼을 다시 누르면 취소)");
+  }
+
+  /** 맵 클릭 훅 (view_live) — 배치 모드였으면 true. */
+  function placeAlarm(p) {
+    if (!placing) return false;
+    placing = false;
+    setBtn();
+    (async () => {
+      try {
+        live = await API.startSession([p.x, p.y]);
+        stoppedId = null;
+        result = null;
+        timeline = [];
+        startPoll();
+        switchPanel("sess");
+        hint(`세션 시작 — ${live.session_id}`);
+      } catch (e) { hint("세션 시작 실패: " + e.message, true); }
+      updateUI();
+    })();
+    return true;
+  }
+
+  async function stop() {
+    try {
+      result = await API.stopSession();
+      stoppedId = live && live.session_id;
+      live = null;
+      stopPoll();
+      try { timeline = await API.getSessionTimeline(); } catch (e) { /* keep */ }
+      hint("세션 종료 — 결과가 산출되었습니다.");
+      showResultModal();
+    } catch (e) { hint("세션 종료 실패: " + e.message, true); }
+    updateUI();
+  }
+
+  function setBtn() {
+    const b = $("sessBtn");
+    if (live) { b.textContent = "⏹ 세션 종료"; b.classList.add("stop"); }
+    else if (placing) { b.textContent = "✕ 위치 클릭 대기 — 취소"; b.classList.remove("stop"); }
+    else { b.textContent = "🔔 경보 시작"; b.classList.remove("stop"); }
+  }
+
+  function hint(msg, warn) {
+    const el = $("sessHint");
+    el.textContent = msg || "";
+    el.classList.toggle("warn", !!warn);
+  }
+
+  function switchPanel(mode) {
+    $("rtPanel").classList.toggle("hidden", mode !== "rt");
+    $("sessPanel").classList.toggle("hidden", mode !== "sess");
+    $("pmRt").classList.toggle("on", mode === "rt");
+    $("pmSess").classList.toggle("on", mode === "sess");
+    $("liveSide").classList.toggle("sesswide", mode === "sess");  // 2열 카드용 확폭
+    if (mode === "sess") updateCards();
+  }
+
+  // ================================================== 공통 포맷
+  const fmt1 = (v) => (v == null ? "—" : (Math.round(v * 10) / 10).toFixed(1));
+  const hhmmss = (ts) => new Date(ts * 1000).toTimeString().slice(0, 8);
+
+  function elapsedSec() {
+    if (live) return live.elapsed_sec;
+    if (result && result.ended_at) return result.ended_at - result.alarm_ts;
+    return null;
+  }
+  function elapsedTxt() {
+    const e = elapsedSec();
+    if (e == null) return "—";
+    const m = Math.floor(e / 60), s = Math.floor(e % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  function nameOf(list, id) {
+    const e = (list || []).find((x) => x.id === id);
+    return (e && e.name) || id;
+  }
+
+  // ================================================== canvas 차트 헬퍼
+  function cvCtx(cv) {
+    const r = cv.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(r.width * dpr);
+    cv.height = Math.round(r.height * dpr);
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, r.width, r.height);
+    return { ctx, w: r.width, h: r.height };
+  }
+
+  /** 스파크라인 — null 구간 스킵, threshold 초과 구간은 붉게. */
+  function spark(cv, vals, opts = {}) {
+    const g = cvCtx(cv);
+    if (!g) return;
+    const { ctx, w, h } = g;
+    const nums = vals.filter((v) => v != null);
+    if (!nums.length) {
+      ctx.fillStyle = "rgba(255,255,255,.3)";
+      ctx.font = "10px Pretendard, sans-serif";
+      ctx.fillText("데이터 없음", 5, h / 2 + 3);
+      return;
+    }
+    let lo = opts.min != null ? opts.min : Math.min(...nums);
+    let hi = opts.max != null ? opts.max : Math.max(...nums);
+    if (opts.threshold != null) { lo = Math.min(lo, opts.threshold); hi = Math.max(hi, opts.threshold); }
+    if (hi - lo < 1e-9) hi = lo + 1;
+    const pad = 3;
+    const X = (i) => pad + (w - 2 * pad) * (vals.length < 2 ? 1 : i / (vals.length - 1));
+    const Y = (v) => h - pad - (h - 2 * pad) * ((v - lo) / (hi - lo));
+    if (opts.threshold != null) {
+      ctx.strokeStyle = "rgba(255,74,68,.55)";
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(0, Y(opts.threshold)); ctx.lineTo(w, Y(opts.threshold)); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    let lastIdx = -1;
+    for (let i = 0; i < vals.length; i++) {
+      if (vals[i] == null) continue;
+      if (lastIdx >= 0) {
+        const over = opts.threshold != null &&
+          (vals[i] > opts.threshold || vals[lastIdx] > opts.threshold);
+        ctx.strokeStyle = over ? "#FF4A44" : (opts.color || "#30DCFB");
+        ctx.beginPath();
+        ctx.moveTo(X(lastIdx), Y(vals[lastIdx]));
+        ctx.lineTo(X(i), Y(vals[i]));
+        ctx.stroke();
+      }
+      lastIdx = i;
+    }
+    if (lastIdx >= 0) {                              // 마지막 점
+      const over = opts.threshold != null && vals[lastIdx] > opts.threshold;
+      ctx.fillStyle = over ? "#FF4A44" : (opts.color || "#30DCFB");
+      ctx.beginPath(); ctx.arc(X(lastIdx), Y(vals[lastIdx]), 2.2, 0, 7); ctx.fill();
+    }
+  }
+
+  /** 반원 게이지 (0~100) + 중앙 숫자. null → "—" (insufficient_data). */
+  function gauge(cv, val) {
+    const g = cvCtx(cv);
+    if (!g) return;
+    const { ctx, w, h } = g;
+    const cx = w / 2, cy = h * 0.88, R = Math.min(w / 2 - 8, h * 0.74);
+    ctx.lineWidth = 9;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(255,255,255,.12)";
+    ctx.beginPath(); ctx.arc(cx, cy, R, Math.PI, 2 * Math.PI); ctx.stroke();
+    let col = "rgba(255,255,255,.4)";
+    if (val != null) {
+      col = val >= 80 ? "#3FB950" : (val >= 60 ? "#F5A623" : "#FF4A44");
+      ctx.strokeStyle = col;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, Math.PI, Math.PI + Math.PI * Math.min(100, Math.max(0, val)) / 100);
+      ctx.stroke();
+    }
+    ctx.textAlign = "center";
+    ctx.fillStyle = val != null ? "#fff" : "rgba(255,255,255,.4)";
+    ctx.font = "700 26px Pretendard, sans-serif";
+    ctx.fillText(val != null ? fmt1(val) : "—", cx, cy - 4);
+    ctx.font = "10px Pretendard, sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,.45)";
+    ctx.fillText(val != null ? "/ 100" : "insufficient data", cx, cy + 11);
+    ctx.textAlign = "left";
+  }
+
+  /** 히스토그램 (0~100, 10구간). */
+  function hist(cv, values) {
+    const g = cvCtx(cv);
+    if (!g) return;
+    const { ctx, w, h } = g;
+    const bins = new Array(10).fill(0);
+    values.forEach((v) => {
+      if (v == null) return;
+      bins[Math.min(9, Math.max(0, Math.floor(v / 10)))]++;
+    });
+    const mx = Math.max(1, ...bins);
+    const bw = (w - 12) / 10;
+    for (let i = 0; i < 10; i++) {
+      const bh = (h - 16) * (bins[i] / mx);
+      ctx.fillStyle = i >= 8 ? "#3FB950" : (i >= 6 ? "#30DCFB" : "#F5A623");
+      ctx.fillRect(6 + i * bw + 1, h - 12 - bh, bw - 2, bh);
+    }
+    ctx.fillStyle = "rgba(255,255,255,.4)";
+    ctx.font = "9px Pretendard, sans-serif";
+    ctx.fillText("0", 6, h - 2);
+    ctx.fillText("EPFI 100", w - 46, h - 2);
+  }
+
+  // ================================================== 카드 렌더
+  function updateCards() {
+    if (!$("sessGrid")) return;
+    const has = !!(live || result);
+    $("sessNone").classList.toggle("hidden", has);
+    $("sessGrid").classList.toggle("hidden", !has);
+    $("sessMeta").classList.toggle("hidden", !has);
+    $("sessFoot").classList.toggle("hidden", !result);
+    if (!has) return;
+
+    const sid = live ? live.session_id : result.session_id;
+    const alarmTs = live ? live.alarm_ts : result.alarm_ts;
+    $("sessMeta").innerHTML =
+      `<b>${sid}</b> · 경보 ${hhmmss(alarmTs)} · ` +
+      (live ? `<span class="st-run">진행 중</span>` : `<span class="st-end">종료</span>`) +
+      ` · 경과 <span class="t-num">${elapsedTxt()}</span>`;
+    document.querySelectorAll("#sessGrid .mela").forEach((el) => {
+      el.textContent = "경과 " + elapsedTxt();
+    });
+
+    renderSei();
+    renderCbs();
+    renderEpfi();
+    renderIdr();
+  }
+
+  function renderSei() {
+    const sei = live ? live.sei : result.sei;
+    gauge($("seiGauge"), sei);
+    spark($("seiSpark"), timeline.map((t) => t.sei), { min: 0, max: 100 });
+
+    // 출구별 실제/설계 분포 가로 바 비교
+    const exits = (App.site && App.site.exits) || [];
+    const box = $("seiBars");
+    if (!exits.length) { box.innerHTML = `<div class="mnote">출입구 없음 — 맵 설정에서 추가</div>`; return; }
+    let actual = {};
+    if (result) {
+      result.exit_metrics.forEach((m) => { actual[m.exit_id] = m.actual_count; });
+    } else {
+      const tp = timeline[timeline.length - 1];
+      actual = (tp && tp.exit_counts) || {};
+    }
+    const tot = exits.reduce((s, e) => s + (actual[e.id] || 0), 0);
+    const csum = exits.reduce((s, e) => s + (e.design_capacity || 0), 0);
+    box.innerHTML = `<div class="bhead"><span></span><span class="bk a">실제</span><span class="bk d">설계</span></div>` +
+      exits.map((e) => {
+        const a = actual[e.id] || 0;
+        const aShare = tot > 0 ? a / tot : 0;
+        const dShare = csum > 0 ? (e.design_capacity || 0) / csum : 1 / exits.length;
+        return `<div class="brow">
+          <div class="blab" title="${nameOf(exits, e.id)}">${nameOf(exits, e.id)}</div>
+          <div class="btracks">
+            <div class="btrack"><div class="bfill a" style="width:${Math.round(aShare * 100)}%"></div>
+              <span class="bval t-num">${a}명 ${(tot > 0 ? Math.round(aShare * 100) + "%" : "")}</span></div>
+            <div class="btrack"><div class="bfill d" style="width:${Math.round(dShare * 100)}%"></div>
+              <span class="bval t-num">${e.design_capacity != null ? e.design_capacity + "명 " : ""}${Math.round(dShare * 100)}%</span></div>
+          </div>
+        </div>`;
+      }).join("");
+  }
+
+  function renderCbs() {
+    const cbs = live ? live.cbs_total : result.cbs_total;
+    $("cbsVal").textContent = fmt1(cbs);
+    spark($("cbsSpark"), timeline.map((t) => t.cbs_total), { min: 0, color: "#FF6F21" });
+
+    const bns = (App.site && App.site.bottlenecks) || [];
+    const box = $("cbsBn");
+    if (!bns.length) { box.innerHTML = `<div class="mnote">병목 없음 — 맵 설정에서 추가</div>`; return; }
+    const resBn = {};
+    if (result) result.bottleneck_metrics.forEach((m) => { resBn[m.bottleneck_id] = m; });
+    box.innerHTML = bns.map((b) => {
+      const m = resBn[b.id];
+      const last = timeline.length ? (timeline[timeline.length - 1].bottleneck_density || {})[b.id] : null;
+      const tail = m ? `CBS ${fmt1(m.cbs)} · <span class="risk ${m.risk_level}">${m.risk_level}</span>`
+                     : (last != null ? `${fmt1(last)}/m²` : "—");
+      return `<div class="bnrow">
+        <div class="bnlab"><span>${nameOf(bns, b.id)}</span><span class="bnval t-num">${tail}</span></div>
+        <canvas class="bnspark" data-bn="${b.id}"></canvas>
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".bnspark").forEach((cv) => {
+      const bid = cv.dataset.bn;
+      const b = bns.find((x) => x.id === bid);
+      spark(cv, timeline.map((t) => (t.bottleneck_density || {})[bid] != null
+        ? t.bottleneck_density[bid] : null),
+        { min: 0, threshold: b ? b.rho_crit : null, color: "#FF6F21" });
+    });
+  }
+
+  function renderEpfi() {
+    const ep = live ? live.epfi_avg : result.epfi_avg;
+    $("epfiVal").textContent = ep != null ? fmt1(ep) : "—";
+    spark($("epfiSpark"), timeline.map((t) => t.epfi_avg), { min: 0, max: 100, color: "#3FB950" });
+    const cv = $("epfiHist"), note = $("epfiNote");
+    if (result && result.person_metrics.length) {
+      cv.classList.remove("hidden");
+      note.textContent = `객체 ${result.person_metrics.length}개 분포`;
+      hist(cv, result.person_metrics.map((p) => p.epfi));
+    } else {
+      const g = cvCtx(cv);
+      if (g) { /* 비움 */ }
+      note.textContent = live ? "객체별 분포는 세션 종료 후 표시됩니다." : "객체 데이터 없음";
+    }
+  }
+
+  function renderIdr() {
+    const zones = (App.site && App.site.zones) || [];
+    const wrap = $("idrTblWrap");
+    if (live) {
+      $("idrProg").textContent = `${live.zones_started}/${live.zones_total}`;
+      const tl = timeline.map((t) => t.zones_started);
+      wrap.innerHTML = `<div class="mnote">구역 개시 판정 진행 중 — 종료 시 구역별 상세(개시시각·지연·IDR)가 표시됩니다.</div>` +
+        (zones.length ? `<table class="mtbl"><tr><th>구역</th><th>상태</th></tr>` +
+          zones.map((z) => `<tr class="ns"><td>${z.name || z.id}</td><td>판정 중…</td></tr>`).join("") +
+          `</table>` : `<div class="mnote">구역 없음 — 맵 설정에서 추가</div>`);
+      void tl;
+      return;
+    }
+    const zm = result.zone_metrics || [];
+    const started = zm.filter((z) => z.status === "started").length;
+    $("idrProg").textContent = `${started}/${zm.length}`;
+    if (!zm.length) { wrap.innerHTML = `<div class="mnote">구역 없음 — 맵 설정에서 추가</div>`; return; }
+    wrap.innerHTML = `<table class="mtbl">
+      <tr><th>구역</th><th>개시</th><th>지연(s)</th><th>IDR</th><th>상태</th></tr>` +
+      zm.map((z) => {
+        const ns = z.status !== "started";
+        return `<tr class="${ns ? "ns" : ""}">
+          <td>${nameOf(zones, z.zone_id)}</td>
+          <td class="t-num">${z.evacuation_start_at ? hhmmss(z.evacuation_start_at) : "—"}</td>
+          <td class="t-num">${z.response_delay_sec != null ? fmt1(z.response_delay_sec) : "—"}</td>
+          <td class="t-num">${z.idr != null ? z.idr.toFixed(2) : "—"}</td>
+          <td>${ns ? "미개시" : "개시"}</td>
+        </tr>`;
+      }).join("") + `</table>`;
+  }
+
+  // ================================================== 결과 모달
+  function showResultModal() {
+    if (!result) return;
+    const r = result;
+    const dur = r.ended_at ? (r.ended_at - r.alarm_ts) : 0;
+    const started = r.zone_metrics.filter((z) => z.status === "started").length;
+    const totOut = r.exit_metrics.reduce((s, e) => s + e.actual_count, 0);
+    const row = (k, v) => `<div class="resrow"><span>${k}</span><b class="t-num">${v}</b></div>`;
+    $("resTitle").textContent = `평가 세션 결과 — ${r.session_id}`;
+    $("resBody").innerHTML = `
+      <div class="resbig">
+        <div class="resmet"><span>SEI</span><b>${r.sei != null ? fmt1(r.sei) : "—"}</b><i>${r.sei == null ? "insufficient_data" : "출구 활용 효율"}</i></div>
+        <div class="resmet"><span>EPFI 평균</span><b>${r.epfi_avg != null ? fmt1(r.epfi_avg) : "—"}</b><i>경로 충실도</i></div>
+        <div class="resmet"><span>CBS 총</span><b>${fmt1(r.cbs_total)}</b><i>혼잡 누적</i></div>
+        <div class="resmet"><span>IDR 개시</span><b>${started}/${r.zone_metrics.length}</b><i>구역 반응</i></div>
+      </div>
+      ${row("경보 시각", hhmmss(r.alarm_ts))}
+      ${row("종료 시각", r.ended_at ? hhmmss(r.ended_at) : "—")}
+      ${row("평가 시간", `${Math.floor(dur / 60)}분 ${Math.floor(dur % 60)}초`)}
+      ${row("경보 위치 (맵 px)", `(${Math.round(r.alarm_origin[0])}, ${Math.round(r.alarm_origin[1])})`)}
+      ${row("출구 총 통과", `${totOut}명 · 출구 ${r.exit_metrics.length}곳`)}
+      ${row("추적 객체", `${r.person_metrics.length}개`)}
+      ${row("설정 버전", `calibration v${r.calibration_version} · config v${r.config_version}`)}
+    `;
+    $("resultModal").classList.remove("hidden");
+  }
+
+  // ================================================== 외부 노출
+  function updateUI() {
+    setBtn();
+    updateCards();
+    if (onMapRender) onMapRender();
+  }
+
+  return {
+    init, bootstrap, onState, placeAlarm, updateCards,
+    isPlacing: () => placing,
+    alarmOrigin: () => (live ? live.alarm_origin : (result ? result.alarm_origin : null)),
+    isActive: () => !!live,
+  };
+})();
+
+window.Session = Session;  // 명시적 전역 노출 — view_live의 window.Session 가드용
