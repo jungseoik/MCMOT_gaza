@@ -6,7 +6,10 @@
 ## 실행
 
 ```bash
-# 실서버 (RTSP → NVDEC → TRT 추적 → 맵 좌표 → SSE) + main 탭 UI
+# 실서버 (RTSP → NVDEC → TRT 추적 → 맵 좌표 → SSE → 4대 지표 세션) + main 탭 UI
+# 상시 기동(권장): pm2 등록 완료 — pm2 restart macs-system
+pm2 start tools/run_system_server.sh --name macs-system
+# 수동 실행:
 conda run -n boosttrack uvicorn system.api.server:app --host 0.0.0.0 --port 8900
 # → http://<host>:8900/  (맵 설정 → 카메라 등록·매핑 → 운영 뷰)
 
@@ -16,6 +19,8 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
 
 - 환경변수: `SITE_ID`(기본 default) · `SITE_ROOT`(기본 data/sites) · `GPU_DEVICES`(기본 0,1 — ffmpeg NVDEC 분산)
 - 설정은 `data/sites/<site_id>/`(site.json·cameras/*.json·map.png)에 영속화 — 재시작 시 자동 복원
+- 평가 세션: 운영 뷰 🔔 경보 시작(맵 클릭) → 4대 지표 카드 → 종료 시 결과 산출,
+  `sessions/<id>.json` 영속화 + `GET /api/sessions` 이력 (계약 v1.3)
 - **기존 webui PoC(webui/server.py)와 같은 프로세스 동시 구동 금지** (전역 GeneralSettings 충돌, CONTRACT v1.1 §5). 별도 포트로 각각 실행 — 기존 UI 좌측 레일의 맵 아이콘이 :8900을 연다.
 
 ## 모듈 (트랙별 소유 — CONTRACT §6)
