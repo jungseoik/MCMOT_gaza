@@ -202,3 +202,6 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .hbody b{ color:var(--text-1); }
 .hbody code{ font-size:10.5px; background:var(--bg-3); padding:1px 5px; border-radius:4px;
   color:var(--cyan, #30DCFB); }
+
+/* 맵 설정 우측(사이트 설정/지표 설명) 패널 — 설명 카드가 읽히도록 넓게 */
+#viewMap .side{ width:380px; }

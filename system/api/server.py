@@ -461,5 +461,15 @@ def index():
     return FileResponse(FRONT_DIR / "index.html")
 
 
+@app.middleware("http")
+async def _static_no_cache(request: Request, call_next):
+    """정적 파일 캐시 재검증 강제 — JS/CSS 갱신이 브라우저 캐시에 씹히는 문제 방지.
+    (no-cache = 매 요청 재검증. Last-Modified 기반 304라 비용은 미미)"""
+    resp = await call_next(request)
+    if request.url.path.startswith("/static") or request.url.path == "/":
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 # webui/static 전체 마운트 — main/ 하위 + 기존 디자인 토큰(colors_and_type.css) 공유
 app.mount("/static", StaticFiles(directory=str(FRONT_DIR.parent)), name="static")
