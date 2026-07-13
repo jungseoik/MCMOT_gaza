@@ -1,0 +1,272 @@
+"""
+evac.core — 피난경로 알고리즘 코어 (순수 numpy/scipy, CAD·플롯 의존 없음).
+
+삼성 TravelDistance_Analyzer(C#)와 동일 로직:
+  격자화(mesh) → 멀티소스 다익스트라(8방향) → prev 역추적 + String-Pulling(LOS).
+
+이 모듈은 좌표/도면 포맷을 모른다. 입력은 "도면단위(mm) 선분·점"과 범위(bounds)뿐이라
+어느 파이프라인에서도 그대로 가져다 쓸 수 있다(예: 트래킹 좌표를 start로 주입).
+"""
+import math
+from collections import deque
+
+import numpy as np
+
+# 원본 상수 (기본값; 모두 함수 인자로 재정의 가능)
+CELL_SIZE = 50.0        # mm
+CLEARANCE = 304.8       # mm (=1ft)
+
+
+def world_to_grid(x, y, minx, miny, cell):
+    return int(math.floor((x - minx) / cell)), int(math.floor((y - miny) / cell))
+
+
+def grid_to_world(c, r, minx, miny, cell):
+    return (minx + (c + 0.5) * cell, miny + (r + 0.5) * cell)
+
+
+# ───────────────────────────────────────────── 격자화: 벽=True(1), 공간=False(0)
+def build_obstacle_grid(obstacles, minx, miny, cols, rows, cell,
+                        clearance=CLEARANCE, exit_cells=()):
+    """선분 리스트(N,4) → bool[cols,rows]. 셀중심~선분 거리 < clearance 면 벽.
+    exit_cells 는 강제로 통행가능(원본과 동일)."""
+    grid = np.zeros((cols, rows), dtype=bool)
+    m = clearance
+    for (x1, y1, x2, y2) in obstacles:
+        bx1, by1 = min(x1, x2) - m, min(y1, y2) - m
+        bx2, by2 = max(x1, x2) + m, max(y1, y2) + m
+        c1 = max(0, int(math.floor((bx1 - minx) / cell)))
+        r1 = max(0, int(math.floor((by1 - miny) / cell)))
+        c2 = min(cols - 1, int(math.floor((bx2 - minx) / cell)))
+        r2 = min(rows - 1, int(math.floor((by2 - miny) / cell)))
+        if c2 < c1 or r2 < r1:
+            continue
+        cc = minx + (np.arange(c1, c2 + 1) + 0.5) * cell
+        rr = miny + (np.arange(r1, r2 + 1) + 0.5) * cell
+        PX, PY = np.meshgrid(cc, rr, indexing="ij")
+        dx, dy = x2 - x1, y2 - y1
+        lensq = dx * dx + dy * dy
+        if lensq < 1e-10:
+            d = np.hypot(PX - x1, PY - y1)
+        else:
+            t = np.clip(((PX - x1) * dx + (PY - y1) * dy) / lensq, 0.0, 1.0)
+            d = np.hypot(PX - (x1 + t * dx), PY - (y1 + t * dy))
+        grid[c1:c2 + 1, r1:r2 + 1] |= (d < clearance)
+    for (c, r) in exit_cells:
+        if 0 <= c < cols and 0 <= r < rows:
+            grid[c, r] = False
+    return grid
+
+
+# ───────────────────────────────────────────── 멀티소스 다익스트라 (scipy)
+def run_dijkstra(grid, exit_cells, cell):
+    """모든 exit_cells 를 dist=0 으로 동시 시드. 8방향(직교 cell, 대각 cell·√2).
+    반환: dist[cols,rows], pred(node), inv_c(node), inv_r(node), idx[cols,rows]."""
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import dijkstra
+
+    cols, rows = grid.shape
+    free = ~grid
+    cs, rs = np.where(free)
+    n = cs.size
+    idx = -np.ones((cols, rows), dtype=np.int64)
+    idx[cs, rs] = np.arange(n)
+
+    diag = cell * math.sqrt(2.0)
+    ri, ci, data = [], [], []
+
+    def add(a_idx, b_idx, w):
+        a = a_idx.ravel(); b = b_idx.ravel()
+        mask = (a >= 0) & (b >= 0)
+        ri.append(a[mask]); ci.append(b[mask]); data.append(np.full(int(mask.sum()), w))
+
+    add(idx[:-1, :], idx[1:, :], cell)
+    add(idx[:, :-1], idx[:, 1:], cell)
+    add(idx[:-1, :-1], idx[1:, 1:], diag)
+    add(idx[:-1, 1:], idx[1:, :-1], diag)
+
+    g = csr_matrix((np.concatenate(data), (np.concatenate(ri), np.concatenate(ci))),
+                   shape=(n, n))
+
+    sources = [int(idx[c, r]) for (c, r) in exit_cells
+               if 0 <= c < cols and 0 <= r < rows and idx[c, r] >= 0]
+    if not sources:
+        raise ValueError("통행가능한 Exit 셀이 없음(Exit가 벽에 묻힘).")
+
+    dist_flat, pred, _ = dijkstra(g, directed=False, indices=sources,
+                                  min_only=True, return_predecessors=True)
+    dist = np.full((cols, rows), np.inf)
+    dist[cs, rs] = dist_flat
+    return dist, pred, cs, rs, idx
+
+
+# ───────────────────────────────────────────── 시야확인 + String-Pulling
+def has_line_of_sight(grid, a, b):
+    c0, r0 = a; c1, r1 = b
+    dc = abs(c1 - c0); dr = abs(r1 - r0)
+    sc = 1 if c0 < c1 else -1
+    sr = 1 if r0 < r1 else -1
+    err = dc - dr
+    while True:
+        if grid[c0, r0]:
+            return False
+        if c0 != c1 and r0 != r1:
+            if grid[c0 + sc, r0] and grid[c0, r0 + sr]:
+                return False
+        if c0 == c1 and r0 == r1:
+            break
+        e2 = 2 * err
+        if e2 > -dr:
+            err -= dr; c0 += sc
+        if e2 < dc:
+            err += dc; r0 += sr
+    return True
+
+
+def trace_path(pred, inv_c, inv_r, grid, start_node):
+    raw = []
+    node = int(start_node)
+    guard = 0
+    while node >= 0 and guard < 500000:
+        guard += 1
+        raw.append((int(inv_c[node]), int(inv_r[node])))
+        p = pred[node]
+        if p < 0:
+            break
+        node = int(p)
+    if len(raw) < 2:
+        return raw
+    smoothed = [raw[0]]
+    anchor = 0
+    while anchor < len(raw) - 1:
+        farthest = anchor + 1
+        for i in range(anchor + 2, len(raw)):
+            if has_line_of_sight(grid, raw[anchor], raw[i]):
+                farthest = i
+            else:
+                break
+        smoothed.append(raw[farthest])
+        anchor = farthest
+    return smoothed
+
+
+def nearest_reachable(grid, dist, oc, or_, clearance, cell):
+    """출발점 셀이 벽/도달불가면 8방향 BFS로 가장 가까운 통행·도달가능 셀 탐색."""
+    cols, rows = grid.shape
+    oc = max(0, min(cols - 1, oc)); or_ = max(0, min(rows - 1, or_))
+    if (not grid[oc, or_]) and np.isfinite(dist[oc, or_]):
+        return oc, or_
+    max_radius = int(math.ceil(clearance * 3 / cell))
+    visited = np.zeros((cols, rows), bool)
+    q = deque([(oc, or_)]); visited[oc, or_] = True
+    dc = [0, 0, 1, -1, 1, 1, -1, -1]; dr = [1, -1, 0, 0, 1, -1, 1, -1]
+    while q:
+        c, r = q.popleft()
+        if abs(c - oc) > max_radius or abs(r - or_) > max_radius:
+            continue
+        if (not grid[c, r]) and np.isfinite(dist[c, r]):
+            return c, r
+        for i in range(8):
+            nc, nr = c + dc[i], r + dr[i]
+            if 0 <= nc < cols and 0 <= nr < rows and not visited[nc, nr]:
+                visited[nc, nr] = True; q.append((nc, nr))
+    return None
+
+
+# ───────────────────────────────────────────── 고수준 API
+class Analysis:
+    """analyze() 결과 컨테이너. paths: [{'path_m','dist_mm','is_pass','start_m'}]."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def analyze(obstacles, exits, bounds, *, starts=None, mode="occupant",
+            worst_n=5, cell=CELL_SIZE, clearance=CLEARANCE,
+            threshold_mm=30000.0, max_cells=30_000_000):
+    """
+    피난경로 산출 (재사용 진입점).
+
+    obstacles : (N,4) 선분 [x1,y1,x2,y2] (도면단위 mm)
+    exits     : [(x,y), ...] 도착점(도면단위)
+    bounds    : (minx,miny,maxx,maxy) 탐색범위(도면단위)
+    starts    : occupant 모드 출발점 [(x,y)]. None이면 worstn 필요.
+    mode      : 'occupant' | 'worstn'
+    반환      : Analysis(paths, grid, dist, bounds, cols, rows, cell, clearance,
+                         n_free, n_wall, skipped)
+    """
+    minx, miny, maxx, maxy = bounds
+    cols = int(math.ceil((maxx - minx) / cell))
+    rows = int(math.ceil((maxy - miny) / cell))
+    if cols * rows > max_cells:
+        raise ValueError(f"격자 과대({cols}x{rows}) — cell 키우거나 bounds 축소.")
+
+    exit_cells = list({world_to_grid(x, y, minx, miny, cell) for (x, y) in exits})
+    grid = build_obstacle_grid(obstacles, minx, miny, cols, rows, cell,
+                               clearance, exit_cells)
+    dist, pred, inv_c, inv_r, idx = run_dijkstra(grid, exit_cells, cell)
+
+    if mode == "occupant":
+        if not starts:
+            raise ValueError("occupant 모드엔 starts 필요.")
+        seeds = list(starts)
+    else:
+        seeds = _worst_seeds(dist, grid, bounds, cell, worst_n)
+
+    paths = []
+    skipped = 0
+    for (wx, wy) in seeds:
+        oc, or_ = world_to_grid(wx, wy, minx, miny, cell)
+        best = nearest_reachable(grid, dist, oc, or_, clearance, cell)
+        if best is None:
+            skipped += 1
+            continue
+        bc, br = best
+        d_mm = float(dist[bc, br])
+        cells = trace_path(pred, inv_c, inv_r, grid, idx[bc, br])
+        if len(cells) < 2:
+            continue
+        path_m = [grid_to_world(c, r, minx, miny, cell) for c, r in cells]
+        paths.append({"path_m": path_m, "dist_mm": d_mm,
+                      "is_pass": d_mm <= threshold_mm,
+                      "start_m": (wx, wy)})
+    return Analysis(paths=paths, grid=grid, dist=dist, bounds=bounds,
+                    cols=cols, rows=rows, cell=cell, clearance=clearance,
+                    n_free=int((~grid).sum()), n_wall=int(grid.sum()),
+                    skipped=skipped)
+
+
+def _worst_seeds(dist, grid, bounds, cell, n):
+    """도달가능 셀 중 거리 최대 지점을 최소이격으로 분산 추출(원본 WorstN 취지)."""
+    minx, miny, maxx, maxy = bounds
+    free_idx = np.argwhere(np.isfinite(dist) & (~grid))
+    if free_idx.size == 0:
+        return []
+    order = np.argsort(-dist[free_idx[:, 0], free_idx[:, 1]])
+    diag = math.hypot(maxx - minx, maxy - miny)
+    sep = max(diag * 0.15, 5000.0)
+    picked = []
+    while len(picked) < n and sep > 1000:
+        picked = []
+        for k in order:
+            c, r = int(free_idx[k, 0]), int(free_idx[k, 1])
+            if all(math.hypot((c - pc) * cell, (r - pr) * cell) >= sep
+                   for pc, pr in picked):
+                picked.append((c, r))
+                if len(picked) >= n:
+                    break
+        sep *= 0.7
+    return [grid_to_world(c, r, minx, miny, cell) for c, r in picked]
+
+
+def connectivity(obstacles, bounds, cell=CELL_SIZE, clearance=CLEARANCE):
+    """보행공간 연결성 진단(도면 품질 점검용). 반환 dict."""
+    from scipy.ndimage import label
+    minx, miny, maxx, maxy = bounds
+    cols = int(math.ceil((maxx - minx) / cell)); rows = int(math.ceil((maxy - miny) / cell))
+    grid = build_obstacle_grid(obstacles, minx, miny, cols, rows, cell, clearance, ())
+    free = ~grid
+    lab, n = label(free)
+    sizes = np.bincount(lab.ravel()); sizes[0] = 0
+    main = int(sizes.argmax())
+    return {"n_components": int(n), "largest_frac": float(sizes[main] / free.sum()),
+            "labels": lab, "main": main, "grid": grid, "cols": cols, "rows": rows}
