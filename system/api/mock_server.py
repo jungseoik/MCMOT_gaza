@@ -788,8 +788,8 @@ def put_mapping(cam_id: str, body: MappingBody):
         raise HTTPException(422, "호모그래피 산출 실패 — 대응점을 확인하세요")
     cam.mapping = CameraMapping(cctv_pts=body.cctv_pts, map_pts=body.map_pts,
                                 H=[float(v) for v in H.reshape(-1)])
-    if body.valid_roi is not None:
-        cam.valid_roi = body.valid_roi if len(body.valid_roi) >= 3 else None
+    # valid_roi는 요청 값으로 전체 교체 — null/3점 미만 = ROI 제거 (계약 v1.3, 실서버 동일)
+    cam.valid_roi = body.valid_roi if (body.valid_roi and len(body.valid_roi) >= 3) else None
     return store.save_camera(SITE_ID, cam)
 
 

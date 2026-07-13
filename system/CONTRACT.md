@@ -58,7 +58,7 @@
 | `DELETE /api/cameras/{id}` | — | `{"ok": true}` |
 | `POST /api/cameras/{id}/test` | — | `{ok, width, height, snapshot_b64}` (첫 프레임. **snapshot_b64는 `data:image/jpeg;base64,…` data URL 형식** — v1.1 명문화) |
 | `GET /api/cameras/{id}/snapshot` | — | image/jpeg 1장 (온디맨드, 스트림 아님) |
-| `PUT /api/cameras/{id}/mapping` | `{cctv_pts: [[u,v]×4+], map_pts: [[x,y]×4+], valid_roi?: [[u,v]...]}` | `CameraConfig` — **H는 서버가 cv2.findHomography로 산출·저장** |
+| `PUT /api/cameras/{id}/mapping` | `{cctv_pts: [[u,v]×4+], map_pts: [[x,y]×4+], valid_roi: [[u,v]...] \| null}` | `CameraConfig` — **H는 서버가 cv2.findHomography로 산출·저장**. valid_roi는 **요청 값으로 전체 교체**(null/3점 미만=제거 — v1.3 명확화) |
 | `POST /api/session/start` | `{origin: [x,y], t_alarm?: float}` (t_alarm 생략 시 now) | `SessionLive`. 시작 시 카운터·debounce reset. 진행 중이면 409 |
 | `POST /api/session/stop` | — | `EvaluationResult` (최종 산출·보존) |
 | `GET /api/session` | — | `SessionLive` (없으면 404) |

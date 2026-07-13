@@ -272,8 +272,9 @@ async def set_mapping(cam_id: str, request: Request):
         raise HTTPException(422, "호모그래피 산출 실패 — 대응점이 퇴화 배치")
     cfg.mapping = CameraMapping(cctv_pts=cctv_pts, map_pts=map_pts,
                                 H=[float(v) for v in H.reshape(-1)])
-    if body.get("valid_roi") is not None:
-        cfg.valid_roi = body["valid_roi"]
+    # valid_roi는 요청 값으로 전체 교체 — null/3점 미만 = ROI 제거 (계약 v1.3)
+    roi = body.get("valid_roi")
+    cfg.valid_roi = roi if (roi and len(roi) >= 3) else None
     rt.store.save_camera(SITE_ID, cfg)
     rt.reload_engine()
     return cfg
