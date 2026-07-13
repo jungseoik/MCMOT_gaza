@@ -35,11 +35,11 @@
           <div class="seg" id="mapTools">
             <button class="tag-btn on" data-tool="pan">이동</button>
             <button class="tag-btn" data-tool="scale">축척 2점</button>
-            <button class="tag-btn" data-tool="route">피난경로</button>
-            <button class="tag-btn" data-tool="zone">구역</button>
-            <button class="tag-btn" data-tool="bottleneck">병목</button>
-            <button class="tag-btn" data-tool="exit">출입구</button>
-            <button class="tag-btn" data-tool="graph">그래프</button>
+            <button class="tag-btn" data-tool="route" title="정렬도·EPFI·피난개시 판정의 기준선">피난경로 <i class="mtag">EPFI</i></button>
+            <button class="tag-btn" data-tool="zone" title="피난개시 판정·IDR 산출 단위 (+실시간 재실·밀도)">구역 <i class="mtag">IDR</i></button>
+            <button class="tag-btn" data-tool="bottleneck" title="임계밀도 초과 혼잡 누적 → CBS">병목 <i class="mtag">CBS</i></button>
+            <button class="tag-btn" data-tool="exit" title="방향성 통과 카운트 → 출구 활용 효율 SEI">출입구 <i class="mtag">SEI</i></button>
+            <button class="tag-btn" data-tool="graph" title="경보→구역 보행거리 그래프 (IDR 거리항)">그래프 <i class="mtag">IDR</i></button>
           </div>
           <span class="fieldlab">실거리 <input id="scaleMeters" type="number" min="0.1" step="0.1" value="10" /> m</span>
           <span class="fieldlab">임계밀도 <input id="rhoCrit" type="number" min="0.1" step="0.1" value="2.0" /> 명/m²</span>
@@ -52,31 +52,38 @@
       </div>
 
       <aside class="side">
-        <div class="sidehead">사이트 설정</div>
+        <div class="sidehead">
+          <span>사이트 설정</span>
+          <span class="seg">
+            <button class="tag-btn on" id="msTabSet">설정</button>
+            <button class="tag-btn" id="msTabHelp">지표 설명</button>
+          </span>
+        </div>
         <div class="sidebody">
+          <div id="mapSetPanel">
           <div class="group">
             <div class="gtitle">맵 · 축척</div>
             <div class="grow" id="mapMeta">맵 없음</div>
             <div class="grow" id="scaleMeta">축척 미지정</div>
           </div>
           <div class="group">
-            <div class="gtitle">피난경로 <span class="cnt" id="cntRoutes">0</span></div>
+            <div class="gtitle">피난경로 <i class="mtag">EPFI·정렬도</i> <span class="cnt" id="cntRoutes">0</span></div>
             <div id="listRoutes" class="ellist"></div>
           </div>
           <div class="group">
-            <div class="gtitle">구역 <span class="cnt" id="cntZones">0</span></div>
+            <div class="gtitle">구역 <i class="mtag">IDR 산출용</i> <span class="cnt" id="cntZones">0</span></div>
             <div id="listZones" class="ellist"></div>
           </div>
           <div class="group">
-            <div class="gtitle">병목 <span class="cnt" id="cntBottlenecks">0</span></div>
+            <div class="gtitle">병목 <i class="mtag">CBS 산출용</i> <span class="cnt" id="cntBottlenecks">0</span></div>
             <div id="listBottlenecks" class="ellist"></div>
           </div>
           <div class="group">
-            <div class="gtitle">출입구 <span class="cnt" id="cntExits">0</span></div>
+            <div class="gtitle">출입구 <i class="mtag">SEI 산출용</i> <span class="cnt" id="cntExits">0</span></div>
             <div id="listExits" class="ellist"></div>
           </div>
           <div class="group">
-            <div class="gtitle">공간그래프 (IDR) <span class="cnt" id="cntGraph">0</span></div>
+            <div class="gtitle">공간그래프 <i class="mtag">IDR 거리항</i> <span class="cnt" id="cntGraph">0</span></div>
             <div id="listGraph" class="ellist"></div>
             <div class="grow" id="graphMeta"></div>
           </div>
@@ -88,6 +95,57 @@
               <label>r_th <input id="thR" type="number" step="0.05" /></label>
               <label>dt_hold <input id="thDt" type="number" step="0.5" /> s</label>
               <label>d_allow <input id="thD" type="number" step="0.5" /> m</label>
+            </div>
+          </div>
+          </div>
+
+          <!-- 지표 설명 패널 (토글) — 4대 지표가 어떤 요소로 어떻게 산출되는지 -->
+          <div id="mapHelpPanel" class="hidden">
+            <div class="hcard">
+              <div class="htitle"><i class="mtag">IDR</i> 구역 피난 반응 확산</div>
+              <div class="hbody">
+                경보 위치에서 각 <b>구역</b>까지의 거리 ÷ 그 구역의 반응 지연시간.<br/>
+                <b>피난개시 판정</b>: 구역 안 사람들의 평균속도(v_th)·경로 방향 정렬도(a_th)·
+                동시만족 비율(r_th)이 <b>dt_hold초 연속 유지</b>된 최초 시점.<br/>
+                필요한 요소: <b>구역</b>(판정 단위) + <b>피난경로</b>(방향 기준) +
+                <b>공간그래프</b>(보행거리 — 없으면 직선거리)
+              </div>
+            </div>
+            <div class="hcard">
+              <div class="htitle"><i class="mtag">EPFI</i> 경로 충실도 (0~100)</div>
+              <div class="hbody">
+                사람별로 <b>배정된 피난경로</b>(세션 첫 위치의 최근접 경로)에서 벗어난
+                거리 d(t)를 시간 적분 → <code>max(0, 1−∫d dt/(T·d_allow))×100</code>.<br/>
+                경로 위를 걸으면 100점, 허용이탈(d_allow) 밖을 오래 걸을수록 0점.<br/>
+                필요한 요소: <b>피난경로</b> + 맵 <b>축척</b>
+              </div>
+            </div>
+            <div class="hcard">
+              <div class="htitle"><i class="mtag">CBS</i> 병목 혼잡 누적</div>
+              <div class="hbody">
+                <b>병목</b> polygon별 밀도 ρ(t)=인원/실면적이 <b>임계밀도(ρcrit)</b>를
+                초과한 만큼을 시간 적분 → <code>∫max(0, ρ−ρcrit)×가중치 dt</code>.<br/>
+                임계를 한 번도 안 넘으면 0. 병목별 최대밀도·초과누적시간·위험등급 함께 산출.<br/>
+                필요한 요소: <b>병목</b>(+임계밀도) + 맵 <b>축척</b>
+              </div>
+            </div>
+            <div class="hcard">
+              <div class="htitle"><i class="mtag">SEI</i> 출구 활용 효율 (0~100)</div>
+              <div class="hbody">
+                <b>출입구</b> 통과선별 고유 통과인원(왕복 중복 제외) 분포를
+                <b>설계 인원</b> 분포와 비교 → <code>(1−½Σ|실제비율−설계비율|)×100</code>.<br/>
+                설계 분포대로 분산 통과하면 100, 한 출구로 쏠리면 하락.
+                통과 0명이면 산출 보류(insufficient data).<br/>
+                필요한 요소: <b>출입구</b>(통과선+안쪽 방향+설계인원)
+              </div>
+            </div>
+            <div class="hcard">
+              <div class="htitle">공통</div>
+              <div class="hbody">
+                네 지표 모두 <b>운영 뷰 → 🔔 경보 시작</b>으로 평가 세션을 열어야 산출
+                (경보 시각 t_alarm 기준). 임계값(v_th 등)은 좌측 [설정] 탭에서 조정 —
+                고객 확정 전 잠정 기본값.
+              </div>
             </div>
           </div>
         </div>

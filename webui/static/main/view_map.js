@@ -296,6 +296,15 @@ Views.map = (() => {
       b.onclick = () => setTool(b.dataset.tool));
     $("drawDone").onclick = finishDraft;
     $("drawCancel").onclick = cancelDraft;
+    // 우측 패널: [설정] ↔ [지표 설명] 토글
+    const msTab = (help) => {
+      $("mapSetPanel").classList.toggle("hidden", help);
+      $("mapHelpPanel").classList.toggle("hidden", !help);
+      $("msTabSet").classList.toggle("on", !help);
+      $("msTabHelp").classList.toggle("on", help);
+    };
+    $("msTabSet").onclick = () => msTab(false);
+    $("msTabHelp").onclick = () => msTab(true);
     $("siteSave").onclick = save;
     $("mapUpload").onchange = (e) => { if (e.target.files.length) upload(e.target.files); };
     $("scaleMeters").onchange = () => {              // 이미 지정된 축척의 실거리 갱신
