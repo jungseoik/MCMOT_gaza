@@ -13,7 +13,7 @@ cad_convert.py — CAD 변환 파이프라인(재현용). DWG↔DXF + DXF→PNG(
   python tools/cad_convert.py dwg2dxf --in cad/17F.dwg --out cad/
   python tools/cad_convert.py dxf2png --dxf cad/17F.dxf --out-prefix cad/17F_plan
 """
-import argparse, os, shutil, subprocess, sys, tempfile
+import argparse, json, os, shutil, subprocess, sys, tempfile
 
 KRFONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 ODA_BIN = "ODAFileConverter"   # apt로 설치되면 /usr/bin/ODAFileConverter
@@ -220,8 +220,27 @@ def dxf2png(args):
     for k in range(11):
         ax.plot([bx + k * upm] * 2, [by - 0.4 * upm, by + 0.4 * upm], "-", color="k", lw=1)
     p2 = args.out_prefix + "_scale.png"
-    fig.savefig(p2, dpi=args.dpi, facecolor="white"); plt.close(fig)
-    print(f"[ok] {p1}\n[ok] {p2}")
+    fig.savefig(p2, dpi=args.dpi, facecolor="white")
+
+    # (3) m/px 메타 JSON — MACS 멀티카메라 시스템 맵 업로드용
+    #     (POST /api/site/map 의 meta 필드로 넘기면 축척 자동 설정)
+    fig.set_dpi(args.dpi)
+    fig.canvas.draw()                     # 저장 dpi 기준으로 axes 픽셀 bbox 확정
+    bb = ax.get_window_extent()
+    m_per_px = Wm / bb.width              # 플롯영역 가로 px ↔ 실폭(m)
+    meta = {
+        "m_per_px": round(m_per_px, 6),
+        "plot_bbox_px": [round(bb.x0, 1), round(bb.y0, 1), round(bb.x1, 1), round(bb.y1, 1)],
+        "total_m": [round(Wm, 2), round(Hm, 2)],
+        "grid_m": args.grid_m,
+        "dpi": args.dpi,
+        "source_dxf": str(args.dxf),
+    }
+    p3 = args.out_prefix + "_scale.meta.json"
+    with open(p3, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    plt.close(fig)
+    print(f"[ok] {p1}\n[ok] {p2}\n[ok] {p3}  (m/px={m_per_px:.5f})")
 
 
 def main():

@@ -160,7 +160,38 @@ class MapCanvas {
 const MC_COLORS = {
   route: "#30DCFB", zone: "#28A138", bottleneck: "#FF6F21",
   exit: "#FF4A44", scale: "#2E90FA", roi: "#30DCFB", over: "#FF4A44",
+  graph: "#B48CFF",
 };
+
+/** IDR 공간그래프 렌더 — 엣지(점선)·노드(원+id). opts.sel = 엣지 연결용 선택 노드. */
+function drawGraph(g, graph, opts = {}) {
+  if (!graph || !graph.nodes || !graph.nodes.length) return;
+  const { ctx, TX, TY } = g;
+  const col = MC_COLORS.graph;
+  const pos = {};
+  graph.nodes.forEach((n) => { pos[n.id] = [TX(n.xy[0]), TY(n.xy[1])]; });
+  ctx.globalAlpha = opts.faint ? 0.45 : 1.0;
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+  (graph.edges || []).forEach(([a, b]) => {
+    if (!pos[a] || !pos[b]) return;
+    ctx.beginPath(); ctx.moveTo(pos[a][0], pos[a][1]); ctx.lineTo(pos[b][0], pos[b][1]); ctx.stroke();
+  });
+  ctx.setLineDash([]);
+  graph.nodes.forEach((n) => {
+    const [x, y] = pos[n.id];
+    const selected = opts.sel === n.id;
+    ctx.fillStyle = selected ? "#fff" : col;
+    ctx.beginPath(); ctx.arc(x, y, selected ? 6 : 4.5, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x, y, selected ? 6 : 4.5, 0, 7); ctx.stroke();
+    if (g.s > 0.35 || selected) {
+      ctx.font = "10px Pretendard, sans-serif";
+      ctx.fillStyle = col;
+      ctx.fillText(n.id, x + 7, y - 6);
+    }
+  });
+  ctx.globalAlpha = 1.0;
+}
 
 function camColor(camId, cams) {
   let idx = (cams || []).findIndex((c) => c.cam_id === camId);

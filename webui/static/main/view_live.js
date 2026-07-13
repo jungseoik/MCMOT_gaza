@@ -9,6 +9,7 @@ Views.live = (() => {
   let inited = false, active = false;
   let mc = null, es = null, watchdog = null;
   let state = null, lastMsg = 0;
+  let showGraph = false;                 // IDR 공간그래프 표시 토글
 
   // ------------------------------------------------------------ 수신
   function connect() {
@@ -48,6 +49,7 @@ Views.live = (() => {
   // ------------------------------------------------------------ 렌더
   function overlay(g) {
     drawSiteElements(g, App.site, { state, showScale: false });
+    if (showGraph) drawGraph(g, App.site.graph, { faint: true });
     drawAlarm(g);                                    // 🔔 경보 위치 마커
     if (!state) return;
     const { ctx, TX, TY } = g;
@@ -169,6 +171,11 @@ Views.live = (() => {
       Session.init({ onMapRender: () => { if (mc) mc.render(); } });
       Session.bootstrap();
     }
+    $("graphToggle").onclick = () => {
+      showGraph = !showGraph;
+      $("graphToggle").classList.toggle("on", showGraph);
+      if (mc) mc.render();
+    };
     $("snapClose").onclick = () => $("snapModal").classList.add("hidden");
     $("snapModal").onclick = (e) => { if (e.target === $("snapModal")) $("snapModal").classList.add("hidden"); };
   }

@@ -291,11 +291,40 @@ async def session_start(request: Request):
     return rt.engine.start_session(origin, t_alarm=body.get("t_alarm"))
 
 
+def _sessions_dir() -> Path:
+    d = rt.store.site_dir(SITE_ID) / "sessions"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _save_session(result, timeline) -> None:
+    """세션 결과+타임라인 영속화 (FR-09) — data/sites/<site>/sessions/<id>.json."""
+    payload = {"result": result.model_dump(),
+               "timeline": [t.model_dump() for t in timeline]}
+    p = _sessions_dir() / f"{result.session_id}.json"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp.rename(p)
+
+
+def _load_saved(session_id: str) -> dict | None:
+    p = _sessions_dir() / f"{session_id}.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+
+
+def _latest_saved() -> dict | None:
+    files = sorted(_sessions_dir().glob("*.json"),
+                   key=lambda p: p.stat().st_mtime)
+    return json.loads(files[-1].read_text(encoding="utf-8")) if files else None
+
+
 @app.post("/api/session/stop")
 def session_stop():
     if rt.engine is None or rt.engine.session_live() is None:
         raise HTTPException(404, "진행 중 세션 없음")
-    return rt.engine.stop_session()
+    result = rt.engine.stop_session()
+    _save_session(result, rt.engine.session_timeline())
+    return result
 
 
 @app.get("/api/session")
@@ -309,21 +338,55 @@ def session_get():
 @app.get("/api/session/result")
 def session_result():
     res = rt.engine.session_result() if rt.engine else None
-    if res is None:
-        raise HTTPException(404, "산출된 세션 결과 없음")
-    return res
+    if res is not None:
+        return res
+    saved = _latest_saved()                     # 재시작 후에도 마지막 결과 유지
+    if saved is not None:
+        return saved["result"]
+    raise HTTPException(404, "산출된 세션 결과 없음")
 
 
 @app.get("/api/session/timeline")
 def session_timeline():
-    return rt.engine.session_timeline() if rt.engine else []
+    tl = rt.engine.session_timeline() if rt.engine else []
+    if tl:
+        return tl
+    saved = _latest_saved()
+    return saved["timeline"] if saved else []
+
+
+@app.get("/api/sessions")
+def sessions_list():
+    """세션 이력 목록 (요약) — 저장 파일 기반, 최신순 (계약 v1.3)."""
+    out = []
+    for p in sorted(_sessions_dir().glob("*.json"),
+                    key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            r = json.loads(p.read_text(encoding="utf-8"))["result"]
+        except (json.JSONDecodeError, KeyError):
+            continue
+        out.append({k: r.get(k) for k in
+                    ("session_id", "alarm_ts", "ended_at", "sei", "epfi_avg", "cbs_total")})
+    return out
+
+
+@app.get("/api/sessions/{session_id}")
+def sessions_get(session_id: str):
+    saved = _load_saved(session_id)
+    if saved is None:
+        raise HTTPException(404, f"세션 없음: {session_id}")
+    return saved
 
 
 @app.get("/api/session/export")
 def session_export(format: str = "json"):
+    from system.contracts import EvaluationResult
     res = rt.engine.session_result() if rt.engine else None
-    if res is None:
-        raise HTTPException(404, "산출된 세션 결과 없음")
+    if res is None:                              # 재시작 후엔 저장본으로
+        saved = _latest_saved()
+        if saved is None:
+            raise HTTPException(404, "산출된 세션 결과 없음")
+        res = EvaluationResult.model_validate(saved["result"])
     if format == "json":
         return Response(res.model_dump_json(indent=2),
                         media_type="application/json",

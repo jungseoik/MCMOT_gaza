@@ -16,7 +16,8 @@ Views.map = (() => {
     tool = t;
     document.querySelectorAll("#mapTools .tag-btn").forEach((b) =>
       b.classList.toggle("on", b.dataset.tool === t));
-    draft = t === "pan" ? null : { pts: [], inside: null };
+    draft = (t === "pan" || t === "graph") ? null : { pts: [], inside: null };
+    graphSel = null;
     if (mc) { mc.freehand = (t === "route"); mc.render(); }
     hint();
   }
@@ -32,12 +33,57 @@ Views.map = (() => {
       zone: "구역: 꼭짓점을 클릭으로 추가, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
       bottleneck: "병목: 꼭짓점 클릭 + 임계밀도 입력, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
       exit: "출입구: 통과선 2점 클릭 → 세 번째 클릭이 '안쪽' 지점 (자동 완료).",
+      graph: "공간그래프(IDR): 빈 곳 클릭=노드 추가 · 노드 클릭 2회=엣지 연결 · 노드 더블클릭=삭제. 복도 교차점·문 위치를 잇는 '걷는 거리' 그래프.",
     };
     el.textContent = H[tool] || "";
   }
 
+  // ------------------------------------------------------------ 공간그래프
+  let graphSel = null;                              // 엣지 연결용 선택 노드 id
+
+  function nearNode(p) {
+    const g = App.site.graph || { nodes: [] };
+    const r = 12 / (mc ? mc.s : 1);                 // 화면 12px 스냅 반경
+    return g.nodes.find((n) => Math.hypot(n.xy[0] - p.x, n.xy[1] - p.y) <= r) || null;
+  }
+
+  function graphClick(p) {
+    const s = App.site;
+    if (!s.graph) s.graph = { nodes: [], edges: [] };
+    const hit = nearNode(p);
+    if (!hit) {                                     // 빈 곳 → 노드 추가
+      s.graph.nodes.push({ id: nextId(s.graph.nodes, "n"), xy: [p.x, p.y] });
+      graphSel = null;
+    } else if (graphSel === null) {                 // 1번째 노드 선택
+      graphSel = hit.id;
+      hint(`노드 ${hit.id} 선택 — 연결할 노드를 클릭하세요 (같은 노드 재클릭=해제).`);
+    } else if (graphSel === hit.id) {
+      graphSel = null; hint();
+    } else {                                        // 2번째 노드 → 엣지 토글
+      const key = (a, b) => (a < b ? [a, b] : [b, a]);
+      const [a, b] = key(graphSel, hit.id);
+      const i = s.graph.edges.findIndex((e) => key(e[0], e[1])[0] === a && key(e[0], e[1])[1] === b);
+      if (i >= 0) { s.graph.edges.splice(i, 1); hint(`엣지 ${a}–${b} 제거`); }
+      else { s.graph.edges.push([a, b]); hint(`엣지 ${a}–${b} 연결 — 계속 연결하거나 빈 곳을 클릭하세요.`); }
+      graphSel = hit.id;                            // 연쇄 연결 편의
+    }
+    refresh();
+  }
+
+  function graphDblClick(p) {                       // 노드 삭제(연결 엣지 포함)
+    const s = App.site;
+    const hit = s.graph && nearNode(p);
+    if (!hit) return false;
+    s.graph.nodes = s.graph.nodes.filter((n) => n.id !== hit.id);
+    s.graph.edges = s.graph.edges.filter((e) => e[0] !== hit.id && e[1] !== hit.id);
+    if (graphSel === hit.id) graphSel = null;
+    refresh();
+    return true;
+  }
+
   // ------------------------------------------------------------ 드로잉
   function onClick(p) {
+    if (tool === "graph") { graphClick(p); return; }
     if (!draft) return;
     const site = App.site;
     if (tool === "scale") {
@@ -123,6 +169,7 @@ Views.map = (() => {
   // ------------------------------------------------------------ 렌더
   function overlay(g) {
     drawSiteElements(g, App.site, { showScale: true });
+    drawGraph(g, App.site.graph, { sel: tool === "graph" ? graphSel : null });
     if (!draft || !draft.pts.length) return;
     const { ctx } = g;
     const col = MC_COLORS[tool] || "#fff";
@@ -169,6 +216,18 @@ Views.map = (() => {
     fill("listBottlenecks", "cntBottlenecks", s.bottlenecks, MC_COLORS.bottleneck,
          (e) => `ρ ${e.rho_crit}`);
     fill("listExits", "cntExits", s.exits, MC_COLORS.exit, () => "통과선");
+    // 공간그래프 — 노드·엣지 요약 1행 + 전체 지우기
+    const gbox = $("listGraph");
+    const gr = s.graph || { nodes: [], edges: [] };
+    gbox.innerHTML = "";
+    $("cntGraph").textContent = gr.nodes.length;
+    if (gr.nodes.length) {
+      gbox.appendChild(elItem("공간그래프", `노드 ${gr.nodes.length} · 엣지 ${gr.edges.length}`,
+        MC_COLORS.graph, () => { s.graph = { nodes: [], edges: [] }; graphSel = null; refresh(); }));
+    }
+    $("graphMeta").textContent = gr.nodes.length
+      ? "IDR 최단거리는 이 그래프 위에서 계산 (미지정 시 직선거리 폴백)"
+      : "그래프 없음 — IDR은 직선거리 폴백으로 계산";
     $("mapMeta").textContent = s.map ? `map.png · ${s.map.w}×${s.map.h}px` : "맵 없음 — 업로드하세요";
     $("scaleMeta").textContent = s.map && (s.map.scale || s.map.m_per_px != null)
       ? `축척: ${fmtScale()}` : "축척 미지정";
@@ -201,13 +260,24 @@ Views.map = (() => {
     }
   }
 
-  async function upload(file) {
+  async function upload(files) {
+    // 이미지 1장 (+선택: cad-convert *_scale.meta.json → 축척 자동)
+    const list = Array.from(files);
+    const img = list.find((f) => f.type.startsWith("image/"));
+    const metaFile = list.find((f) => f.name.endsWith(".json"));
+    if (!img) { hint("맵 이미지 파일을 선택하세요.", true); return; }
     hint("맵 업로드 중…");
     try {
-      await API.uploadMap(file);
+      let meta = null;
+      if (metaFile) {
+        meta = JSON.parse(await metaFile.text());
+        if (meta.m_per_px == null) { hint("메타 JSON에 m_per_px가 없습니다.", true); return; }
+      }
+      await API.uploadMap(img, meta);
       await App.reloadSite();                        // MapSpec 반영 + 이미지 로드
       mc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
-      hint("맵 업로드 완료 — 축척 2점을 지정하세요.");
+      hint(meta ? `맵 업로드 완료 — 축척 자동 설정 (${meta.m_per_px} m/px, CAD 메타).`
+                : "맵 업로드 완료 — 축척 2점을 지정하세요.");
       refresh();
     } catch (e) { hint("업로드 실패: " + e.message, true); }
   }
@@ -219,7 +289,7 @@ Views.map = (() => {
     mc = new MapCanvas($("mapSetupCv"), {
       onClick, onDragDraw,
       onDragEnd: () => {},
-      onDblClick: () => finishDraft(),
+      onDblClick: (p) => { if (tool === "graph") { graphDblClick(p); return; } finishDraft(); },
       draw: overlay,
     });
     document.querySelectorAll("#mapTools .tag-btn").forEach((b) =>
@@ -227,7 +297,7 @@ Views.map = (() => {
     $("drawDone").onclick = finishDraft;
     $("drawCancel").onclick = cancelDraft;
     $("siteSave").onclick = save;
-    $("mapUpload").onchange = (e) => { if (e.target.files[0]) upload(e.target.files[0]); };
+    $("mapUpload").onchange = (e) => { if (e.target.files.length) upload(e.target.files); };
     $("scaleMeters").onchange = () => {              // 이미 지정된 축척의 실거리 갱신
       const m = parseFloat($("scaleMeters").value);
       if (App.site.map && App.site.map.scale && m > 0) {
