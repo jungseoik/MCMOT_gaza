@@ -335,76 +335,105 @@ const Session = (() => {
     const aCounts = exits.map((e) => actual[e.id] || 0);
     const cCounts = exits.map((e) => e.design_capacity || 0);
 
-    // 두 패널 canvas
-    box.innerHTML =
-      `<div class="sei-panels">` +
-        `<div class="sei-panel"><div class="sei-ptitle">설계 통과용량 분포</div><canvas id="seiDesignCv"></canvas></div>` +
-        `<div class="sei-panel"><div class="sei-ptitle">실제 통과객체 분포</div><canvas id="seiActualCv"></canvas></div>` +
-      `</div>`;
+    const deltas = dShares.map((d, i) => aShares[i] - d);
+    const maxAbsDelta = Math.max(...deltas.map(Math.abs), 0.001);
 
-    drawSeiBars($("seiDesignCv"), labels, dShares, cCounts, false);
-    drawSeiBars($("seiActualCv"), labels, aShares, aCounts, true);
+    box.innerHTML =
+      `<div class="sei-legend"><span class="sei-leg-d">■ 설계</span><span class="sei-leg-a">■ 실제</span></div>` +
+      `<canvas id="seiChartCv"></canvas>` +
+      `<div class="sei-delta-hd">출구별 분포 차이 (실제 − 설계)</div>` +
+      `<div id="seiDeltas"></div>`;
+
+    requestAnimationFrame(() => {
+      const cv = $("seiChartCv");
+      if (cv) drawSeiGrouped(cv, labels, dShares, aShares);
+
+      const dbox = $("seiDeltas");
+      if (!dbox) return;
+      const worstIdx = deltas.reduce((mi, d, i) => Math.abs(d) > Math.abs(deltas[mi]) ? i : mi, 0);
+      dbox.innerHTML = deltas.map((d, i) => {
+        const pct = Math.round(Math.abs(d) / maxAbsDelta * 100);
+        const sign = d >= 0 ? "+" : "";
+        const cls = Math.abs(d) < 0.005 ? "sei-even" : d > 0 ? "sei-over" : "sei-under";
+        const worst = i === worstIdx && Math.abs(d) >= 0.005 ? " sei-worst" : "";
+        return `<div class="sei-drow${worst}">
+          <div class="sei-dlab">${labels[i]}</div>
+          <div class="sei-dbar-wrap"><div class="sei-dbar ${cls}" style="width:${pct}%"></div></div>
+          <div class="sei-dval ${cls}">${sign}${(d * 100).toFixed(1)}%</div>
+        </div>`;
+      }).join("");
+    });
   }
 
-  function drawSeiBars(cv, labels, shares, counts, isActual) {
-    const W = cv.parentElement.clientWidth || 200;
-    const H = 160;
+  function drawSeiGrouped(cv, labels, dShares, aShares) {
+    const n = labels.length;
+    const W = cv.parentElement.clientWidth || 260;
+    const H = 150;
     cv.width = W; cv.height = H;
     const ctx = cv.getContext("2d");
-    const n = labels.length;
-    const PAD_L = 32, PAD_B = 28, PAD_T = 8, PAD_R = 8;
+
+    const PAD_L = 30, PAD_R = 8, PAD_T = 10, PAD_B = 26;
     const plotW = W - PAD_L - PAD_R;
     const plotH = H - PAD_T - PAD_B;
-    const barW = Math.max(8, plotW / n * 0.55);
-    const barGap = plotW / n;
+    const slotW = plotW / n;
+    const bw = Math.max(5, Math.min(18, slotW * 0.28));
+    const bg = 3;
 
     // 배경
-    ctx.fillStyle = "#0a1628";
+    ctx.fillStyle = "#111722";
     ctx.fillRect(0, 0, W, H);
 
-    // HUD 테두리
-    const borderCol = "#1e4a7a";
-    ctx.strokeStyle = borderCol; ctx.lineWidth = 1.5;
-    ctx.strokeRect(0.75, 0.75, W - 1.5, H - 1.5);
-
-    // y축 격자 + 레이블
-    ctx.strokeStyle = "#1a3050"; ctx.lineWidth = 1;
-    ctx.fillStyle = "#5a8ab0"; ctx.font = "10px monospace"; ctx.textAlign = "right";
-    [0, 0.25, 0.5, 0.75, 1.0].forEach((v) => {
+    // 격자
+    [0.25, 0.5, 0.75, 1.0].forEach((v) => {
       const y = PAD_T + plotH * (1 - v);
+      ctx.strokeStyle = v === 1.0 ? "#2a3a50" : "#1e2b3a";
+      ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y); ctx.stroke();
+      ctx.fillStyle = "#4a6078"; ctx.font = "9px sans-serif"; ctx.textAlign = "right";
       ctx.fillText(v.toFixed(2), PAD_L - 3, y + 3.5);
     });
 
-    // 바
-    const barCol = isActual ? "#3eb8e8" : "#2e8cc0";
-    shares.forEach((sh, i) => {
-      const bh = plotH * Math.min(sh, 1.0);
-      const bx = PAD_L + barGap * i + (barGap - barW) / 2;
-      const by = PAD_T + plotH - bh;
+    // 그룹 바
+    labels.forEach((lbl, i) => {
+      const cx = PAD_L + slotW * (i + 0.5);
+      const bx_d = cx - bw - bg / 2;
+      const bx_a = cx + bg / 2;
 
-      // 바 그라데이션
-      const grad = ctx.createLinearGradient(bx, by, bx, by + bh);
-      grad.addColorStop(0, isActual ? "#5dd4f8" : "#4ab0e0");
-      grad.addColorStop(1, isActual ? "#1e7aaa" : "#1a5a8a");
-      ctx.fillStyle = grad;
-      ctx.fillRect(bx, by, barW, bh);
+      // 설계 (청색)
+      const h_d = plotH * Math.min(dShares[i], 1);
+      const gd = ctx.createLinearGradient(0, PAD_T + plotH - h_d, 0, PAD_T + plotH);
+      gd.addColorStop(0, "#5ab4e0"); gd.addColorStop(1, "#1e6898");
+      ctx.fillStyle = gd;
+      ctx.fillRect(bx_d, PAD_T + plotH - h_d, bw, h_d);
 
-      // 카운트 레이블 (바 위)
-      ctx.fillStyle = "#c8e8ff";
-      ctx.font = "bold 10px monospace"; ctx.textAlign = "center";
-      if (counts[i] > 0) ctx.fillText(counts[i], bx + barW / 2, by - 3);
+      // 실제 (오렌지)
+      const h_a = plotH * Math.min(aShares[i], 1);
+      const ga = ctx.createLinearGradient(0, PAD_T + plotH - h_a, 0, PAD_T + plotH);
+      ga.addColorStop(0, "#f09050"); ga.addColorStop(1, "#b04818");
+      ctx.fillStyle = ga;
+      ctx.fillRect(bx_a, PAD_T + plotH - h_a, bw, h_a);
 
-      // x축 레이블
-      ctx.fillStyle = "#7aaac8"; ctx.font = "10px monospace";
-      const lbl = labels[i].length > 5 ? labels[i].slice(0, 5) + "…" : labels[i];
-      ctx.fillText(lbl, bx + barW / 2, H - PAD_B + 13);
+      // 비율 레이블 (바 위)
+      ctx.font = "8px sans-serif"; ctx.textAlign = "center";
+      if (dShares[i] > 0.04) {
+        ctx.fillStyle = "#7ac8f0";
+        ctx.fillText((dShares[i] * 100).toFixed(0) + "%", bx_d + bw / 2, PAD_T + plotH - h_d - 2);
+      }
+      if (aShares[i] > 0.04) {
+        ctx.fillStyle = "#f0c090";
+        ctx.fillText((aShares[i] * 100).toFixed(0) + "%", bx_a + bw / 2, PAD_T + plotH - h_a - 2);
+      }
+
+      // x 레이블
+      ctx.fillStyle = "#5a7890"; ctx.font = "9px sans-serif";
+      const short = lbl.length > 5 ? lbl.slice(0, 4) + "…" : lbl;
+      ctx.fillText(short, cx, H - PAD_B + 12);
     });
 
-    // y축 선
-    ctx.strokeStyle = "#2a5070"; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(PAD_L, PAD_T); ctx.lineTo(PAD_L, PAD_T + plotH); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(PAD_L, PAD_T + plotH); ctx.lineTo(W - PAD_R, PAD_T + plotH); ctx.stroke();
+    // 축
+    ctx.strokeStyle = "#2e4060"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(PAD_L, PAD_T); ctx.lineTo(PAD_L, PAD_T + plotH);
+    ctx.lineTo(W - PAD_R, PAD_T + plotH); ctx.stroke();
   }
 
   function renderCbs() {

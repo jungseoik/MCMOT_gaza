@@ -75,10 +75,18 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .bfield{ display:flex; align-items:center; gap:3px; font-size:11px; color:var(--text-3); white-space:nowrap; }
 .bni{ width:44px; height:22px; background:var(--bg-3); color:var(--text-1);
   border:1px solid var(--stroke-1); border-radius:4px; font-size:11px; text-align:right; padding:0 3px; }
-.sei-panels{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px; }
-.sei-panel{ background:#0a1628; border:1.5px solid #1e4a7a; border-radius:4px; padding:6px 4px 4px; }
-.sei-ptitle{ font-size:10px; color:#4a9ac8; text-align:center; margin-bottom:4px; font-weight:600; letter-spacing:.3px; }
-.sei-panel canvas{ display:block; width:100%; }
+.sei-legend{ display:flex; gap:12px; font-size:10px; padding:4px 0 3px; }
+.sei-leg-d{ color:#5ab4e0; } .sei-leg-a{ color:#f09050; }
+#seiChartCv{ display:block; width:100%; border-radius:4px; }
+.sei-delta-hd{ font-size:10px; color:var(--text-3); margin:8px 0 4px; font-weight:600; }
+.sei-drow{ display:flex; align-items:center; gap:6px; margin-bottom:4px; padding:2px 4px; border-radius:3px; }
+.sei-drow.sei-worst{ background:rgba(255,255,255,.04); }
+.sei-dlab{ font-size:10px; color:var(--text-2); width:56px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sei-dbar-wrap{ flex:1; height:7px; background:var(--bg-3); border-radius:3px; overflow:hidden; }
+.sei-dbar{ height:100%; border-radius:3px; }
+.sei-dbar.sei-over{ background:#3eb88a; } .sei-dbar.sei-under{ background:#e87640; } .sei-dbar.sei-even{ background:#3a5068; }
+.sei-dval{ font-size:10px; font-family:monospace; width:42px; text-align:right; flex-shrink:0; }
+.sei-dval.sei-over{ color:#3eb88a; } .sei-dval.sei-under{ color:#e87640; } .sei-dval.sei-even{ color:#4a6080; }
 .th-metric{ margin-top:10px; }
 .th-metric-hd{ font-size:11px; font-weight:600; color:var(--text-2); display:flex; align-items:center; gap:5px; margin-bottom:5px; }
 .th-note{ font-size:11px; color:var(--text-3); font-style:italic; padding:2px 0 0 2px; }
