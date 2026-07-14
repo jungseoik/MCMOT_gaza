@@ -52,6 +52,8 @@ class _ObjState:
     gid: str
     hist: deque = field(default_factory=deque)   # (ts, x, y) 맵 px
     last_ts: float = 0.0
+    first_ts: float = 0.0                        # 첫 관측 (체류시간용, v1.5)
+    conf: float = 0.0                            # 최근 검출 신뢰도
     in_bounds: bool = True
 
 
@@ -190,7 +192,9 @@ class MetricsEngine:
                 st = self._objects.get(gid)
                 if st is None:
                     st = self._objects[gid] = _ObjState(
-                        cam_id=cam_id, local_id=int(tr.local_track_id), gid=gid)
+                        cam_id=cam_id, local_id=int(tr.local_track_id), gid=gid,
+                        first_ts=ts)
+                st.conf = tr.conf
                 st.hist.append((ts, p.x, p.y))
                 while len(st.hist) > 1 and ts - st.hist[0][0] > self.window_sec:
                     st.hist.popleft()            # sliding window 유지
@@ -329,14 +333,40 @@ class MetricsEngine:
             now = self._latest_ts if self._latest_ts is not None else time.time()
             self._purge(now)
 
+            th = self._site.thresholds
+            sess = self._session
             objects: list[MapObject] = []
             positions: list[tuple[float, float]] = []
             for st in self._objects.values():
                 _, x, y = st.hist[-1]
                 vx, vy, speed, align = self._obj_kinematics(st)
+                # --- 객체별 부가 지표 (v1.5) — 전부 기계산 값의 노출/파생 ---
+                dwell = max(0.0, st.last_ts - st.first_ts)
+                zone_id = next((z.id for z, _a in self._zones
+                                if point_in_polygon((x, y), z.polygon)), None)
+                evac_ok = (speed is not None and align is not None
+                           and speed >= th.v_th and align >= th.a_th) \
+                    if (speed is not None or align is not None) else None
+                epfi_live = dev_m = route_id = exited = None
+                if sess is not None:
+                    pa = sess.persons.get(st.gid)
+                    if pa is not None:
+                        dev_m = pa.last_d_m
+                        route_id = pa.route_id
+                        T = pa.last_ts - pa.first_ts
+                        if T >= 2.0 and th.d_allow > 0 and pa.route_pts is not None:
+                            epfi_live = max(0.0, 1.0 - pa.integral_dm
+                                            / (T * th.d_allow)) * 100.0
+                    exited = next((eid for eid, ec in self._exits.items()
+                                   if st.gid in ec.counted_out
+                                   or st.gid in ec.counted_in), None)
                 objects.append(MapObject(
                     cam_id=st.cam_id, id=st.local_id, gid=st.gid,
-                    x=x, y=y, vx=vx, vy=vy, speed_mps=speed, align=align))
+                    x=x, y=y, vx=vx, vy=vy, speed_mps=speed, align=align,
+                    in_bounds=st.in_bounds, conf=round(st.conf, 3),
+                    dwell_sec=round(dwell, 1), zone_id=zone_id,
+                    evac_ok=evac_ok, epfi_live=epfi_live, dev_m=dev_m,
+                    route_id=route_id, exited=exited))
                 positions.append((x, y))
 
             zones = []

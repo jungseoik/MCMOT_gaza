@@ -204,7 +204,18 @@
     <div class="workarea">
       <aside class="side left">
         <div class="sidehead">카메라 <span class="conn" id="liveConn">연결 중…</span></div>
-        <div class="sidebody"><div id="liveCamList" class="camlist"></div></div>
+        <div class="sidebody">
+          <div id="liveCamList" class="camlist"></div>
+          <!-- 객체별 지표 목록 (v1.5) — 행 클릭: 맵 하이라이트 -->
+          <div class="group objgroup">
+            <div class="gtitle">객체 <span class="cnt" id="objCnt">0</span>
+              <span class="sp"></span>
+              <button class="tag-btn xs" id="objSort" title="정렬 기준 전환">이탈↓</button>
+            </div>
+            <div class="objhead" id="objHead"></div>
+            <div id="objList" class="objlist"></div>
+          </div>
+        </div>
       </aside>
 
       <div class="canvaswrap">

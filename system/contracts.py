@@ -53,6 +53,15 @@ class MapObject(BaseModel):
     speed_mps: float | None = None
     align: float | None = None  # 경로 방향정렬도 cosine (-1~1), 경로 없으면 None
     in_bounds: bool = True      # 맵 경계(w×h) 밖 투영 여부 (계약 개정 2026-07-13)
+    # --- 객체별 부가 지표 (v1.5 — 객체 목록 패널용, 전부 선택 필드) ---
+    conf: float | None = None       # 최근 검출 신뢰도
+    dwell_sec: float | None = None  # 체류시간 (첫 관측 후 초)
+    zone_id: str | None = None      # 현재 소속 구역
+    evac_ok: bool | None = None     # 피난개시 조건(v≥v_th ∧ align≥a_th) 충족 중
+    epfi_live: float | None = None  # 세션 중 EPFI_i 진행값 (T≥2s부터)
+    dev_m: float | None = None      # 세션 중 현재 경로 이탈거리 (m)
+    route_id: str | None = None     # 세션 중 배정 경로
+    exited: str | None = None       # 통과 완료한 출구 id (미통과 None)
 
 
 class ZoneState(BaseModel):

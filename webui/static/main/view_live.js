@@ -10,6 +10,8 @@ Views.live = (() => {
   let mc = null, es = null, watchdog = null;
   let state = null, lastMsg = 0;
   let showGraph = false;                 // IDR 공간그래프 표시 토글
+  let selGid = null;                     // 객체 목록에서 선택된 gid (맵 하이라이트)
+  let objSort = "dev";                   // 객체 정렬: dev(이탈)|speed|dwell
 
   // ------------------------------------------------------------ 수신
   function connect() {
@@ -66,6 +68,12 @@ Views.live = (() => {
       ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 7); ctx.fill();
       ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 7); ctx.stroke();
+      if (o.gid === selGid) {                        // 목록 선택 객체 하이라이트 링
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, 10, 0, 7); ctx.stroke();
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x, y, 13, 0, 7); ctx.stroke();
+      }
       if (g.s > 0.7) {                               // 줌인 시 gid 라벨
         ctx.font = "10px Pretendard, sans-serif";
         ctx.fillStyle = "rgba(0,0,0,.7)";
@@ -153,9 +161,50 @@ Views.live = (() => {
     $("snapModal").classList.remove("hidden");
   }
 
+  // ------------------------------------------------------------ 객체 목록 (v1.5)
+  const SORTS = { dev: "이탈↓", speed: "속도↓", dwell: "체류↓" };
+  const alignDot = (a) => a == null ? "—"
+    : `<i class="adot" style="background:${a >= 0.7 ? "#3FB950" : (a >= 0.2 ? "#F5A623" : "#FF5B5B")}"></i>`;
+
+  function renderObjects() {
+    if (!state) return;
+    const inSess = !!state.session;
+    $("objCnt").textContent = state.objects.length;
+    $("objHead").innerHTML = inSess
+      ? `<span>객체</span><span>㎧</span><span>정렬</span><span>EPFI</span><span>이탈m</span>`
+      : `<span>객체</span><span>㎧</span><span>정렬</span><span>체류s</span><span>구역</span>`;
+    const key = { dev: (o) => o.dev_m != null ? o.dev_m : -1,
+                  speed: (o) => o.speed_mps != null ? o.speed_mps : -1,
+                  dwell: (o) => o.dwell_sec != null ? o.dwell_sec : -1 }[objSort];
+    const rows = [...state.objects].sort((a, b) => key(b) - key(a));
+    const fmt = (v, d) => v == null ? "—" : v.toFixed(d);
+    $("objList").innerHTML = rows.map((o) => {
+      const col = camColor(o.cam_id, App.cameras);
+      const badge = o.exited ? ` <span class="objbadge out">↦${o.exited}</span>`
+        : (o.evac_ok ? ` <span class="objbadge ok">피난중</span>` : "");
+      const tail = inSess
+        ? `<span class="t-num">${o.epfi_live != null ? Math.round(o.epfi_live) : "—"}</span>
+           <span class="t-num">${fmt(o.dev_m, 1)}</span>`
+        : `<span class="t-num">${fmt(o.dwell_sec, 0)}</span>
+           <span>${o.zone_id || "—"}</span>`;
+      return `<div class="objrow${o.gid === selGid ? " sel" : ""}" data-gid="${o.gid}">
+        <span class="onm"><i class="dotc" style="background:${col}"></i>${o.gid}${badge}</span>
+        <span class="t-num">${fmt(o.speed_mps, 1)}</span>
+        <span>${alignDot(o.align)}</span>${tail}</div>`;
+    }).join("");
+    $("objList").querySelectorAll(".objrow").forEach((el) => {
+      el.onclick = () => {
+        selGid = selGid === el.dataset.gid ? null : el.dataset.gid;
+        renderObjects();
+        if (mc) mc.render();
+      };
+    });
+  }
+
   function update() {
     updatePanels();
     renderCams();
+    renderObjects();
     if (mc) mc.render();
   }
 
@@ -175,6 +224,12 @@ Views.live = (() => {
       showGraph = !showGraph;
       $("graphToggle").classList.toggle("on", showGraph);
       if (mc) mc.render();
+    };
+    $("objSort").onclick = () => {                 // 객체 목록 정렬 전환
+      const keys = Object.keys(SORTS);
+      objSort = keys[(keys.indexOf(objSort) + 1) % keys.length];
+      $("objSort").textContent = SORTS[objSort];
+      renderObjects();
     };
     $("snapClose").onclick = () => $("snapModal").classList.add("hidden");
     $("snapModal").onclick = (e) => { if (e.target === $("snapModal")) $("snapModal").classList.add("hidden"); };
