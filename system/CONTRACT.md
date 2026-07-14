@@ -1,4 +1,10 @@
-# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.2 — 4대 지표 세션 계층)
+# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.4)
+
+> **v1.4 개정 (2026-07-14 — EPFI 근거 시계열·설정 스냅샷 표시)**
+> - `SessionLive.config_version` 추가 — 세션이 고정한 설정 버전(사이트 버전과 다르면 UI가 "다음 세션부터 적용" 경고)
+> - 객체별 `d_i(t)` 1초 시계열: 엔진 `session_person_series()` · `GET /api/session/person_series` ·
+>   세션 저장 JSON에 `person_series` 포함 — EPFI 지연 표출·역추적(요구사항 FR-05 보강)
+> - `PUT mapping`의 valid_roi 전체 교체 의미 명문화(v1.3) · 세션 이력 API(v1.3)
 
 > **v1.2 개정 (2026-07-13, P1 착수)**
 > - 스키마: `SiteConfig.graph`(SpatialGraph — IDR 공간그래프, 수동 정의), `Zone.node_id`

@@ -172,6 +172,8 @@ class SessionLive(BaseModel):
     session_id: str
     alarm_ts: float
     alarm_origin: tuple[float, float]
+    config_version: int = 0    # 세션이 고정한 설정 스냅샷 버전 (v1.4 —
+                               # site_version과 다르면 "다음 세션부터 적용" 안내)
     elapsed_sec: float = 0.0
     sei: float | None = None
     cbs_total: float = 0.0

@@ -8,6 +8,8 @@ const Session = (() => {
   let live = null;         // SessionLive | null
   let result = null;       // EvaluationResult | null
   let timeline = [];       // TimelinePoint[]
+  let personSeries = null; // {gid: {route_id, series: [[t, d_m],...]}} — v1.4
+  let lastSiteV = 0;       // 최신 site_version (설정 변경 경고용)
   let placing = false;     // 경보 위치 클릭 대기
   let pollT = null;
   let stoppedId = null;    // stop 직후 지연 SSE 스냅샷 무시용
@@ -21,11 +23,13 @@ const Session = (() => {
     try { timeline = await API.getSessionTimeline(); } catch (e) { timeline = []; }
     if (live) { startPoll(); switchPanel("sess"); }
     else if (result) switchPanel("sess");
+    if (result) loadSeries();
     updateUI();
   }
 
   /** SSE MapState 수신 시 view_live가 호출. */
   function onState(st) {
+    if (st && st.site_version) lastSiteV = st.site_version;
     const s = st && st.session;
     if (s && s.session_id !== stoppedId) {
       const wasNew = !live;
@@ -51,7 +55,15 @@ const Session = (() => {
   async function refreshFinal() {
     try { result = await API.getSessionResult(); } catch (e) { /* keep */ }
     try { timeline = await API.getSessionTimeline(); } catch (e) { /* keep */ }
+    loadSeries();
     updateUI();
+  }
+
+  /** 객체별 d_i(t) 시계열 로드 — 종료 후 저장본에서 지연 표출 (v1.4). */
+  async function loadSeries() {
+    try { personSeries = await API.getPersonSeries(); }
+    catch (e) { personSeries = null; }
+    renderDev();
   }
 
   // ================================================== 컨트롤
@@ -88,6 +100,8 @@ const Session = (() => {
         stoppedId = null;
         result = null;
         timeline = [];
+        personSeries = null;
+        renderDev();
         startPoll();
         switchPanel("sess");
         hint(`세션 시작 — ${live.session_id}`);
@@ -104,6 +118,7 @@ const Session = (() => {
       live = null;
       stopPoll();
       try { timeline = await API.getSessionTimeline(); } catch (e) { /* keep */ }
+      loadSeries();
       hint("세션 종료 — 결과가 산출되었습니다.");
       showResultModal();
     } catch (e) { hint("세션 종료 실패: " + e.message, true); }
@@ -277,10 +292,14 @@ const Session = (() => {
 
     const sid = live ? live.session_id : result.session_id;
     const alarmTs = live ? live.alarm_ts : result.alarm_ts;
+    // 세션은 시작 시점 설정 스냅샷으로 계산 (결정성) — 이후 변경은 다음 세션부터
+    const cfgWarn = (live && live.config_version && lastSiteV > live.config_version)
+      ? ` · <span class="warnbadge">⚠ 설정 v${lastSiteV} 변경됨 — 이 세션은 v${live.config_version} 기준, 다음 세션부터 적용</span>`
+      : "";
     $("sessMeta").innerHTML =
       `<b>${sid}</b> · 경보 ${hhmmss(alarmTs)} · ` +
       (live ? `<span class="st-run">진행 중</span>` : `<span class="st-end">종료</span>`) +
-      ` · 경과 <span class="t-num">${elapsedTxt()}</span>`;
+      ` · 경과 <span class="t-num">${elapsedTxt()}</span>` + cfgWarn;
     document.querySelectorAll("#sessGrid .mela").forEach((el) => {
       el.textContent = "경과 " + elapsedTxt();
     });
@@ -288,6 +307,7 @@ const Session = (() => {
     renderSei();
     renderCbs();
     renderEpfi();
+    renderDev();
     renderIdr();
   }
 
@@ -369,6 +389,58 @@ const Session = (() => {
       if (g) { /* 비움 */ }
       note.textContent = live ? "객체별 분포는 세션 종료 후 표시됩니다." : "객체 데이터 없음";
     }
+  }
+
+  // ------------------------------- 객체별 d_i(t) 이탈 곡선 (EPFI 근거 시각화)
+  function renderDev() {
+    const wrap = $("devWrap");
+    if (!wrap) return;
+    const ids = personSeries
+      ? Object.keys(personSeries).filter((g) => personSeries[g].series.length > 1) : [];
+    if (!result || !ids.length) { wrap.classList.add("hidden"); return; }
+    wrap.classList.remove("hidden");
+    const sel = $("devSel");
+    if (sel.dataset.sid !== result.session_id) {      // 세션 바뀔 때만 재구성
+      const em = {};
+      (result.person_metrics || []).forEach((p) => { em[p.global_track_id] = p.epfi; });
+      sel.innerHTML = ids
+        .sort((a, b) => (em[a] != null ? em[a] : 101) - (em[b] != null ? em[b] : 101))
+        .map((g) => `<option value="${g}">${g} — EPFI ${em[g] != null ? Math.round(em[g]) : "—"}</option>`)
+        .join("");
+      sel.dataset.sid = result.session_id;
+      sel.onchange = renderDev;
+    }
+    const gid = sel.value || ids[0];
+    if (personSeries[gid]) drawDev($("devChart"), personSeries[gid].series);
+  }
+
+  function drawDev(cv, series) {
+    const g = cvCtx(cv);
+    if (!g || !series.length) return;
+    const { ctx, w, h } = g;
+    const dAllow = (App.site && App.site.thresholds) ? App.site.thresholds.d_allow : null;
+    const t0 = series[0][0], t1 = series[series.length - 1][0] || t0 + 1;
+    const dmax = Math.max(dAllow || 0, ...series.map((s) => s[1])) * 1.15 || 1;
+    const X = (t) => 4 + (t - t0) / (t1 - t0 || 1) * (w - 8);
+    const Y = (d) => h - 12 - (d / dmax) * (h - 20);
+    ctx.beginPath(); ctx.moveTo(X(t0), h - 12);       // ∫d dt 면적
+    series.forEach(([t, d]) => ctx.lineTo(X(t), Y(d)));
+    ctx.lineTo(X(t1), h - 12); ctx.closePath();
+    ctx.fillStyle = "rgba(63,185,80,.22)"; ctx.fill();
+    ctx.beginPath();                                   // d(t) 곡선
+    series.forEach(([t, d], i) => (i ? ctx.lineTo(X(t), Y(d)) : ctx.moveTo(X(t), Y(d))));
+    ctx.strokeStyle = "#3FB950"; ctx.lineWidth = 1.5; ctx.stroke();
+    if (dAllow != null) {                              // 허용 이탈폭 기준선
+      ctx.setLineDash([4, 3]); ctx.strokeStyle = "#FF5B5B";
+      ctx.beginPath(); ctx.moveTo(4, Y(dAllow)); ctx.lineTo(w - 4, Y(dAllow)); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = "9px Pretendard, sans-serif"; ctx.fillStyle = "#FF5B5B";
+      ctx.fillText(`d_allow ${dAllow}m`, 6, Y(dAllow) - 3);
+    }
+    ctx.font = "9px Pretendard, sans-serif"; ctx.fillStyle = "rgba(255,255,255,.45)";
+    ctx.fillText("0s", 4, h - 2);
+    ctx.fillText(`${Math.round(t1 - t0)}s`, w - 30, h - 2);
+    ctx.fillText(`${dmax.toFixed(1)}m`, 4, 10);
   }
 
   function renderIdr() {

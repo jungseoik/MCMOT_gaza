@@ -105,6 +105,7 @@ class MetricsEngine:
         self._session: EvaluationSession | None = None
         self._last_result: EvaluationResult | None = None
         self._last_timeline: list[TimelinePoint] = []
+        self._last_person_series: dict = {}
         self.reload(site, cameras)
 
     # ------------------------------------------------------------ 설정 반영
@@ -264,6 +265,7 @@ class MetricsEngine:
             result = self._session.finalize(self._session_now())
             self._last_result = result
             self._last_timeline = list(self._session.timeline)
+            self._last_person_series = self._session.person_series()
             self._session = None
             return result
 
@@ -277,6 +279,13 @@ class MetricsEngine:
         """마지막으로 종료된 세션의 결과 (없으면 None)."""
         with self._lock:
             return self._last_result
+
+    def session_person_series(self) -> dict:
+        """객체별 d_i(t) 시계열 — 진행 중이면 현재까지, 아니면 마지막 세션 (v1.4)."""
+        with self._lock:
+            if self._session is not None:
+                return self._session.person_series()
+            return dict(self._last_person_series)
 
     def session_timeline(self) -> list[TimelinePoint]:
         """진행 중 세션의 타임라인, 없으면 마지막 세션의 타임라인."""

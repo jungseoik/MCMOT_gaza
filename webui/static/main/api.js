@@ -52,6 +52,7 @@ const API = {
   getSession: () => API._j("/api/session"),
   getSessionResult: () => API._j("/api/session/result"),
   getSessionTimeline: () => API._j("/api/session/timeline"),
+  getPersonSeries: () => API._j("/api/session/person_series"),
   exportUrl: (format) => `/api/session/export?format=${format || "json"}`,
 
   // ---- map state

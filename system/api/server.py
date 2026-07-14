@@ -298,10 +298,11 @@ def _sessions_dir() -> Path:
     return d
 
 
-def _save_session(result, timeline) -> None:
-    """세션 결과+타임라인 영속화 (FR-09) — data/sites/<site>/sessions/<id>.json."""
+def _save_session(result, timeline, person_series=None) -> None:
+    """세션 결과+타임라인+객체별 d_i(t) 시계열 영속화 (FR-09·v1.4)."""
     payload = {"result": result.model_dump(),
-               "timeline": [t.model_dump() for t in timeline]}
+               "timeline": [t.model_dump() for t in timeline],
+               "person_series": person_series or {}}
     p = _sessions_dir() / f"{result.session_id}.json"
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -324,7 +325,8 @@ def session_stop():
     if rt.engine is None or rt.engine.session_live() is None:
         raise HTTPException(404, "진행 중 세션 없음")
     result = rt.engine.stop_session()
-    _save_session(result, rt.engine.session_timeline())
+    _save_session(result, rt.engine.session_timeline(),
+                  rt.engine.session_person_series())
     return result
 
 
@@ -354,6 +356,16 @@ def session_timeline():
         return tl
     saved = _latest_saved()
     return saved["timeline"] if saved else []
+
+
+@app.get("/api/session/person_series")
+def session_person_series():
+    """객체별 d_i(t) 시계열 — 진행 중이면 현재까지, 종료 후엔 마지막/저장본 (v1.4)."""
+    ps = rt.engine.session_person_series() if rt.engine else {}
+    if ps:
+        return ps
+    saved = _latest_saved()
+    return saved.get("person_series", {}) if saved else {}
 
 
 @app.get("/api/sessions")

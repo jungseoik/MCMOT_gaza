@@ -30,7 +30,7 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -57,6 +57,7 @@ if TYPE_CHECKING:                       # 순환 import 방지 (타입 전용)
 
 # ---------------------------------------------------------- 알고리즘 상수
 SAMPLE_INTERVAL_SEC = 1.0        # IDR 판정·CBS 적분·타임라인 샘플 주기 (s)
+PERSON_SERIES_MAX = 7200         # 객체별 d_i(t) 시계열 상한 (1초 샘플 2시간)
 TIMELINE_MAXLEN = 7200           # 타임라인 링버퍼 (1초 샘플 × 2시간)
 MIN_TRACK_DURATION_SEC = 2.0     # EPFI 유효 최소 관측시간 T_i (s)
 IDR_EPS_SEC = 1e-6               # IDR 분모 ε (delay=0 방지)
@@ -85,6 +86,8 @@ class _PersonAcc:
     last_d_m: float | None          # 직전 관측의 이탈거리 (m, 축척 없으면 None)
     integral_dm: float = 0.0        # ∫ d_i dt (m·s, 사다리꼴)
     max_d_m: float | None = None
+    series: list = field(default_factory=list)   # d_i(t) 1초 샘플 [(t, d_m), ...]
+                                                  # — 지연 표출·역추적용 (FR-05 보강)
 
 
 @dataclass
@@ -259,6 +262,12 @@ class EvaluationSession:
                 acc.peak = d
             acc.prev_density = d
 
+        # EPFI 보조: 객체별 d_i(t) 1초 시계열 — 최근 관측(3초 내) 객체만 기록
+        for p in self.persons.values():
+            if p.last_d_m is not None and t - p.last_ts <= 3.0 \
+                    and len(p.series) < PERSON_SERIES_MAX:
+                p.series.append((t, p.last_d_m))
+
         # IDR: 구역별 v_e·a_e·r_e → dt_hold 연속 유지 판정
         th = self.thresholds
         rows = self._obj_rows()
@@ -344,11 +353,18 @@ class EvaluationSession:
 
     # ---------------------------------------------------- 스냅샷·최종 결과
 
+    def person_series(self) -> dict:
+        """객체별 d_i(t) 1초 시계열 — 지연 표출·역추적용 (FR-05 보강, 계약 v1.4)."""
+        return {gid: {"route_id": p.route_id,
+                      "series": [[round(t, 3), round(d, 3)] for t, d in p.series]}
+                for gid, p in self.persons.items() if p.series}
+
     def live(self, now: float) -> SessionLive:
         return SessionLive(
             session_id=self.session_id,
             alarm_ts=self.alarm_ts,
             alarm_origin=self.origin,
+            config_version=self.site_version,
             elapsed_sec=max(0.0, now - self.alarm_ts),
             sei=self._sei(),
             cbs_total=self._cbs_total(),

@@ -260,6 +260,12 @@
                 <div class="mbig t-num" id="epfiVal">—</div>
                 <canvas class="mspark" id="epfiSpark" title="평균 EPFI 추이"></canvas>
                 <div class="mhistwrap"><canvas id="epfiHist"></canvas><div class="mnote" id="epfiNote"></div></div>
+                <!-- 객체별 d_i(t) 이탈 곡선 — 세션 종료 후 저장 시계열에서 표출 (v1.4) -->
+                <div id="devWrap" class="hidden">
+                  <select id="devSel" class="devsel"></select>
+                  <canvas id="devChart" class="devchart"></canvas>
+                  <div class="mnote">y: 경로 이탈거리 d(t) [m] · 점선: d_allow · 채움 면적 = ∫d dt</div>
+                </div>
               </div>
               <div class="mcard" id="cardIdr">
                 <div class="mhead"><b>IDR</b><span class="msub">구역 피난 반응</span><span class="mela t-num"></span></div>
