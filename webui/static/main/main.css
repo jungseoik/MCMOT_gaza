@@ -148,9 +148,13 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .mgaugewrap{ height:84px; flex:0 0 auto; }
 .mgaugewrap canvas{ width:100%; height:100%; display:block; }
 .mspark{ width:100%; height:30px; flex:0 0 auto; display:block; }
-.mhistwrap{ height:54px; flex:0 0 auto; }
-.mhistwrap canvas{ width:100%; height:100%; display:block; }
+/* 높이 고정은 canvas에만 — 안의 노트 텍스트가 넘쳐 아래 요소(devWrap)를 가리지 않게 */
+.mhistwrap{ flex:0 0 auto; }
+.mhistwrap canvas{ width:100%; height:54px; display:block; }
+.mhistwrap .mnote{ margin-top:2px; }
 .mnote{ font-size:10px; color:var(--text-3); }
+/* d(t) 곡선 뷰어 — 히스토그램 x축 라벨과 겹치지 않게 아래로 분리 */
+#devWrap{ margin-top:10px; padding-top:8px; border-top:1px solid var(--stroke-2); }
 
 /* SEI 출구 분포 바 */
 .mbars{ display:flex; flex-direction:column; gap:4px; font-size:11px;
