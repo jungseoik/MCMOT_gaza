@@ -235,6 +235,7 @@ Views.map = (() => {
     const t = s.thresholds || {};
     $("thV").value = t.v_th; $("thA").value = t.a_th; $("thR").value = t.r_th;
     $("thDt").value = t.dt_hold; $("thD").value = t.d_allow;
+    $("thC").value = t.min_conf != null ? t.min_conf : 0.35;
   }
 
   function refresh() { refreshLists(); if (mc) mc.render(); }
@@ -248,6 +249,7 @@ Views.map = (() => {
       r_th: parseFloat($("thR").value) || 0.5,
       dt_hold: parseFloat($("thDt").value) || 3.0,
       d_allow: parseFloat($("thD").value) || 2.0,
+      min_conf: (() => { const v = parseFloat($("thC").value); return isNaN(v) ? 0.35 : v; })(),
     };
     try {
       App.site = await API.putSite(s);

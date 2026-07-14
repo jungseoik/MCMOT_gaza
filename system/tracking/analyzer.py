@@ -138,7 +138,7 @@ class AnalyzerThread(threading.Thread):
         t0 = time.perf_counter()
         lag = max(time.time() - item.ts, 0.0)
 
-        padded, _ = preproc(item.frame, self.input_size, mean=None, std=None)
+        padded, scale_r = preproc(item.frame, self.input_size, mean=None, std=None)
         tensor = torch.from_numpy(padded).unsqueeze(0).cuda()
         pred = self.detector.detect(tensor)
 
@@ -146,10 +146,16 @@ class AnalyzerThread(threading.Thread):
         targets = tracker.update(pred, tensor, item.frame,
                                  f"{item.cam_id}:{item.seq}")
 
+        # 트랙별 '실제 검출 점수' — 트래커 출력 conf는 내부 신뢰도(부스팅 포함)라
+        # 오탐 연명 트랙도 높게 나온다. 원본 검출과 IoU 매칭해 진짜 점수를 싣는다
+        # (TrackedObject.conf 계약 의미). 미매칭(coasting) 프레임은 0.0.
+        det_xyxy, det_scores = self._frame_dets(pred, scale_r)
+
         tracks: list[TrackedObject] = []
         for t in np.asarray(targets).reshape(-1, targets.shape[1] if targets.size else 6):
             x1, y1, x2, y2, tid = t[0], t[1], t[2], t[3], int(t[4])
-            conf = float(t[5]) if t.shape[0] >= 6 else 0.0
+            conf = self._matched_score(np.array([x1, y1, x2, y2], np.float64),
+                                       det_xyxy, det_scores)
             tracks.append(TrackedObject(
                 cam_id=item.cam_id,
                 local_track_id=tid,
@@ -170,6 +176,33 @@ class AnalyzerThread(threading.Thread):
         self.on_tracks(item.cam_id, item.ts, tracks)
 
     # ------------------------------------------------------------ 내부
+    @staticmethod
+    def _frame_dets(pred, scale_r: float):
+        """검출 결과 → (원본 px xyxy[N,4], 점수[N]). pred 없으면 빈 배열."""
+        if pred is None:
+            return np.zeros((0, 4)), np.zeros(0)
+        p = pred.cpu().numpy() if hasattr(pred, "cpu") else np.asarray(pred)
+        p = p.reshape(-1, p.shape[-1]) if p.size else p.reshape(0, 6)
+        if not len(p):
+            return np.zeros((0, 4)), np.zeros(0)
+        xyxy = p[:, :4] / scale_r
+        scores = p[:, 4] * p[:, 5] if p.shape[1] >= 6 else p[:, 4]
+        return xyxy, scores
+
+    @staticmethod
+    def _matched_score(box, det_xyxy, det_scores, iou_th: float = 0.5) -> float:
+        """트랙 박스와 최대 IoU 검출의 점수 (IoU<임계 → 0.0 = 이번 프레임 미검출)."""
+        if not len(det_xyxy):
+            return 0.0
+        x1 = np.maximum(box[0], det_xyxy[:, 0]); y1 = np.maximum(box[1], det_xyxy[:, 1])
+        x2 = np.minimum(box[2], det_xyxy[:, 2]); y2 = np.minimum(box[3], det_xyxy[:, 3])
+        inter = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
+        a1 = (box[2] - box[0]) * (box[3] - box[1])
+        a2 = (det_xyxy[:, 2] - det_xyxy[:, 0]) * (det_xyxy[:, 3] - det_xyxy[:, 1])
+        iou = inter / np.maximum(a1 + a2 - inter, 1e-9)
+        k = int(np.argmax(iou))
+        return float(det_scores[k]) if iou[k] >= iou_th else 0.0
+
     def _tracker_for(self, cam_id: str) -> BoostTrack:
         with self._lock:
             tracker = self._trackers.get(cam_id)

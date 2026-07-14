@@ -175,7 +175,10 @@ class MetricsEngine:
                 return
             if sess is not None:
                 sess.cams_seen.add(cam_id)
+            min_conf = self._site.thresholds.min_conf
             for tr in tracks:
+                if tr.conf < min_conf:           # 저신뢰 관측 — 오탐 연명 트랙 차단
+                    continue                     # (BYTE 저신뢰 연관 유령 객체 방지)
                 p = proj.project(tr.foot_uv)
                 if p is None:                    # valid_roi 밖 — 제외
                     self._drop(f"{cam_id}:{tr.local_track_id}")

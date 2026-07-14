@@ -262,3 +262,24 @@ class TestEndToEnd:
         eng = MetricsEngine(make_site(), [make_cam("cam01")])
         eng.on_tracks("cam99", 1.0, [tr("cam99", 1, 100, 100, 1.0)])
         assert eng.snapshot().objects == []
+
+
+def test_min_conf_filters_low_confidence_tracks():
+    """저신뢰 관측(min_conf 미만) 제외 — 오탐 연명 유령 객체 차단 (2026-07-14)."""
+    from system.config.schema import (CameraConfig, CameraMapping, MapSpec,
+                                      SiteConfig, Thresholds)
+    from system.contracts import TrackedObject
+    from system.metrics import MetricsEngine
+    pts = [(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0), (0.0, 1000.0)]
+    site = SiteConfig(site_id="t", map=MapSpec(image="m.png", w=1000, h=1000, m_per_px=0.01),
+                      thresholds=Thresholds(min_conf=0.35))
+    cam = CameraConfig(cam_id="c1", rtsp="rtsp://x",
+                       mapping=CameraMapping(cctv_pts=pts, map_pts=pts,
+                                             H=[1, 0, 0, 0, 1, 0, 0, 0, 1]))
+    eng = MetricsEngine(site, [cam])
+    mk = lambda tid, conf: TrackedObject(cam_id="c1", local_track_id=tid,
+                                         foot_uv=(500, 500), bbox_xyxy=(490, 460, 510, 500),
+                                         conf=conf, ts=1.0)
+    eng.on_tracks("c1", 1.0, [mk(1, 0.9), mk(2, 0.27)])   # 사람 vs 의자 오탐
+    gids = {o.gid for o in eng.snapshot().objects}
+    assert "c1:1" in gids and "c1:2" not in gids

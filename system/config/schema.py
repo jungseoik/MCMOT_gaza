@@ -101,6 +101,8 @@ class Thresholds(BaseModel):
     r_th: float = 0.5      # 동시만족 객체비율 임계 (0~1)
     dt_hold: float = 3.0   # 연속 유지시간 (s)
     d_allow: float = 2.0   # EPFI 허용 이탈거리 (m)
+    min_conf: float = 0.35  # 표출·지표 최소 검출 신뢰도 — 저신뢰 오탐(예: 의자)이
+                            # BYTE 저신뢰 연관으로 연명한 트랙 관측을 지표 층에서 차단
 
 
 class SiteConfig(BaseModel):
