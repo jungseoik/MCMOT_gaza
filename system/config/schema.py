@@ -127,6 +127,8 @@ class CameraMapping(BaseModel):
     cctv_pts: list[Point] = Field(min_length=4)
     map_pts: list[Point] = Field(min_length=4)
     H: list[float] = Field(min_length=9, max_length=9)
+    reproj_err_px: list[float] | None = None  # 대응점별 재투영 오차(맵 px) —
+                                              # FR-01 기준점 오차 기록 (v1.5)
 
     @model_validator(mode="after")
     def _same_len(self):

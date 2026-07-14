@@ -267,11 +267,17 @@ async def set_mapping(cam_id: str, request: Request):
     cctv_pts, map_pts = body["cctv_pts"], body["map_pts"]
     if len(cctv_pts) < 4 or len(cctv_pts) != len(map_pts):
         raise HTTPException(422, "대응점은 4쌍 이상, 개수 일치 필요")
-    H, _ = cv2.findHomography(np.array(cctv_pts, np.float64), np.array(map_pts, np.float64))
+    src = np.array(cctv_pts, np.float64)
+    dst = np.array(map_pts, np.float64)
+    H, _ = cv2.findHomography(src, dst)
     if H is None:
         raise HTTPException(422, "호모그래피 산출 실패 — 대응점이 퇴화 배치")
+    # 대응점별 재투영 오차(맵 px) — FR-01 기준점 오차 기록, UI가 품질 표시에 사용
+    proj = cv2.perspectiveTransform(src.reshape(-1, 1, 2), H).reshape(-1, 2)
+    errs = [float(np.hypot(*(p - d))) for p, d in zip(proj, dst)]
     cfg.mapping = CameraMapping(cctv_pts=cctv_pts, map_pts=map_pts,
-                                H=[float(v) for v in H.reshape(-1)])
+                                H=[float(v) for v in H.reshape(-1)],
+                                reproj_err_px=[round(e, 2) for e in errs])
     # valid_roi는 요청 값으로 전체 교체 — null/3점 미만 = ROI 제거 (계약 v1.3)
     roi = body.get("valid_roi")
     cfg.valid_roi = roi if (roi and len(roi) >= 3) else None

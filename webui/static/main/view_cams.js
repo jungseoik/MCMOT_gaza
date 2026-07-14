@@ -107,6 +107,17 @@ Views.cams = (() => {
 
   function renderSel() { if (camMc) camMc.render(); if (mapMc) mapMc.render(); }
 
+  function mPerPx() {
+    const m = App.site && App.site.map;
+    if (!m) return null;
+    if (m.m_per_px != null) return m.m_per_px;
+    if (m.scale) {
+      const d = Math.hypot(m.scale.p2[0] - m.scale.p1[0], m.scale.p2[1] - m.scale.p1[1]);
+      return d > 0 ? m.scale.meters / d : null;
+    }
+    return null;
+  }
+
   function hint(msg, warn) {
     const el = $("camHint");
     if (msg !== undefined) { el.textContent = msg; el.classList.toggle("warn", !!warn); return; }
@@ -171,11 +182,23 @@ Views.cams = (() => {
     if (roi.length > 0 && roi.length < 3) { hint("유효 ROI는 3점 이상이거나 비워야 합니다.", true); return; }
     try {
       hint("매핑 저장 중…");
-      await API.putMapping(sel, { cctv_pts: cctvPts, map_pts: mapPts,
-                                  valid_roi: roi.length >= 3 ? roi : null });
+      const saved = await API.putMapping(sel, { cctv_pts: cctvPts, map_pts: mapPts,
+                                                valid_roi: roi.length >= 3 ? roi : null });
       await App.reloadCameras();
       renderList();
-      hint(`저장됨 — 호모그래피 H 산출 완료 (${n}쌍${roi.length >= 3 ? " + ROI" : ""}).`);
+      // 대응점별 재투영 오차(m) 품질 표시 — 큰 점은 바닥 아님/오지정 의심 (v1.5)
+      const errs = saved.mapping && saved.mapping.reproj_err_px;
+      const mpp = mPerPx();
+      if (errs && errs.length && mpp) {
+        const em = errs.map((e) => e * mpp);
+        const worst = Math.max(...em);
+        const detail = em.map((e, i) => `#${i + 1} ${e.toFixed(2)}m`).join(" · ");
+        hint(`저장됨 (${n}쌍${roi.length >= 3 ? " + ROI" : ""}) — 점별 오차: ${detail}` +
+             (worst > 0.5 ? ` · ⚠ 최대 ${worst.toFixed(2)}m — 오차 큰 점은 바닥 아닌 지점일 수 있음, 빼고 재지정 권장` : " ✓"),
+             worst > 0.5);
+      } else {
+        hint(`저장됨 — 호모그래피 H 산출 완료 (${n}쌍${roi.length >= 3 ? " + ROI" : ""}).`);
+      }
     } catch (e) { hint("저장 실패: " + e.message, true); }
   }
 
