@@ -102,6 +102,7 @@ class Thresholds(BaseModel):
     dt_hold: float = 3.0   # 연속 유지시간 (s)
     d_allow: float = 2.0   # EPFI 허용 이탈거리 (m)
     min_conf: float = 0.35  # 표출·지표 최소 검출 신뢰도 — 저신뢰 오탐(예: 의자)이
+    q_design: float = Field(default=60.0, gt=0)  # SEI: 단위 유효폭당 설계 통과기준 [인/분/m]
                             # BYTE 저신뢰 연관으로 연명한 트랙 관측을 지표 층에서 차단
 
 

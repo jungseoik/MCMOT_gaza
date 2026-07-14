@@ -16,6 +16,50 @@ Views.cams = (() => {
 
   const pairColor = (i) => `hsl(${(i * 47) % 360},80%,60%)`;
 
+  // H 행렬 적용 (9원소 row-major, 카메라→맵)
+  function applyH(H9, x, y) {
+    const w = H9[6]*x + H9[7]*y + H9[8];
+    if (Math.abs(w) < 1e-10) return null;
+    return [(H9[0]*x + H9[1]*y + H9[2])/w, (H9[3]*x + H9[4]*y + H9[5])/w];
+  }
+
+  function invertH3x3(H9) {
+    const [a,b,c,d,e,f,g,h,i] = H9;
+    const det = a*(e*i-f*h) - b*(d*i-f*g) + c*(d*h-e*g);
+    if (Math.abs(det) < 1e-12) return null;
+    return [(e*i-f*h)/det,(c*h-b*i)/det,(b*f-c*e)/det,
+            (f*g-d*i)/det,(a*i-c*g)/det,(c*d-a*f)/det,
+            (d*h-e*g)/det,(b*g-a*h)/det,(a*e-b*d)/det];
+  }
+
+  function getCamH() {
+    const cam = App.cameras.find((c) => c.cam_id === sel);
+    return cam && cam.mapping ? cam.mapping.H : null;
+  }
+
+  // 현재 마우스 (맵 원본 px) — hover crosshair용
+  let hoverCam = null;  // {x,y} 카메라 px
+  let hoverMap = null;  // {x,y} 맵 px
+
+  // 컨벡스 헐 (Graham scan)
+  function convexHull(pts) {
+    if (pts.length <= 2) return pts.slice();
+    const s = [...pts].sort((a, b) => a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
+    const cross = (O, A, B) => (A[0]-O[0])*(B[1]-O[1]) - (A[1]-O[1])*(B[0]-O[0]);
+    const lo = [], hi = [];
+    for (const p of s) {
+      while (lo.length >= 2 && cross(lo[lo.length-2], lo[lo.length-1], p) <= 0) lo.pop();
+      lo.push(p);
+    }
+    for (let i = s.length-1; i >= 0; i--) {
+      const p = s[i];
+      while (hi.length >= 2 && cross(hi[hi.length-2], hi[hi.length-1], p) <= 0) hi.pop();
+      hi.push(p);
+    }
+    hi.pop(); lo.pop();
+    return lo.concat(hi);
+  }
+
   // ------------------------------------------------------------ 목록
   function badge(cls, txt) { return `<span class="badge ${cls}">${txt}</span>`; }
 
@@ -203,8 +247,39 @@ Views.cams = (() => {
   }
 
   // ------------------------------------------------------------ overlays
+  function drawCrosshair(g, px, py, col, label) {
+    const { ctx, TX, TY } = g;
+    const cx = TX(px), cy = TY(py);
+    ctx.save();
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(cx-14, cy); ctx.lineTo(cx+14, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy-14); ctx.lineTo(cx, cy+14); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI*2);
+    ctx.fillStyle = col; ctx.globalAlpha = 0.85; ctx.fill();
+    if (label) {
+      ctx.globalAlpha = 1; ctx.fillStyle = col;
+      ctx.font = "11px Pretendard,sans-serif";
+      ctx.fillText(label, cx+8, cy-7);
+    }
+    ctx.restore();
+  }
+
   function camOverlay(g) {
-    const { ctx } = g;
+    const { ctx, TX, TY } = g;
+    // cctv_pts 컨벡스 헐 — 호모그래피 커버리지 (보간 보장 구역)
+    if (cctvPts.length >= 3) {
+      const hull = convexHull(cctvPts);
+      ctx.save();
+      ctx.beginPath();
+      hull.forEach(([x, y], i) => i === 0 ? ctx.moveTo(TX(x), TY(y)) : ctx.lineTo(TX(x), TY(y)));
+      ctx.closePath();
+      ctx.fillStyle = "rgba(255,200,0,.07)"; ctx.fill();
+      ctx.strokeStyle = "rgba(255,200,0,.6)"; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.restore();
+    }
     if (roi.length) {
       mcPath(g, roi, true);
       ctx.fillStyle = "rgba(48,220,251,.12)"; ctx.fill();
@@ -213,11 +288,30 @@ Views.cams = (() => {
       if (mode === "roi") mcNumbered(g, roi, MC_COLORS.roi);
     }
     mcNumbered(g, cctvPts, null, pairColor);
+    // hover crosshair: 맵에서 마우스 올렸을 때 역투영 위치 표시
+    if (hoverMap) {
+      const H9 = getCamH();
+      if (H9) {
+        const Hinv = invertH3x3(H9);
+        if (Hinv) {
+          const p = applyH(Hinv, hoverMap.x, hoverMap.y);
+          if (p) drawCrosshair(g, p[0], p[1], "#ff6ef7", `맵(${hoverMap.x.toFixed(0)},${hoverMap.y.toFixed(0)})`);
+        }
+      }
+    }
   }
 
   function mapOverlay(g) {
     drawSiteElements(g, App.site, { faint: true });
     mcNumbered(g, mapPts, null, pairColor);
+    // hover crosshair: 카메라에서 마우스 올렸을 때 순방향 투영 위치 표시
+    if (hoverCam) {
+      const H9 = getCamH();
+      if (H9) {
+        const p = applyH(H9, hoverCam.x, hoverCam.y);
+        if (p) drawCrosshair(g, p[0], p[1], "#ff6ef7", `cam(${hoverCam.x.toFixed(0)},${hoverCam.y.toFixed(0)})`);
+      }
+    }
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -226,12 +320,36 @@ Views.cams = (() => {
     inited = true;
     camMc = new MapCanvas($("camFrameCv"), { onClick: onCamClick, draw: camOverlay });
     mapMc = new MapCanvas($("camMapCv"), { onClick: onMapClick, draw: mapOverlay });
+    // hover crosshair — 한쪽 캔버스 마우스 → 반대 캔버스에 투영점 표시
+    $("camFrameCv").addEventListener("mousemove", (e) => {
+      if (!getCamH()) return;
+      const p = camMc && camMc.toMap(e);
+      hoverCam = p ? { x: p.x, y: p.y } : null;
+      hoverMap = null;
+      if (mapMc) mapMc.render();
+    });
+    $("camFrameCv").addEventListener("mouseleave", () => { hoverCam = null; if (mapMc) mapMc.render(); });
+    $("camMapCv").addEventListener("mousemove", (e) => {
+      if (!getCamH()) return;
+      const p = mapMc && mapMc.toMap(e);
+      hoverMap = p ? { x: p.x, y: p.y } : null;
+      hoverCam = null;
+      if (camMc) camMc.render();
+    });
+    $("camMapCv").addEventListener("mouseleave", () => { hoverMap = null; if (camMc) camMc.render(); });
     document.querySelectorAll("#camTools .tag-btn").forEach((b) =>
       b.onclick = () => setMode(b.dataset.mode));
     $("camAdd").onclick = addCamera;
     $("pairUndo").onclick = undo;
     $("pairClear").onclick = clearAll;
     $("mappingSave").onclick = saveMapping;
+    $("hullRoi").onclick = () => {
+      if (cctvPts.length < 3) { hint("대응점 3개 이상 필요합니다.", true); return; }
+      roi = convexHull(cctvPts);
+      setMode("roi");
+      hint(`커버리지 ROI 자동 설정 완료 (${roi.length}점) — 확인 후 매핑 저장.`);
+      renderSel();
+    };
     $("camRetest").onclick = async () => {
       if (!sel) return;
       try {

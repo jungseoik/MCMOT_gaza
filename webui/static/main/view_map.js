@@ -180,6 +180,16 @@ Views.map = (() => {
     if (draft.inside) mcNumbered(g, [draft.inside], "#3FB950");
   }
 
+  function mPerPx() {
+    const m = App.site && App.site.map;
+    if (!m) return null;
+    if (m.scale) {
+      const d = Math.hypot(m.scale.p2[0] - m.scale.p1[0], m.scale.p2[1] - m.scale.p1[1]);
+      return d > 0 ? m.scale.meters / d : null;
+    }
+    return m.m_per_px != null ? m.m_per_px : null;
+  }
+
   function fmtScale() {
     const m = App.site && App.site.map;
     if (!m) return "";
@@ -213,9 +223,46 @@ Views.map = (() => {
     };
     fill("listRoutes", "cntRoutes", s.routes, MC_COLORS.route, (e) => `${e.points.length}점`);
     fill("listZones", "cntZones", s.zones, MC_COLORS.zone, (e) => `${e.polygon.length}점`);
-    fill("listBottlenecks", "cntBottlenecks", s.bottlenecks, MC_COLORS.bottleneck,
-         (e) => `ρ ${e.rho_crit}`);
-    fill("listExits", "cntExits", s.exits, MC_COLORS.exit, () => "통과선");
+    // 병목 — rho_crit·weight 인라인 편집
+    (function fillBns() {
+      const box = $("listBottlenecks");
+      box.innerHTML = "";
+      $("cntBottlenecks").textContent = s.bottlenecks.length;
+      s.bottlenecks.forEach((bn, i) => {
+        const div = document.createElement("div");
+        div.className = "elitem elitem-bn";
+        div.innerHTML =
+          `<span class="swatch" style="background:${MC_COLORS.bottleneck}"></span>` +
+          `<span class="nm">${bn.name || bn.id}</span>` +
+          `<label class="bfield" title="임계밀도 (명/m²)">ρcrit ` +
+            `<input type="number" class="bni" min="0.1" step="0.1" value="${bn.rho_crit}"> 명/m²</label>` +
+          `<label class="bfield" title="가중치 w_k">w ` +
+            `<input type="number" class="bni" min="0.01" step="0.1" value="${bn.weight}"></label>` +
+          `<button class="del" title="삭제">🗑</button>`;
+        const [rhoIn, wIn] = div.querySelectorAll("input");
+        rhoIn.oninput = () => { const v = parseFloat(rhoIn.value); if (v > 0) s.bottlenecks[i].rho_crit = v; };
+        wIn.oninput   = () => { const v = parseFloat(wIn.value);   if (v > 0) s.bottlenecks[i].weight   = v; };
+        div.querySelector(".del").onclick = () => { s.bottlenecks.splice(i, 1); refresh(); };
+        box.appendChild(div);
+      });
+    })();
+    // 출입구 — W_eff(m) · 계산 C_j 표시
+    (function fillExits() {
+      const mpp = mPerPx();
+      const qd = parseFloat($("thQd").value) || 60;
+      const box = $("listExits"); box.innerHTML = "";
+      $("cntExits").textContent = s.exits.length;
+      s.exits.forEach((ex, i) => {
+        let meta = "통과선";
+        if (mpp && ex.line && ex.line.length === 2) {
+          const dx = ex.line[1][0] - ex.line[0][0], dy = ex.line[1][1] - ex.line[0][1];
+          const w = Math.sqrt(dx * dx + dy * dy) * mpp;
+          meta = `W ${w.toFixed(2)}m · C ${Math.max(1, Math.round(w * qd))}명/분`;
+        }
+        box.appendChild(elItem(ex.name || ex.id, meta, MC_COLORS.exit,
+          () => { s.exits.splice(i, 1); refresh(); }));
+      });
+    })();
     // 공간그래프 — 노드·엣지 요약 1행 + 전체 지우기
     const gbox = $("listGraph");
     const gr = s.graph || { nodes: [], edges: [] };
@@ -236,6 +283,7 @@ Views.map = (() => {
     $("thV").value = t.v_th; $("thA").value = t.a_th; $("thR").value = t.r_th;
     $("thDt").value = t.dt_hold; $("thD").value = t.d_allow;
     $("thC").value = t.min_conf != null ? t.min_conf : 0.35;
+    $("thQd").value = t.q_design != null ? t.q_design : 60;
   }
 
   function refresh() { refreshLists(); if (mc) mc.render(); }
@@ -250,7 +298,19 @@ Views.map = (() => {
       dt_hold: parseFloat($("thDt").value) || 3.0,
       d_allow: parseFloat($("thD").value) || 2.0,
       min_conf: (() => { const v = parseFloat($("thC").value); return isNaN(v) ? 0.35 : v; })(),
+      q_design: parseFloat($("thQd").value) || 60.0,
     };
+    // 출입구 design_capacity 자동 계산: 선 길이(px) × m_per_px × q_design
+    const mpp = mPerPx();
+    if (mpp && s.exits) {
+      const qd = s.thresholds.q_design;
+      s.exits.forEach((ex) => {
+        if (!ex.line || ex.line.length < 2) return;
+        const dx = ex.line[1][0] - ex.line[0][0], dy = ex.line[1][1] - ex.line[0][1];
+        const w_eff_m = Math.sqrt(dx * dx + dy * dy) * mpp;
+        ex.design_capacity = Math.max(1, Math.round(w_eff_m * qd));
+      });
+    }
     try {
       App.site = await API.putSite(s);
       App.updateChip();

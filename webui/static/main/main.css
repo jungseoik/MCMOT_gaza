@@ -71,6 +71,17 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .elitem .meta{ color:var(--text-3); font-size:11px; }
 .elitem .del{ background:none; border:0; color:var(--text-3); cursor:pointer; font-size:13px; }
 .elitem .del:hover{ color:var(--pia-coral); }
+.elitem-bn{ flex-wrap:wrap; row-gap:4px; }
+.bfield{ display:flex; align-items:center; gap:3px; font-size:11px; color:var(--text-3); white-space:nowrap; }
+.bni{ width:44px; height:22px; background:var(--bg-3); color:var(--text-1);
+  border:1px solid var(--stroke-1); border-radius:4px; font-size:11px; text-align:right; padding:0 3px; }
+.sei-panels{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px; }
+.sei-panel{ background:#0a1628; border:1.5px solid #1e4a7a; border-radius:4px; padding:6px 4px 4px; }
+.sei-ptitle{ font-size:10px; color:#4a9ac8; text-align:center; margin-bottom:4px; font-weight:600; letter-spacing:.3px; }
+.sei-panel canvas{ display:block; width:100%; }
+.th-metric{ margin-top:10px; }
+.th-metric-hd{ font-size:11px; font-weight:600; color:var(--text-2); display:flex; align-items:center; gap:5px; margin-bottom:5px; }
+.th-note{ font-size:11px; color:var(--text-3); font-style:italic; padding:2px 0 0 2px; }
 .thgrid{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
 .thgrid label{ font-size:11px; color:var(--text-3); display:flex; align-items:center; gap:4px; }
 .thgrid input{ width:56px; height:26px; background:var(--bg-3); color:var(--text-1);

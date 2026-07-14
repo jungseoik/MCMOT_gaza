@@ -313,13 +313,13 @@ const Session = (() => {
 
   function renderSei() {
     const sei = live ? live.sei : result.sei;
-    gauge($("seiGauge"), sei);
-    spark($("seiSpark"), timeline.map((t) => t.sei), { min: 0, max: 100 });
+    $("seiVal").textContent = sei != null ? fmt1(sei) : "—";
 
-    // 출구별 실제/설계 분포 가로 바 비교
     const exits = (App.site && App.site.exits) || [];
     const box = $("seiBars");
     if (!exits.length) { box.innerHTML = `<div class="mnote">출입구 없음 — 맵 설정에서 추가</div>`; return; }
+
+    // 실제 통과 인원 수집
     let actual = {};
     if (result) {
       result.exit_metrics.forEach((m) => { actual[m.exit_id] = m.actual_count; });
@@ -327,23 +327,84 @@ const Session = (() => {
       const tp = timeline[timeline.length - 1];
       actual = (tp && tp.exit_counts) || {};
     }
-    const tot = exits.reduce((s, e) => s + (actual[e.id] || 0), 0);
-    const csum = exits.reduce((s, e) => s + (e.design_capacity || 0), 0);
-    box.innerHTML = `<div class="bhead"><span></span><span class="bk a">실제</span><span class="bk d">설계</span></div>` +
-      exits.map((e) => {
-        const a = actual[e.id] || 0;
-        const aShare = tot > 0 ? a / tot : 0;
-        const dShare = csum > 0 ? (e.design_capacity || 0) / csum : 1 / exits.length;
-        return `<div class="brow">
-          <div class="blab" title="${nameOf(exits, e.id)}">${nameOf(exits, e.id)}</div>
-          <div class="btracks">
-            <div class="btrack"><div class="bfill a" style="width:${Math.round(aShare * 100)}%"></div>
-              <span class="bval t-num">${a}명 ${(tot > 0 ? Math.round(aShare * 100) + "%" : "")}</span></div>
-            <div class="btrack"><div class="bfill d" style="width:${Math.round(dShare * 100)}%"></div>
-              <span class="bval t-num">${e.design_capacity != null ? e.design_capacity + "명 " : ""}${Math.round(dShare * 100)}%</span></div>
-          </div>
-        </div>`;
-      }).join("");
+    const totE = exits.reduce((s, e) => s + (actual[e.id] || 0), 0);
+    const totC = exits.reduce((s, e) => s + (e.design_capacity || 0), 0);
+    const labels = exits.map((e) => e.name || e.id);
+    const dShares = exits.map((e) => totC > 0 ? (e.design_capacity || 0) / totC : 1 / exits.length);
+    const aShares = exits.map((e) => totE > 0 ? (actual[e.id] || 0) / totE : 0);
+    const aCounts = exits.map((e) => actual[e.id] || 0);
+    const cCounts = exits.map((e) => e.design_capacity || 0);
+
+    // 두 패널 canvas
+    box.innerHTML =
+      `<div class="sei-panels">` +
+        `<div class="sei-panel"><div class="sei-ptitle">설계 통과용량 분포</div><canvas id="seiDesignCv"></canvas></div>` +
+        `<div class="sei-panel"><div class="sei-ptitle">실제 통과객체 분포</div><canvas id="seiActualCv"></canvas></div>` +
+      `</div>`;
+
+    drawSeiBars($("seiDesignCv"), labels, dShares, cCounts, false);
+    drawSeiBars($("seiActualCv"), labels, aShares, aCounts, true);
+  }
+
+  function drawSeiBars(cv, labels, shares, counts, isActual) {
+    const W = cv.parentElement.clientWidth || 200;
+    const H = 160;
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext("2d");
+    const n = labels.length;
+    const PAD_L = 32, PAD_B = 28, PAD_T = 8, PAD_R = 8;
+    const plotW = W - PAD_L - PAD_R;
+    const plotH = H - PAD_T - PAD_B;
+    const barW = Math.max(8, plotW / n * 0.55);
+    const barGap = plotW / n;
+
+    // 배경
+    ctx.fillStyle = "#0a1628";
+    ctx.fillRect(0, 0, W, H);
+
+    // HUD 테두리
+    const borderCol = "#1e4a7a";
+    ctx.strokeStyle = borderCol; ctx.lineWidth = 1.5;
+    ctx.strokeRect(0.75, 0.75, W - 1.5, H - 1.5);
+
+    // y축 격자 + 레이블
+    ctx.strokeStyle = "#1a3050"; ctx.lineWidth = 1;
+    ctx.fillStyle = "#5a8ab0"; ctx.font = "10px monospace"; ctx.textAlign = "right";
+    [0, 0.25, 0.5, 0.75, 1.0].forEach((v) => {
+      const y = PAD_T + plotH * (1 - v);
+      ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y); ctx.stroke();
+      ctx.fillText(v.toFixed(2), PAD_L - 3, y + 3.5);
+    });
+
+    // 바
+    const barCol = isActual ? "#3eb8e8" : "#2e8cc0";
+    shares.forEach((sh, i) => {
+      const bh = plotH * Math.min(sh, 1.0);
+      const bx = PAD_L + barGap * i + (barGap - barW) / 2;
+      const by = PAD_T + plotH - bh;
+
+      // 바 그라데이션
+      const grad = ctx.createLinearGradient(bx, by, bx, by + bh);
+      grad.addColorStop(0, isActual ? "#5dd4f8" : "#4ab0e0");
+      grad.addColorStop(1, isActual ? "#1e7aaa" : "#1a5a8a");
+      ctx.fillStyle = grad;
+      ctx.fillRect(bx, by, barW, bh);
+
+      // 카운트 레이블 (바 위)
+      ctx.fillStyle = "#c8e8ff";
+      ctx.font = "bold 10px monospace"; ctx.textAlign = "center";
+      if (counts[i] > 0) ctx.fillText(counts[i], bx + barW / 2, by - 3);
+
+      // x축 레이블
+      ctx.fillStyle = "#7aaac8"; ctx.font = "10px monospace";
+      const lbl = labels[i].length > 5 ? labels[i].slice(0, 5) + "…" : labels[i];
+      ctx.fillText(lbl, bx + barW / 2, H - PAD_B + 13);
+    });
+
+    // y축 선
+    ctx.strokeStyle = "#2a5070"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(PAD_L, PAD_T); ctx.lineTo(PAD_L, PAD_T + plotH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD_L, PAD_T + plotH); ctx.lineTo(W - PAD_R, PAD_T + plotH); ctx.stroke();
   }
 
   function renderCbs() {

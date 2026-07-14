@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MACS — 멀티카메라 맵 운영</title>
+<title>삼성화재 피난대피 지표보드</title>
 <link rel="stylesheet" href="/static/colors_and_type.css" />
 <link rel="stylesheet" href="/static/main/main.css" />
 </head>
@@ -13,7 +13,7 @@
   <!-- 상단 바 -->
   <header class="topbar">
     <img class="brandlogo" src="/static/pia-logo.png" alt="PIA" />
-    <div class="crumb"><b>MACS 멀티카메라</b><span>공통 2D 맵 · 다중 채널 운영</span></div>
+    <div class="crumb"><b>삼성화재</b><span>피난대피 지표보드</span></div>
     <nav class="viewnav">
       <button class="vbtn on" data-view="map">① 맵 설정</button>
       <button class="vbtn" data-view="cams">② 카메라 등록·매핑</button>
@@ -89,13 +89,41 @@
           </div>
           <div class="group">
             <div class="gtitle">판정 임계값</div>
-            <div class="thgrid">
-              <label>v_th <input id="thV" type="number" step="0.1" /> m/s</label>
-              <label>a_th <input id="thA" type="number" step="0.05" /> cos</label>
-              <label>r_th <input id="thR" type="number" step="0.05" /></label>
-              <label>dt_hold <input id="thDt" type="number" step="0.5" /> s</label>
-              <label>d_allow <input id="thD" type="number" step="0.5" /> m</label>
-              <label title="이 신뢰도 미만 검출은 표출·지표에서 제외 (정지 오탐 차단)">min_conf <input id="thC" type="number" step="0.05" min="0" max="1" /></label>
+
+            <div class="th-metric">
+              <div class="th-metric-hd"><i class="mtag">IDR</i> 피난개시 판정 조건</div>
+              <div class="thgrid">
+                <label title="평균 이동속도 임계 — 이 속도 이상이어야 '피난 이동 중' 판정">v_th <input id="thV" type="number" step="0.1" /> m/s</label>
+                <label title="경로 방향 정렬도 코사인 임계 — 경로 방향과의 일치 정도 (0~1)">a_th <input id="thA" type="number" step="0.05" /> cos</label>
+                <label title="구역 내 v_th·a_th 동시 만족 인원 비율 임계 (0~1)">r_th <input id="thR" type="number" step="0.05" /></label>
+                <label title="v_th·a_th·r_th 세 조건이 연속으로 유지돼야 하는 시간">dt_hold <input id="thDt" type="number" step="0.5" /> s</label>
+              </div>
+            </div>
+
+            <div class="th-metric">
+              <div class="th-metric-hd"><i class="mtag">EPFI</i> 경로 이탈 허용</div>
+              <div class="thgrid">
+                <label title="경로 중심선으로부터 이 거리 이내면 '경로 위 이동' 으로 인정">d_allow <input id="thD" type="number" step="0.5" /> m</label>
+              </div>
+            </div>
+
+            <div class="th-metric">
+              <div class="th-metric-hd"><i class="mtag">CBS</i> 병목 임계밀도 · 가중치</div>
+              <div class="th-note">병목 목록에서 항목별 개별 지정 (ρcrit 명/m² · w)</div>
+            </div>
+
+            <div class="th-metric">
+              <div class="th-metric-hd"><i class="mtag">SEI</i> 설계 통과기준</div>
+              <div class="thgrid">
+                <label title="단위 유효폭(m)당 설계 통과인원 기준 — 출입구 선 길이 × q_design = C_j,design. 일반복도 60, 계단 45 등">q_design <input id="thQd" type="number" min="1" step="5" value="60" /> 인/분/m</label>
+              </div>
+            </div>
+
+            <div class="th-metric">
+              <div class="th-metric-hd">시스템</div>
+              <div class="thgrid">
+                <label title="이 신뢰도 미만 검출은 표출·지표에서 제외 (정지 오탐 차단)">min_conf <input id="thC" type="number" step="0.05" min="0" max="1" /></label>
+              </div>
             </div>
           </div>
           </div>
@@ -187,6 +215,8 @@
           <button class="tag-btn" id="pairUndo">↶ 마지막 취소</button>
           <button class="tag-btn" id="pairClear">지우기</button>
           <span class="vsep"></span>
+          <button class="tag-btn" id="hullRoi" title="cctv_pts 컨벡스 헐로 유효 ROI 자동 설정 — 대응점 범위 밖 탐지 제외">커버리지→ROI 자동설정</button>
+          <span class="vsep"></span>
           <button class="tag-btn" id="camRetest">연결 테스트 ↻</button>
           <button class="btn primary sm" id="mappingSave">매핑 저장</button>
         </div>
@@ -224,6 +254,7 @@
           <span class="fieldlab" id="sessHint"></span>
           <span class="sp"></span>
           <button class="tag-btn" id="graphToggle" title="IDR 공간그래프 표시">공간그래프</button>
+          <button class="tag-btn on" id="hullToggle" title="카메라 매핑 커버리지 표시 (대응점 컨벡스 헐)">커버리지</button>
         </div>
         <div class="hint" id="liveHint">SSE 실시간 맵 — 객체 점·방향, 구역/병목 상태, 통과 카운트. (휠: 줌 · 드래그: 팬)</div>
         <canvas id="liveCv" class="mapcv"></canvas>
@@ -255,9 +286,7 @@
             <div class="sessmeta hidden" id="sessMeta"></div>
             <div class="mgrid hidden" id="sessGrid">
               <div class="mcard" id="cardSei">
-                <div class="mhead"><b>SEI</b><span class="msub">출구 활용 효율</span><span class="mela t-num"></span></div>
-                <div class="mgaugewrap"><canvas id="seiGauge"></canvas></div>
-                <canvas class="mspark" id="seiSpark" title="SEI 추이"></canvas>
+                <div class="mhead"><b>SEI</b><span class="msub">출구 활용 효율</span><span class="mela t-num" id="seiVal"></span></div>
                 <div class="mbars" id="seiBars"></div>
               </div>
               <div class="mcard" id="cardCbs">

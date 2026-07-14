@@ -460,6 +460,41 @@ async def map_stream():
                              headers={"Cache-Control": "no-cache"})
 
 
+@app.get("/api/debug/tracks")
+def debug_tracks():
+    """트래커 foot_uv 진단 — 좌표가 카메라 원본 해상도 범위 안인지 확인."""
+    if rt.engine is None:
+        return {"error": "엔진 없음"}
+    import numpy as np, cv2
+    cams = {c.cam_id: c for c in rt.cameras()}
+    workers = getattr(rt.ingest, "_workers", {})
+    foot_dbg = rt.engine._debug_foot   # gid -> {foot_u/v, map_x/y}
+    result = []
+    for gid, d in foot_dbg.items():
+        cam_id = gid.rsplit(":", 1)[0]
+        worker = workers.get(cam_id)
+        cam_w = getattr(worker, "width", "?") if worker else "?"
+        cam_h = getattr(worker, "height", "?") if worker else "?"
+        cam_cfg = cams.get(cam_id)
+        # cctv_pts 커버리지
+        cov = None
+        if cam_cfg and cam_cfg.mapping:
+            cctv = cam_cfg.mapping.cctv_pts
+            u_min = min(p[0] for p in cctv); u_max = max(p[0] for p in cctv)
+            v_min = min(p[1] for p in cctv); v_max = max(p[1] for p in cctv)
+            u, v = d["foot_u"], d["foot_v"]
+            in_cov = (u_min <= u <= u_max and v_min <= v <= v_max)
+            cov = f"cctv_pts u[{u_min:.0f}~{u_max:.0f}] v[{v_min:.0f}~{v_max:.0f}] → {'IN' if in_cov else '⚠OUT'}"
+        result.append({
+            "gid": gid, "cam": f"{cam_w}×{cam_h}",
+            "foot_u": d["foot_u"], "foot_v": d["foot_v"],
+            "map_x": d["map_x"], "map_y": d["map_y"],
+            "coverage": cov,
+        })
+    result.sort(key=lambda r: r["gid"])
+    return {"objects": result}
+
+
 @app.get("/api/status")
 def status():
     try:

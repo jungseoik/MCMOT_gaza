@@ -108,6 +108,7 @@ class MetricsEngine:
         self._last_result: EvaluationResult | None = None
         self._last_timeline: list[TimelinePoint] = []
         self._last_person_series: dict = {}
+        self._debug_foot: dict = {}  # gid -> {foot_uv, map_xy} — debug용 임시
         self.reload(site, cameras)
 
     # ------------------------------------------------------------ 설정 반영
@@ -183,6 +184,11 @@ class MetricsEngine:
                 if tr.conf < min_conf:           # 저신뢰 관측 — 오탐 연명 트랙 차단
                     continue                     # (BYTE 저신뢰 연관 유령 객체 방지)
                 p = proj.project(tr.foot_uv)
+                gid_pre = f"{cam_id}:{tr.local_track_id}"
+                self._debug_foot[gid_pre] = {
+                    "foot_u": round(tr.foot_uv[0], 1), "foot_v": round(tr.foot_uv[1], 1),
+                    "map_x": round(p.x, 1) if p else None, "map_y": round(p.y, 1) if p else None,
+                }
                 if p is None:                    # valid_roi 밖 — 제외
                     self._drop(f"{cam_id}:{tr.local_track_id}")
                     if sess is not None:

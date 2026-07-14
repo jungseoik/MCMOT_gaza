@@ -10,6 +10,7 @@ Views.live = (() => {
   let mc = null, es = null, watchdog = null;
   let state = null, lastMsg = 0;
   let showGraph = false;                 // IDR 공간그래프 표시 토글
+  let showHulls = true;                  // 카메라 매핑 커버리지 다각형 표시
   let selGid = null;                     // 객체 목록에서 선택된 gid (맵 하이라이트)
   let objSort = "dev";                   // 객체 정렬: dev(이탈)|speed|dwell
 
@@ -48,10 +49,77 @@ Views.live = (() => {
     el.className = "conn " + cls;
   }
 
+  // ------------------------------------------------------------ 커버리지 헐
+  function convexHull(pts) {
+    if (pts.length <= 2) return pts.slice();
+    const s = [...pts].sort((a, b) => a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
+    const cross = (O, A, B) => (A[0]-O[0])*(B[1]-O[1]) - (A[1]-O[1])*(B[0]-O[0]);
+    const lo = [], hi = [];
+    for (const p of s) {
+      while (lo.length >= 2 && cross(lo[lo.length-2], lo[lo.length-1], p) <= 0) lo.pop();
+      lo.push(p);
+    }
+    for (let i = s.length-1; i >= 0; i--) {
+      const p = s[i];
+      while (hi.length >= 2 && cross(hi[hi.length-2], hi[hi.length-1], p) <= 0) hi.pop();
+      hi.push(p);
+    }
+    hi.pop(); lo.pop();
+    return lo.concat(hi);
+  }
+
+  function drawCameraHulls(g) {
+    const { ctx, TX, TY } = g;
+    App.cameras.forEach((cam) => {
+      const m = cam.mapping;
+      if (!m || !m.map_pts || m.map_pts.length < 4) return;
+      const hull = convexHull(m.map_pts);
+      if (hull.length < 3) return;
+      const col = camColor(cam.cam_id, App.cameras);
+      ctx.save();
+      // 채우기 — 옅은 배경
+      ctx.beginPath();
+      hull.forEach(([x, y], i) => i === 0 ? ctx.moveTo(TX(x), TY(y)) : ctx.lineTo(TX(x), TY(y)));
+      ctx.closePath();
+      ctx.fillStyle = col;
+      ctx.globalAlpha = 0.06;
+      ctx.fill();
+      // 외곽선 — 점선
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([7, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      // 대응점 마커 (맵 측) — 작은 다이아몬드
+      ctx.save();
+      m.map_pts.forEach(([x, y], i) => {
+        const cx = TX(x), cy = TY(y), r = 4;
+        ctx.fillStyle = col;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy);
+        ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 0.8; ctx.globalAlpha = 1;
+        ctx.stroke();
+        if (g.s > 0.6) {
+          ctx.fillStyle = "#fff"; ctx.globalAlpha = 0.9;
+          ctx.font = "9px Pretendard,sans-serif";
+          ctx.fillText(i + 1, cx + 5, cy - 4);
+        }
+      });
+      ctx.restore();
+    });
+  }
+
   // ------------------------------------------------------------ 렌더
   function overlay(g) {
     drawSiteElements(g, App.site, { state, showScale: false });
     if (showGraph) drawGraph(g, App.site.graph, { faint: true });
+    if (showHulls) drawCameraHulls(g);               // 카메라별 매핑 커버리지
     drawAlarm(g);                                    // 🔔 경보 위치 마커
     if (!state) return;
     const { ctx, TX, TY } = g;
@@ -223,6 +291,11 @@ Views.live = (() => {
     $("graphToggle").onclick = () => {
       showGraph = !showGraph;
       $("graphToggle").classList.toggle("on", showGraph);
+      if (mc) mc.render();
+    };
+    $("hullToggle").onclick = () => {
+      showHulls = !showHulls;
+      $("hullToggle").classList.toggle("on", showHulls);
       if (mc) mc.render();
     };
     $("objSort").onclick = () => {                 // 객체 목록 정렬 전환
