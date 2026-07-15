@@ -94,7 +94,8 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .sei-dbar.sei-over{ background:#3eb88a; } .sei-dbar.sei-under{ background:#e87640; } .sei-dbar.sei-even{ background:#3a5068; }
 .sei-dval{ font-size:12px; font-family:monospace; width:48px; text-align:right; flex-shrink:0; }
 .sei-dval.sei-over{ color:#3eb88a; } .sei-dval.sei-under{ color:#e87640; } .sei-dval.sei-even{ color:#4a6080; }
-.th-metric{ margin-top:12px; }
+.th-metric{ margin-top:0; padding-top:16px; border-top:1px solid var(--stroke-2); }
+.th-metric:first-of-type{ padding-top:4px; border-top:none; }
 .th-metric-hd{ font-size:15px; font-weight:600; color:var(--text-2); display:flex; align-items:center; gap:5px; margin-bottom:10px; }
 .th-note{ font-size:13px; color:var(--text-3); font-style:italic; padding:2px 0 0 2px; }
 /* thgrid: 레거시 2열 레이아웃 — th-params로 대체 중 */
