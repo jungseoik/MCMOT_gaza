@@ -60,7 +60,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
   align-items:center; justify-content:flex-end; }
 .savemsg{ font-size:12px; color:var(--pia-cyan); }
 .group{ display:flex; flex-direction:column; gap:6px; }
-.gtitle{ font-size:14px; color:var(--text-2); font-weight:700; letter-spacing:.02em; }
+.gtitle{ font-size:18px; color:var(--text-2); font-weight:700; letter-spacing:.02em; }
 .gtitle .cnt{ color:var(--pia-cyan); }
 /* 맵설정 그룹 구분선 */
 #mapSetPanel{ display:flex; flex-direction:column; }
