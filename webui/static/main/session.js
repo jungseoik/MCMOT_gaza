@@ -511,26 +511,43 @@ const Session = (() => {
     const dAllow = (App.site && App.site.thresholds) ? App.site.thresholds.d_allow : null;
     const t0 = series[0][0], t1 = series[series.length - 1][0] || t0 + 1;
     const dmax = Math.max(dAllow || 0, ...series.map((s) => s[1])) * 1.15 || 1;
-    const X = (t) => 4 + (t - t0) / (t1 - t0 || 1) * (w - 8);
-    const Y = (d) => h - 12 - (d / dmax) * (h - 20);
-    ctx.beginPath(); ctx.moveTo(X(t0), h - 12);       // ∫d dt 면적
+    const PL = 5, PR = 5, PT = 6, PB = 14;
+    const X = (t) => PL + (t - t0) / (t1 - t0 || 1) * (w - PL - PR);
+    const Y = (d) => PT + (1 - d / dmax) * (h - PT - PB);
+
+    // ∫d dt 면적
+    ctx.beginPath(); ctx.moveTo(X(t0), Y(0));
     series.forEach(([t, d]) => ctx.lineTo(X(t), Y(d)));
-    ctx.lineTo(X(t1), h - 12); ctx.closePath();
-    ctx.fillStyle = "rgba(63,185,80,.22)"; ctx.fill();
-    ctx.beginPath();                                   // d(t) 곡선
+    ctx.lineTo(X(t1), Y(0)); ctx.closePath();
+    ctx.fillStyle = "rgba(63,185,80,.2)"; ctx.fill();
+
+    // d(t) 곡선
+    ctx.beginPath();
     series.forEach(([t, d], i) => (i ? ctx.lineTo(X(t), Y(d)) : ctx.moveTo(X(t), Y(d))));
     ctx.strokeStyle = "#3FB950"; ctx.lineWidth = 1.5; ctx.stroke();
-    if (dAllow != null) {                              // 허용 이탈폭 기준선
-      ctx.setLineDash([4, 3]); ctx.strokeStyle = "#FF5B5B";
-      ctx.beginPath(); ctx.moveTo(4, Y(dAllow)); ctx.lineTo(w - 4, Y(dAllow)); ctx.stroke();
+
+    // d_allow 기준선 — 레이블은 우측 끝 + 반투명 배경으로 겹침 방지
+    if (dAllow != null) {
+      const ly = Y(dAllow);
+      ctx.setLineDash([4, 3]); ctx.strokeStyle = "rgba(255,91,91,.7)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(PL, ly); ctx.lineTo(w - PR, ly); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.font = "9px Pretendard, sans-serif"; ctx.fillStyle = "#FF5B5B";
-      ctx.fillText(`d_allow ${dAllow}m`, 6, Y(dAllow) - 3);
+      const lbl = `d_allow ${dAllow}m`;
+      ctx.font = "9px Pretendard, sans-serif";
+      const tw = ctx.measureText(lbl).width;
+      const lx = w - PR - tw - 3;
+      const lblY = ly - 3;
+      ctx.fillStyle = "rgba(14,18,28,.75)";
+      ctx.fillRect(lx - 2, lblY - 9, tw + 4, 12);
+      ctx.fillStyle = "#FF5B5B"; ctx.textAlign = "left";
+      ctx.fillText(lbl, lx, lblY);
     }
-    ctx.font = "9px Pretendard, sans-serif"; ctx.fillStyle = "rgba(255,255,255,.45)";
-    ctx.fillText("0s", 4, h - 2);
-    ctx.fillText(`${Math.round(t1 - t0)}s`, w - 30, h - 2);
-    ctx.fillText(`${dmax.toFixed(1)}m`, 4, 10);
+
+    // 시간 레이블 (하단)
+    ctx.font = "9px Pretendard, sans-serif"; ctx.fillStyle = "rgba(255,255,255,.32)";
+    ctx.textAlign = "left";  ctx.fillText("0s", PL, h - 2);
+    ctx.textAlign = "right"; ctx.fillText(`${Math.round(t1 - t0)}s`, w - PR, h - 2);
+    ctx.textAlign = "left";
   }
 
   function renderIdr() {

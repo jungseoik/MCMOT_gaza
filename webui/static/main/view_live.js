@@ -14,6 +14,17 @@ Views.live = (() => {
   let selGid = null;                     // 객체 목록에서 선택된 gid (맵 하이라이트)
   let objSort = "dev";                   // 객체 정렬: dev(이탈)|speed|dwell
 
+  // ---- 클라이언트 사이드 위치 보간 (선형 보간, T_n-1 → T_n)
+  let prevObjects = {};      // {gid: {x,y}} — T_n-1 위치
+  let currObjects = {};      // {gid: {x,y}} — T_n 위치 (최신 SSE)
+  let interpStart = 0;       // T_n 도착 시각 (performance.now())
+  let interpDuration = 1000; // 측정된 SSE 간격 (ms), 수신 시마다 갱신
+  let lastSseTime = 0;       // 이전 SSE 도착 시각
+  let rafId = null;          // requestAnimationFrame handle
+  const FPS_OPTS = [10, 20, 30];
+  let fpsCursor = 1;                     // 기본 20fps
+  const renderFps = () => FPS_OPTS[fpsCursor];
+
   // ------------------------------------------------------------ 수신
   function connect() {
     disconnect();
@@ -21,10 +32,26 @@ Views.live = (() => {
     es = new EventSource(API.streamUrl());
     es.addEventListener("state", (ev) => {
       lastMsg = Date.now();
-      setConn("LIVE (SSE 1초)", "ok");
-      try { state = JSON.parse(ev.data); } catch (e) { return; }
-      if (window.Session) Session.onState(state);   // 세션 카드 갱신 (v1.2)
-      update();
+      let newState;
+      try { newState = JSON.parse(ev.data); } catch (e) { return; }
+
+      // 보간 타이밍 갱신
+      const now = performance.now();
+      if (lastSseTime > 0)
+        interpDuration = Math.max(200, Math.min(3000, now - lastSseTime));
+      lastSseTime = now;
+      interpStart = now;
+
+      // T_n-1 ← T_n, T_n ← 새 수신
+      prevObjects = {...currObjects};
+      currObjects = {};
+      (newState.objects || []).forEach((o) => { currObjects[o.gid] = {x: o.x, y: o.y}; });
+
+      state = newState;
+      setConn(`LIVE · ${renderFps()}fps 보간`, "ok");
+      if (window.Session) Session.onState(state);   // 대시보드는 T_n 즉시 업데이트
+      updatePanels(); renderCams(); renderObjects();
+      // ★ mc.render()는 RAF 루프가 담당
     });
     es.onerror = () => setConn("SSE 재연결 중…", "err");
     // 워치독: 4초 이상 무수신이면 폴링 폴백으로 1회 채움
@@ -123,8 +150,13 @@ Views.live = (() => {
     drawAlarm(g);                                    // 🔔 경보 위치 마커
     if (!state) return;
     const { ctx, TX, TY } = g;
+    const alpha = Math.min(1, interpDuration > 0
+      ? (performance.now() - interpStart) / interpDuration : 1);
     state.objects.forEach((o) => {
-      const x = TX(o.x), y = TY(o.y);
+      const prev = prevObjects[o.gid];
+      const rx = prev ? prev.x + (o.x - prev.x) * alpha : o.x;
+      const ry = prev ? prev.y + (o.y - prev.y) * alpha : o.y;
+      const x = TX(rx), y = TY(ry);
       const col = camColor(o.cam_id, App.cameras);
       if (o.vx || o.vy) {                            // 방향 벡터 (화면 px 고정 길이)
         const L = 16, ex = x + o.vx * L, ey = y + o.vy * L;
@@ -273,7 +305,25 @@ Views.live = (() => {
     updatePanels();
     renderCams();
     renderObjects();
-    if (mc) mc.render();
+    // ★ mc.render()는 RAF 루프 담당 — 폴링 폴백 시에도 RAF가 처리
+  }
+
+  // ---- RAF 보간 렌더 루프
+  function startRenderLoop() {
+    stopRenderLoop();
+    let lastFrame = 0;
+    function loop(ts) {
+      if (!active) { rafId = null; return; }
+      rafId = requestAnimationFrame(loop);
+      if (ts - lastFrame < 1000 / renderFps()) return;
+      lastFrame = ts;
+      if (mc) mc.render();
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function stopRenderLoop() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -298,6 +348,10 @@ Views.live = (() => {
       $("hullToggle").classList.toggle("on", showHulls);
       if (mc) mc.render();
     };
+    $("fpsToggle").onclick = () => {
+      fpsCursor = (fpsCursor + 1) % FPS_OPTS.length;
+      $("fpsToggle").textContent = `${renderFps()}fps`;
+    };
     $("objSort").onclick = () => {                 // 객체 목록 정렬 전환
       const keys = Object.keys(SORTS);
       objSort = keys[(keys.indexOf(objSort) + 1) % keys.length];
@@ -314,9 +368,14 @@ Views.live = (() => {
     if (App.mapImg && App.site.map) mc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
     else mc.setImage(null, 1000, 600);
     connect();
+    startRenderLoop();
   }
 
-  function leave() { active = false; disconnect(); }
+  function leave() {
+    active = false;
+    disconnect();
+    stopRenderLoop();
+  }
 
   return { enter, leave };
 })();
