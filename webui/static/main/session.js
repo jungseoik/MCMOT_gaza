@@ -384,7 +384,7 @@ const Session = (() => {
   function drawSeiGrouped(cv, labels, dShares, aShares) {
     const n = labels.length;
     const W = cv.parentElement.clientWidth || 260;
-    const H = 150;
+    const H = 120;
     cv.width = W; cv.height = H;
     const ctx = cv.getContext("2d");
 
@@ -628,10 +628,20 @@ const Session = (() => {
       : (result ? (result.zone_metrics || []) : []);
     const elapsed = live ? live.elapsed_sec : (result ? (result.ended_at || result.alarm_ts) - result.alarm_ts : 0);
 
+    // 진행 카운터 + 평균 IDR
+    const startedZones = zm.filter((z) => z.status === "started");
+    const tot = zm.length;
     if (live) {
       $("idrProg").textContent = `${live.zones_started}/${live.zones_total}`;
     } else if (result) {
-      $("idrProg").textContent = `${zm.filter((z) => z.status === "started").length}/${zm.length}`;
+      $("idrProg").textContent = `${startedZones.length}/${tot}`;
+    }
+    const validIdrs = startedZones.map((z) => z.idr).filter((v) => v != null);
+    const avgIdr = validIdrs.length ? validIdrs.reduce((s, v) => s + v, 0) / validIdrs.length : null;
+    const avgEl = $("idrAvgEl");
+    if (avgEl) {
+      avgEl.textContent = avgIdr != null ? `avg ${avgIdr.toFixed(2)} m/s` : "—";
+      avgEl.classList.toggle("active", avgIdr != null);
     }
 
     if (!zm.length) {
@@ -642,7 +652,7 @@ const Session = (() => {
     const maxDelay = zm.reduce((mx, z) => Math.max(mx, z.response_delay_sec || 0), 0);
     const maxWindow = Math.max(elapsed, maxDelay + 5, 20);
 
-    wrap.innerHTML = zm.map((z) => {
+    wrap.innerHTML = `<div class="idr-colhd">IDR&nbsp;<small>m/s</small></div>` + zm.map((z) => {
       const name = nameOf(zones, z.zone_id);
       const det = z.status === "started";
       const perO = (z.idr_per_origin || []).filter((v) => v != null);

@@ -161,6 +161,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .msub{ font-size:11px; color:var(--text-3); flex:1; min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mela{ font-size:10px; color:var(--text-3); }
+.mela.active{ color:#3FB950; font-weight:600; }
 .mbig{ font-size:26px; font-weight:700; line-height:1.1; }
 
 /* canvas 크기는 CSS 박스가 결정 (session.js cvCtx가 rect 기준으로 백킹 해상도 설정) */
@@ -176,8 +177,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 #devWrap{ margin-top:10px; padding-top:8px; border-top:1px solid var(--stroke-2); }
 
 /* SEI 출구 분포 바 */
-.mbars{ display:flex; flex-direction:column; gap:4px; font-size:11px;
-  overflow-y:auto; min-height:0; max-height:170px; }
+.mbars{ display:flex; flex-direction:column; gap:4px; font-size:11px; }
 .bhead{ display:flex; gap:8px; justify-content:flex-end; color:var(--text-3); font-size:10px; }
 .bk.a::before{ content:"■ "; color:var(--cyan, #30DCFB); }
 .bk.d::before{ content:"■ "; color:var(--text-3); }
@@ -255,6 +255,14 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .objbadge.ok{ background:rgba(63,185,80,.2); color:#3FB950; }
 .objbadge.out{ background:rgba(48,220,251,.15); color:var(--pia-cyan); }
 
+/* IDR 진행 헤더 */
+.idr-prog-row{ display:flex; align-items:baseline; gap:5px; }
+.idr-prog-row .t-num{ font-size:22px; font-weight:700; line-height:1.1; }
+.idr-prog-lab{ font-size:11px; color:var(--text-3); }
+/* IDR 컬럼 헤더 — zone 목록 위 */
+.idr-colhd{ display:flex; justify-content:flex-end; font-size:9px; color:var(--text-3);
+  letter-spacing:.4px; text-transform:uppercase; padding-bottom:4px;
+  border-bottom:1px solid rgba(255,255,255,.06); margin-bottom:2px; }
 /* IDR 구역별 타임라인 — 1행 컴팩트: [구역명+Δt] [타임라인] [IDR값] */
 .idr-row{ display:flex; align-items:center; gap:6px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.04); }
 .idr-row:last-child{ border-bottom:none; }
