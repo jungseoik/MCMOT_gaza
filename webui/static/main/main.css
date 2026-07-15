@@ -276,9 +276,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .objbadge.out{ background:rgba(48,220,251,.15); color:var(--pia-cyan); }
 
 /* IDR 진행 헤더 */
-.idr-prog-row{ display:flex; align-items:baseline; gap:6px; }
-.idr-prog-row .t-num{ font-size:28px; font-weight:700; line-height:1.1; }
-.idr-prog-lab{ font-size:13px; color:var(--text-3); }
+/* idr-prog-row 제거됨 — idrProg를 mhead 우측으로 이동 */
 /* IDR 컬럼 헤더 — zone 목록 위 */
 .idr-colhd{ display:flex; justify-content:flex-end; font-size:11px; color:var(--text-3);
   letter-spacing:.4px; text-transform:uppercase; padding-bottom:5px;
