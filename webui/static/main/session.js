@@ -352,7 +352,8 @@ const Session = (() => {
     const cCounts = exits.map((e) => e.design_capacity || 0);
 
     const deltas = dShares.map((d, i) => aShares[i] - d);
-    const maxAbsDelta = Math.max(...deltas.map(Math.abs), 0.001);
+    // 발산형 바: 기준점 50pp 이탈 = 절반 꽉 참
+    const DELTA_MAX_SCALE = 0.50;
 
     box.innerHTML =
       `<div class="sei-legend"><span class="sei-leg-d">■ 설계</span><span class="sei-leg-a">■ 실제</span></div>` +
@@ -368,13 +369,20 @@ const Session = (() => {
       if (!dbox) return;
       const worstIdx = deltas.reduce((mi, d, i) => Math.abs(d) > Math.abs(deltas[mi]) ? i : mi, 0);
       dbox.innerHTML = deltas.map((d, i) => {
-        const pct = Math.round(Math.abs(d) / maxAbsDelta * 100);
+        // 발산형 바: 중심(50%)에서 좌(under) 또는 우(over)로 뻗음
+        const halfPct = Math.min(Math.abs(d) / DELTA_MAX_SCALE * 50, 50).toFixed(1);
+        const posStyle = d >= 0
+          ? `left:50%;width:${halfPct}%;border-radius:0 3px 3px 0`
+          : `right:50%;width:${halfPct}%;border-radius:3px 0 0 3px`;
         const sign = d >= 0 ? "+" : "";
         const cls = Math.abs(d) < 0.005 ? "sei-even" : d > 0 ? "sei-over" : "sei-under";
         const worst = i === worstIdx && Math.abs(d) >= 0.005 ? " sei-worst" : "";
         return `<div class="sei-drow${worst}">
           <div class="sei-dlab">${labels[i]}</div>
-          <div class="sei-dbar-wrap"><div class="sei-dbar ${cls}" style="width:${pct}%"></div></div>
+          <div class="sei-dbar-wrap sei-diverge">
+            <div class="sei-div-center"></div>
+            <div class="sei-dbar ${cls}" style="${posStyle}"></div>
+          </div>
           <div class="sei-dval ${cls}">${sign}${(d * 100).toFixed(1)}%</div>
         </div>`;
       }).join("");
@@ -384,29 +392,29 @@ const Session = (() => {
   function drawSeiGrouped(cv, labels, dShares, aShares) {
     const n = labels.length;
     const W = cv.parentElement.clientWidth || 300;
-    const H = 160;
+    const H = 180;
     cv.width = W; cv.height = H;
     const ctx = cv.getContext("2d");
 
-    const PAD_L = 30, PAD_R = 8, PAD_T = 10, PAD_B = 26;
+    const PAD_L = 44, PAD_R = 8, PAD_T = 12, PAD_B = 34;
     const plotW = W - PAD_L - PAD_R;
     const plotH = H - PAD_T - PAD_B;
     const slotW = plotW / n;
-    const bw = Math.max(5, Math.min(18, slotW * 0.28));
-    const bg = 3;
+    const bw = Math.max(8, Math.min(26, slotW * 0.35));
+    const bg = 4;
 
     // 배경
     ctx.fillStyle = "#111722";
     ctx.fillRect(0, 0, W, H);
 
-    // 격자
+    // 격자 + y축 레이블
     [0.25, 0.5, 0.75, 1.0].forEach((v) => {
       const y = PAD_T + plotH * (1 - v);
       ctx.strokeStyle = v === 1.0 ? "#2a3a50" : "#1e2b3a";
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y); ctx.stroke();
-      ctx.fillStyle = "#4a6078"; ctx.font = "9px sans-serif"; ctx.textAlign = "right";
-      ctx.fillText(v.toFixed(2), PAD_L - 3, y + 3.5);
+      ctx.fillStyle = "#8aaac8"; ctx.font = "12px sans-serif"; ctx.textAlign = "right";
+      ctx.fillText((v * 100).toFixed(0) + "%", PAD_L - 5, y + 4);
     });
 
     // 그룹 바
@@ -430,20 +438,20 @@ const Session = (() => {
       ctx.fillRect(bx_a, PAD_T + plotH - h_a, bw, h_a);
 
       // 비율 레이블 (바 위)
-      ctx.font = "8px sans-serif"; ctx.textAlign = "center";
+      ctx.font = "11px sans-serif"; ctx.textAlign = "center";
       if (dShares[i] > 0.04) {
         ctx.fillStyle = "#7ac8f0";
-        ctx.fillText((dShares[i] * 100).toFixed(0) + "%", bx_d + bw / 2, PAD_T + plotH - h_d - 2);
+        ctx.fillText((dShares[i] * 100).toFixed(0) + "%", bx_d + bw / 2, PAD_T + plotH - h_d - 3);
       }
       if (aShares[i] > 0.04) {
         ctx.fillStyle = "#f0c090";
-        ctx.fillText((aShares[i] * 100).toFixed(0) + "%", bx_a + bw / 2, PAD_T + plotH - h_a - 2);
+        ctx.fillText((aShares[i] * 100).toFixed(0) + "%", bx_a + bw / 2, PAD_T + plotH - h_a - 3);
       }
 
       // x 레이블
-      ctx.fillStyle = "#5a7890"; ctx.font = "9px sans-serif";
+      ctx.fillStyle = "#8aaac8"; ctx.font = "12px sans-serif";
       const short = lbl.length > 5 ? lbl.slice(0, 4) + "…" : lbl;
-      ctx.fillText(short, cx, H - PAD_B + 12);
+      ctx.fillText(short, cx, H - PAD_B + 16);
     });
 
     // 축
