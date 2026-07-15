@@ -294,8 +294,14 @@ async def session_start(request: Request):
     body = await request.json()
     if rt.engine.session_live() is not None:
         raise HTTPException(409, "세션 진행 중 — 먼저 종료하세요")
-    origin = tuple(body["origin"])
-    return rt.engine.start_session(origin, t_alarm=body.get("t_alarm"))
+    # origins 우선, 없으면 단일 origin (하위 호환)
+    origins = body.get("origins")
+    origin_xy = tuple(body["origin"]) if "origin" in body else None
+    return rt.engine.start_session(
+        origin_xy=origin_xy,
+        t_alarm=body.get("t_alarm"),
+        alarm_origins=[tuple(o) for o in origins] if origins else None,
+    )
 
 
 def _sessions_dir() -> Path:

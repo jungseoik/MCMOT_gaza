@@ -17,11 +17,11 @@
 | 항목 | 설명 |
 |------|------|
 | `t_alarm` | 경보 발생 시각 |
-| `S_origin` | 경보 발생 위치 (맵 좌표) |
-| 구역 polygon 집합 | IDR 판정 단위. 관리자가 맵에 수동 지정 |
+| `S_origin_j` ($j=1\ldots N$) | **N개 경보 발생원** 위치 (맵 좌표). 맵설정 [경보원] 도구로 지정. |
+| 구역 polygon 집합 | IDR 판정 단위. 관리자가 맵에 수동 지정 (Option B) |
+| 격자 셀 크기 $c$ [m] | 격자 BFS 해상도 — `grid.cell_size_m` (기본 2.0 m). 맵 전체를 정사각형 셀로 자동 분할 (Option C 배경 격자) |
 | 객체 시계열 | 각 구역 내 재실 객체의 평면도 좌표·속도·방향 |
 | 권장 피난 경로 | Route polyline (관리자 자유곡선 화살표 또는 CAD 산출) |
-| 공간 노드그래프 | 경보 위치→구역 최단 보행거리 계산용 |
 | 임계값 | `v_th`, `a_th`, `r_th`, `Δt_hold` (UI/config 입력, 버전 관리) |
 
 ---
@@ -136,18 +136,32 @@ for each timestamp t:
 
 ---
 
-## 4. IDR 산출 수식 (FR-04)
+## 4. IDR 산출 수식 (FR-04, v1.6 — Option C 격자 BFS + N-origin)
 
-경보 위치 $S_{\mathrm{origin}}$에서 구역 $e$까지 공간 노드그래프 최단 보행거리:
+### 4.1 구역-경보원 거리 $D(e, S_j)$ — 격자 BFS (Option C)
 
-$$D(e,\, S_{\mathrm{origin}})$$
+맵 전체를 셀 크기 $c$의 정사각형 격자로 분할한다 (배경 격자).  
+구역 polygon $e$ 안에 포함된 셀 centroid 집합: $\mathcal{C}_e$.
 
-구역별 IDR:
+경보원 $j$에서 구역 $e$까지의 거리:
 
-$$\mathrm{IDR}_e = \frac{D(e,\,S_{\mathrm{origin}})}{\max\!\left(t_{e,\mathrm{start}} - t_{\mathrm{alarm}},\;\varepsilon\right)} \quad [\text{m/s}]$$
+$$D(e,\, S_j) = \frac{1}{|\mathcal{C}_e|} \sum_{k \in \mathcal{C}_e} d_{\mathrm{BFS}}(k,\, S_j)$$
+
+- $d_{\mathrm{BFS}}(k, S_j)$: 격자 BFS (4방향 인접, 가중치 $c$) 최단거리 (m)
+- $|\mathcal{C}_e| = 0$ (셀 없음): Zone centroid와의 직선거리 폴백
+- 격자/축척 미설정: 수동 SpatialGraph Dijkstra → 직선거리 순으로 폴백
+
+### 4.2 경보원별 구역 IDR
+
+$$\mathrm{IDR}_{e,j} = \frac{D(e,\, S_j)}{\max\!\left(t_{e,\mathrm{start}} - t_{\mathrm{alarm}},\;\varepsilon\right)} \quad [\text{m/s}]$$
+
+### 4.3 N-origin 평균 IDR
+
+$$\mathrm{IDR}_e = \frac{1}{N} \sum_{j=1}^{N} \mathrm{IDR}_{e,j}$$
 
 - $\varepsilon = 10^{-6}$ s (delay=0 방지)
 - 피난 개시 미검출 구역: `status = not_started`, IDR = null
+- $N=1$ (단일 경보원): 기존 공식과 동일
 
 ---
 
@@ -156,8 +170,14 @@ $$\mathrm{IDR}_e = \frac{D(e,\,S_{\mathrm{origin}})}{\max\!\left(t_{e,\mathrm{st
 | 기호 | 의미 |
 |------|------|
 | $e$ | 분석 대상 구역 인덱스 |
+| $j$ | 경보 발생원 인덱스 ($1 \ldots N$) |
 | $i$ | 탐지 객체 인덱스 |
 | $t$ | 현재 시각 |
+| $S_j$ | $j$번째 경보 발생원 위치 (맵 px) |
+| $c$ | 격자 셀 한 변 크기 (m) — `grid.cell_size_m` |
+| $\mathcal{C}_e$ | 구역 $e$ polygon 내 격자 셀 centroid 집합 |
+| $d_{\mathrm{BFS}}(k, S_j)$ | 격자 BFS — 셀 $k$ centroid에서 경보원 $S_j$까지 최단거리 (m) |
+| $D(e, S_j)$ | 경보원 $j$ → 구역 $e$ 격자 BFS 평균거리 (m) |
 | $\mathcal{I}_e(t)$ | 시각 $t$에 구역 $e$에서 탐지된 객체 집합 |
 | $N_e(t)$ | $\left\|\mathcal{I}_e(t)\right\|$ |
 | $\mathbf{V}_i(t)$ | 객체 $i$의 이동 벡터 |
@@ -172,8 +192,8 @@ $$\mathrm{IDR}_e = \frac{D(e,\,S_{\mathrm{origin}})}{\max\!\left(t_{e,\mathrm{st
 | $\Delta t_{\mathrm{hold}}$ | 판정 조건 유지시간 임계값 (기본 3.0 s) |
 | $t_{\mathrm{alarm}}$ | 경보 발생 시각 |
 | $t_{e,\mathrm{start}}$ | 구역 $e$의 피난 개시 판정 시각 |
-| $D(e, S_{\mathrm{origin}})$ | 경보 위치→구역 최단 보행거리 (m) |
-| $\mathrm{IDR}_e$ | 구역 $e$ 피난 반응 확산 지표 (m/s) |
+| $\mathrm{IDR}_{e,j}$ | 경보원 $j$ 기준 구역 $e$ IDR (m/s) |
+| $\mathrm{IDR}_e$ | 구역 $e$ IDR — N-origin 평균 (m/s) |
 
 ---
 
@@ -183,13 +203,15 @@ $$\mathrm{IDR}_e = \frac{D(e,\,S_{\mathrm{origin}})}{\max\!\left(t_{e,\mathrm{st
 zone_id               : 구역 식별자
 evacuation_start_at   : t_e,start (epoch)
 response_delay_sec    : t_e,start − t_alarm  (null = 미개시)
-graph_distance        : D(e, S_origin) [m]
-idr                   : IDR_e (null = 미개시)
+graph_distance        : D(e) [m]  — N-origin 거리 평균
+idr                   : IDR_e 평균 (null = 미개시)
+idr_per_origin        : [IDR_e,1, IDR_e,2, …]  (N-origin 각각)
 participant_ratio     : 판정 시점 r_e
 status                : "started" | "not_started"
 ```
 
-SessionLive에도 `zone_metrics[]` 포함 — 세션 진행 중 SSE로 실시간 전달.
+SessionLive에도 `zone_metrics[]` 포함 — 세션 진행 중 SSE로 실시간 전달.  
+`alarm_origins[]` — 세션에 사용된 경보 발생원 목록.
 
 ---
 
@@ -216,9 +238,14 @@ SessionLive에도 `zone_metrics[]` 포함 — 세션 진행 중 SSE로 실시간
 | 구역별 객체 포함 판정 | ✅ | `system/metrics/session.py:point_in_polygon` |
 | 속도·정렬도 계산 | ✅ | `system/metrics/engine.py:_obj_kinematics()` |
 | 피난개시 판정 (v_e·a_e·r_e·dt_hold) | ✅ | `system/metrics/session.py:_sample()` |
-| 노드그래프 최단거리 | ✅ | `system/spatial/graph.py` + Dijkstra |
-| IDR_e 산출 | ✅ | `session.py:_zone_metric_now()` |
-| SessionLive zone_metrics 실시간 전달 | ✅ | `contracts.py:SessionLive.zone_metrics` |
+| **N개 경보 발생원** 스키마·맵 도구 | ✅ | `schema.py:AlarmOrigin`, `view_map.js:alarm_origin 도구` |
+| **격자 BFS 거리** (Option C) | ✅ | `system/spatial/grid.py:zone_grid_distance_m()` |
+| **N-origin IDR 평균** 산출 | ✅ | `session.py:_zone_metric_now()` → `idr_per_origin[]` + `idr` avg |
+| 격자 셀 크기 UI 입력·저장 | ✅ | `index.html:gridCellSize`, `view_map.js:save()` |
+| 축척 2점 수평·수직 스냅 토글 | ✅ | `view_map.js:scaleSnapOn`, `index.html:scaleSnap` |
+| SessionLive alarm_origins 전달 | ✅ | `contracts.py:SessionLive.alarm_origins` |
+| 운영뷰 IDR 배지 per-origin 표시 | ✅ | `session.js:renderIdr()` |
+| 경보원 설정 시 세션 즉시 시작 UX | ✅ | `session.js:onBtn()` |
 | 구역별 타임라인 시각화 | ✅ | `session.js:drawIdrTimeline()` |
 | **그리드 셀 대표벡터 field** | ⚠️ | polyline tangent 대체 중 (D-2) |
 | CAD API 경로 자동입력 | ❌ | 미구현 (D-2 ②) |

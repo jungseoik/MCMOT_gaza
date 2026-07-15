@@ -112,8 +112,9 @@ class ZoneMetric(BaseModel):
     zone_id: str
     evacuation_start_at: float | None = None   # t_e,start (epoch)
     response_delay_sec: float | None = None    # t_e,start − t_alarm
-    graph_distance: float | None = None        # 경보위치→구역 최단거리 (m)
-    idr: float | None = None
+    graph_distance: float | None = None        # 경보위치→구역 최단거리 (m, 단일 origin 또는 평균)
+    idr: float | None = None                   # IDR_e 평균 (N-origin 평균, 또는 단일값)
+    idr_per_origin: list[float | None] = []    # 경보원별 IDR_e,j (N-origin 시 채워짐)
     participant_ratio: float = 0.0             # 판정 시점 r_e
     status: str = "not_started"                # started | not_started
 
@@ -152,7 +153,8 @@ class EvaluationResult(BaseModel):
     calibration_version: int = 0               # site version at start
     config_version: int = 0
     alarm_ts: float
-    alarm_origin: tuple[float, float]          # 맵 px
+    alarm_origin: tuple[float, float]          # 맵 px (하위 호환 — 첫 번째 origin 또는 단일값)
+    alarm_origins: list[tuple[float, float]] = []  # 경보 발생원 전체 목록 (v1.6)
     ended_at: float | None = None
     zone_metrics: list[ZoneMetric] = []
     person_metrics: list[PersonMetric] = []
@@ -180,7 +182,8 @@ class SessionLive(BaseModel):
     """진행 중 세션 스냅샷 — MapState.session에 실림."""
     session_id: str
     alarm_ts: float
-    alarm_origin: tuple[float, float]
+    alarm_origin: tuple[float, float]          # 하위 호환 — 첫 번째 origin 또는 단일값
+    alarm_origins: list[tuple[float, float]] = []  # 경보 발생원 전체 목록 (v1.6)
     config_version: int = 0    # 세션이 고정한 설정 스냅샷 버전 (v1.4 —
                                # site_version과 다르면 "다음 세션부터 적용" 안내)
     elapsed_sec: float = 0.0

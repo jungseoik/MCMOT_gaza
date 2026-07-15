@@ -46,8 +46,13 @@ const API = {
   putMapping: (id, body) => API._put(`/api/cameras/${id}/mapping`, body),
 
   // ---- 평가 세션 (CONTRACT v1.2)
-  startSession: (origin, t_alarm) =>
-    API._post("/api/session/start", t_alarm != null ? { origin, t_alarm } : { origin }),
+  startSession: (origin, { origins, t_alarm } = {}) => {
+    const body = {};
+    if (origins && origins.length) body.origins = origins;
+    else if (origin) body.origin = origin;
+    if (t_alarm != null) body.t_alarm = t_alarm;
+    return API._post("/api/session/start", body);
+  },
   stopSession: () => API._post("/api/session/stop"),
   getSession: () => API._j("/api/session"),
   getSessionResult: () => API._j("/api/session/result"),

@@ -15,10 +15,11 @@ finalize()가 EvaluationResult를 조립한다. 수식·예외 정의는 요구�
   밀도가 다음 샘플까지 유지된 것으로 본다(over_threshold_sec 동일 기준).
 - EPFI(FR-05): 배정 경로 = 세션 중 **첫 관측 위치**의 최근접 Route.
   d_i(t)는 관측 시각 기반 사다리꼴 적분(객체별 관측 주기 그대로).
-- IDR(FR-03·04): v_e·a_e·r_e를 1초 샘플로 판정, 조건이 dt_hold 이상
-  연속 유지된 **구간의 시작 샘플 시각**을 t_e,start로 본다.
-  D = SpatialGraph 다익스트라(m) — 경보위치·구역 각각 최근접 노드
-  (구역은 zone.node_id 우선), 그래프 비었거나 도달 불가면 직선거리 폴백.
+- IDR(FR-03·04 v1.6 Option C): v_e·a_e·r_e를 1초 샘플로 판정, 조건이 dt_hold
+  이상 연속 유지된 **구간의 시작 샘플 시각**을 t_e,start로 본다.
+  D(zone, origin_j) = Zone polygon 내 격자 셀 centroid들의 BFS 평균거리(m).
+  N개 경보 발생원 각각 IDR_e,j 산출 후 평균 → IDR_e.
+  격자 미설정·축척 없음 → SpatialGraph 다익스트라 → 직선 폴백 순.
 
 시간: wall-clock ts(초). 샘플 격자는 t_alarm + k·SAMPLE_INTERVAL_SEC —
 같은 입력·같은 설정이면 같은 결과(§8 결정성, generated_at 제외).
@@ -35,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from system.config.schema import Bottleneck, Zone
+from system.config.schema import Bottleneck, GridConfig, Zone
 from system.contracts import (
     BottleneckMetric,
     EvaluationResult,
@@ -51,6 +52,7 @@ from system.spatial import (
     point_in_polygon,
     shortest_dist_px,
 )
+from system.spatial.grid import zone_grid_distance_m
 
 if TYPE_CHECKING:                       # 순환 import 방지 (타입 전용)
     from system.metrics.engine import MetricsEngine
@@ -94,10 +96,16 @@ class _PersonAcc:
 class _ZoneAcc:
     """IDR — 구역 1개의 피난개시 판정 상태."""
     zone: Zone
-    graph_distance_m: float | None  # D(e, S_origin) — 세션 시작 시 1회 계산
-    cond_since: float | None = None    # 조건 연속 성립 시작 샘플 시각
-    started_at: float | None = None    # t_e,start
-    participant_ratio: float = 0.0     # 판정 시점 r_e
+    graph_distances_m: list[float | None]  # D(e, origin_j) — 경보원별, 세션 시작 시 1회 계산
+    cond_since: float | None = None        # 조건 연속 성립 시작 샘플 시각
+    started_at: float | None = None        # t_e,start
+    participant_ratio: float = 0.0         # 판정 시점 r_e
+
+    @property
+    def graph_distance_m(self) -> float | None:
+        """하위 호환 — 유효 거리들의 평균 (단일 origin 시 그대로)."""
+        vals = [d for d in self.graph_distances_m if d is not None]
+        return sum(vals) / len(vals) if vals else None
 
 
 @dataclass
@@ -115,10 +123,16 @@ class EvaluationSession:
     시작 시점의 site 설정 사본으로 판정한다."""
 
     def __init__(self, engine: "MetricsEngine",
-                 origin_xy: tuple[float, float], t_alarm: float):
+                 alarm_origins: list[tuple[float, float]], t_alarm: float):
         self._eng = engine
         self.alarm_ts = float(t_alarm)
-        self.origin = (float(origin_xy[0]), float(origin_xy[1]))
+        # N개 경보 발생원 — 하위 호환용 self.origin = 첫 번째 or (0,0)
+        self.alarm_origins: list[tuple[float, float]] = [
+            (float(o[0]), float(o[1])) for o in alarm_origins
+        ] if alarm_origins else []
+        self.origin: tuple[float, float] = (
+            self.alarm_origins[0] if self.alarm_origins else (0.0, 0.0)
+        )
         # 결정성(§8): session_id는 입력(t_alarm)에서 유도 — uuid 금지
         self.session_id = f"sess-{int(round(self.alarm_ts * 1000))}"
 
@@ -127,6 +141,9 @@ class EvaluationSession:
         self.thresholds = site.thresholds
         self.m_per_px: float | None = engine._m_per_px
         self._graph = site.graph
+        self._grid_cfg: GridConfig = site.grid
+        self._map_w: float = float(site.map.w) if site.map else 0.0
+        self._map_h: float = float(site.map.h) if site.map else 0.0
         # 경로 (id 보존 — 엔진 _routes는 id가 없어 별도 보관)
         self._routes: list[tuple[str, np.ndarray]] = [
             (r.id, np.asarray(r.points, dtype=np.float64))
@@ -140,7 +157,10 @@ class EvaluationSession:
         # 누적 상태
         self.persons: dict[str, _PersonAcc] = {}
         self.zones: list[_ZoneAcc] = [
-            _ZoneAcc(zone=z, graph_distance_m=self._graph_distance_m(z))
+            _ZoneAcc(zone=z,
+                     graph_distances_m=[self._origin_distance_m(z, o)
+                                        for o in self.alarm_origins]
+                                       or [self._graph_distance_m(z)])
             for z, _area in engine._zones]
         self.bns: dict[str, _BnAcc] = {b.id: _BnAcc() for b, _ in self._bn_cfg}
         self.timeline: deque[TimelinePoint] = deque(maxlen=TIMELINE_MAXLEN)
@@ -153,24 +173,48 @@ class EvaluationSession:
         for bid, d in self._bn_densities().items():
             self.bns[bid].prev_density = d
 
-    # ---------------------------------------------------- IDR 그래프 거리
+    # ---------------------------------------------------- IDR 거리 산출
 
-    def _graph_distance_m(self, zone: Zone) -> float | None:
-        """경보위치→구역 최단거리 (m). 그래프 비었거나 도달 불가 → 직선 폴백.
-        축척 없으면 None (실단위 불가 → idr=None)."""
+    def _origin_distance_m(self, zone: Zone,
+                           origin: tuple[float, float]) -> float | None:
+        """경보 발생원 1개 → 구역 거리 (m). 격자 BFS 우선, 수동 그래프, 직선 폴백."""
+        if self.m_per_px is None:
+            return None
+        # 1순위: 격자 BFS (map 크기 알 때)
+        if self._map_w > 0 and self._map_h > 0:
+            d = zone_grid_distance_m(
+                zone_polygon=zone.polygon,
+                origin_px=origin,
+                map_w=self._map_w,
+                map_h=self._map_h,
+                m_per_px=self.m_per_px,
+                cell_size_m=self._grid_cfg.cell_size_m,
+            )
+            if d is not None:
+                return d
+        # 2순위: 수동 SpatialGraph Dijkstra
+        return self._graph_distance_m_from(zone, origin)
+
+    def _graph_distance_m_from(self, zone: Zone,
+                               origin: tuple[float, float]) -> float | None:
+        """수동 SpatialGraph 다익스트라 → 직선 폴백 (단일 origin 버전)."""
         if self.m_per_px is None:
             return None
         c = _centroid(zone.polygon)
         d_px: float | None = None
         if self._graph.nodes:
             node_ids = {n.id for n in self._graph.nodes}
-            src = nearest_node_id(self._graph, self.origin)
+            src = nearest_node_id(self._graph, origin)
             dst = (zone.node_id if zone.node_id in node_ids
-                   else nearest_node_id(self._graph, c))   # node_id 우선
+                   else nearest_node_id(self._graph, c))
             d_px = shortest_dist_px(self._graph, src, dst)
-        if d_px is None:                    # 그래프 없음/도달 불가 — 직선 폴백
-            d_px = math.dist(self.origin, c)
+        if d_px is None:
+            d_px = math.dist(origin, c)
         return d_px * self.m_per_px
+
+    def _graph_distance_m(self, zone: Zone) -> float | None:
+        """하위 호환 — self.origin 기준 단일 거리 산출."""
+        return self._graph_distance_m_from(zone, self.origin)
 
     # ---------------------------------------------------- EPFI 관측 누적
 
@@ -362,15 +406,26 @@ class EvaluationSession:
     def _zone_metric_now(self, zacc: "_ZoneAcc") -> ZoneMetric:
         started = zacc.started_at is not None
         delay = (zacc.started_at - self.alarm_ts) if started else None
-        idr = None
-        if started and zacc.graph_distance_m is not None:
-            idr = zacc.graph_distance_m / max(delay, IDR_EPS_SEC)
+        denom = max(delay, IDR_EPS_SEC) if started else None
+
+        # N-origin IDR 산출
+        idr_per: list[float | None] = []
+        for d in zacc.graph_distances_m:
+            if started and d is not None and denom is not None:
+                idr_per.append(d / denom)
+            else:
+                idr_per.append(None)
+
+        valid_idrs = [v for v in idr_per if v is not None]
+        idr_avg = sum(valid_idrs) / len(valid_idrs) if valid_idrs else None
+
         return ZoneMetric(
             zone_id=zacc.zone.id,
             evacuation_start_at=zacc.started_at,
             response_delay_sec=delay,
             graph_distance=zacc.graph_distance_m,
-            idr=idr,
+            idr=idr_avg,
+            idr_per_origin=idr_per,
             participant_ratio=zacc.participant_ratio,
             status="started" if started else "not_started",
         )
@@ -380,6 +435,7 @@ class EvaluationSession:
             session_id=self.session_id,
             alarm_ts=self.alarm_ts,
             alarm_origin=self.origin,
+            alarm_origins=self.alarm_origins,
             config_version=self.site_version,
             elapsed_sec=max(0.0, now - self.alarm_ts),
             sei=self._sei(),
@@ -452,6 +508,7 @@ class EvaluationSession:
             config_version=self.site_version,
             alarm_ts=self.alarm_ts,
             alarm_origin=self.origin,
+            alarm_origins=self.alarm_origins,
             ended_at=now,
             zone_metrics=zone_metrics,
             person_metrics=person_metrics,

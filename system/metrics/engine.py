@@ -246,18 +246,35 @@ class MetricsEngine:
                 cfg_key=(tuple(map(tuple, ex.line)), tuple(ex.inside)))
             for ex in self._site.exits}
 
-    def start_session(self, origin_xy: tuple[float, float],
-                      t_alarm: float | None = None) -> SessionLive:
+    def start_session(self,
+                      origin_xy: tuple[float, float] | None = None,
+                      t_alarm: float | None = None,
+                      alarm_origins: list[tuple[float, float]] | None = None,
+                      ) -> SessionLive:
         """평가 세션 시작 — 내부 카운터·debounce·객체이력 reset 후 누적 개시.
         site version을 calibration/config_version으로 기록.
-        진행 중이면 RuntimeError (API 층이 409로 매핑)."""
+        진행 중이면 RuntimeError (API 층이 409로 매핑).
+
+        alarm_origins 우선. 없으면 site.alarm_origins 사용.
+        둘 다 없으면 origin_xy를 단일 origin으로 사용 (하위 호환).
+        """
         with self._lock:
             if self._session is not None:
                 raise RuntimeError("평가 세션이 이미 진행 중")
             if t_alarm is None:
                 t_alarm = time.time()
+            # 경보 발생원 결정: 인자 > site 설정 > origin_xy 폴백
+            origins: list[tuple[float, float]]
+            if alarm_origins:
+                origins = alarm_origins
+            elif self._site.alarm_origins:
+                origins = [(ao.xy[0], ao.xy[1]) for ao in self._site.alarm_origins]
+            elif origin_xy is not None:
+                origins = [origin_xy]
+            else:
+                origins = [(0.0, 0.0)]
             self._reset_locked()
-            self._session = EvaluationSession(self, origin_xy, float(t_alarm))
+            self._session = EvaluationSession(self, origins, float(t_alarm))
             return self._session.live(float(t_alarm))
 
     def _session_now(self) -> float:

@@ -40,8 +40,12 @@
             <button class="tag-btn" data-tool="bottleneck" title="임계밀도 초과 혼잡 누적 → CBS">병목 <i class="mtag">CBS</i></button>
             <button class="tag-btn" data-tool="exit" title="방향성 통과 카운트 → 출구 활용 효율 SEI">출입구 <i class="mtag">SEI</i></button>
             <button class="tag-btn" data-tool="graph" title="경보→구역 보행거리 그래프 (IDR 거리항)">그래프 <i class="mtag">IDR</i></button>
+            <button class="tag-btn" data-tool="alarm_origin" title="경보 발생원 위치 지정 — IDR 거리 기준점 (N개 가능)">경보원 <i class="mtag">IDR</i></button>
           </div>
-          <span class="fieldlab">실거리 <input id="scaleMeters" type="number" min="0.1" step="0.1" value="10" /> m</span>
+          <span class="fieldlab">실거리 <input id="scaleMeters" type="number" min="0.1" step="0.1" value="10" /> m
+            <button class="tag-btn" id="scaleSnap" title="축척 2점 클릭 시 수평·수직 자동 스냅 토글">스냅 OFF</button>
+          </span>
+          <span class="fieldlab">격자 셀 <input id="gridCellSize" type="number" min="0.5" step="0.5" value="2.0" title="IDR 격자 BFS 셀 크기 (m)" style="width:52px"/> m</span>
           <span class="fieldlab">임계밀도 <input id="rhoCrit" type="number" min="0.1" step="0.1" value="2.0" /> 명/m²</span>
           <span class="fieldlab">이름 <input id="elName" type="text" placeholder="(선택)" style="width:110px" /></span>
           <button class="tag-btn" id="drawDone">완료 ⏎</button>
@@ -83,7 +87,12 @@
             <div id="listExits" class="ellist"></div>
           </div>
           <div class="group">
-            <div class="gtitle">공간그래프 <i class="mtag">IDR 거리항</i> <span class="cnt" id="cntGraph">0</span></div>
+            <div class="gtitle">경보 발생원 <i class="mtag">IDR 거리 기준</i> <span class="cnt" id="cntAlarmOrigins">0</span></div>
+            <div id="listAlarmOrigins" class="ellist"></div>
+            <div class="grow" id="alarmOriginMeta" style="font-size:11px;color:var(--text-3)"></div>
+          </div>
+          <div class="group">
+            <div class="gtitle">공간그래프 <i class="mtag">IDR 거리항 (레거시)</i> <span class="cnt" id="cntGraph">0</span></div>
             <div id="listGraph" class="ellist"></div>
             <div class="grow" id="graphMeta"></div>
           </div>

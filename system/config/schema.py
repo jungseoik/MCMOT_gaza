@@ -94,6 +94,19 @@ class SpatialGraph(BaseModel):
     edges: list[tuple[str, str]] = []
 
 
+class AlarmOrigin(BaseModel):
+    """경보 발생원 위치 (맵 px) — IDR 거리 기준점 (N개 지정 가능)."""
+    id: str
+    name: str = ""
+    xy: Point
+
+
+class GridConfig(BaseModel):
+    """IDR 격자 BFS용 배경 격자 설정.
+    Zone polygon 내 셀 centroid들의 BFS 평균거리 → D(zone, origin)."""
+    cell_size_m: float = Field(default=2.0, gt=0)  # 격자 셀 한 변 실거리 (m)
+
+
 class Thresholds(BaseModel):
     """판정 임계값 — 전부 UI 설정 가능, 하드코딩 금지 (요구사항 D-6). 실단위."""
     v_th: float = 0.5      # 피난개시 속도 임계 (m/s)
@@ -115,7 +128,9 @@ class SiteConfig(BaseModel):
     zones: list[Zone] = []
     bottlenecks: list[Bottleneck] = []
     exits: list[ExitLine] = []
-    graph: SpatialGraph = SpatialGraph()   # IDR용 (v1.2)
+    graph: SpatialGraph = SpatialGraph()            # IDR용 수동 그래프 (v1.2)
+    alarm_origins: list[AlarmOrigin] = []           # 경보 발생원 N개 (v1.6)
+    grid: GridConfig = GridConfig()                 # IDR 격자 BFS 설정 (v1.6)
     thresholds: Thresholds = Thresholds()
 
 

@@ -10,13 +10,14 @@ Views.map = (() => {
   let tool = "pan";
   let draft = null;              // {pts:[[x,y],...], inside:[x,y]|null}
   let inited = false;
+  let scaleSnapOn = false;       // 축척 2점 수평·수직 스냅 토글
 
   // ------------------------------------------------------------ 도구
   function setTool(t) {
     tool = t;
     document.querySelectorAll("#mapTools .tag-btn").forEach((b) =>
       b.classList.toggle("on", b.dataset.tool === t));
-    draft = (t === "pan" || t === "graph") ? null : { pts: [], inside: null };
+    draft = (t === "pan" || t === "graph" || t === "alarm_origin") ? null : { pts: [], inside: null };
     graphSel = null;
     if (mc) { mc.freehand = (t === "route"); mc.render(); }
     hint();
@@ -34,6 +35,7 @@ Views.map = (() => {
       bottleneck: "병목: 꼭짓점 클릭 + 임계밀도 입력, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
       exit: "출입구: 통과선 2점 클릭 → 세 번째 클릭이 '안쪽' 지점 (자동 완료).",
       graph: "공간그래프(IDR): 빈 곳 클릭=노드 추가 · 노드 클릭 2회=엣지 연결 · 노드 더블클릭=삭제. 복도 교차점·문 위치를 잇는 '걷는 거리' 그래프.",
+      alarm_origin: "경보 발생원(IDR): 클릭=경보원 추가 · 더블클릭=삭제. 연기감지기·경보벨 위치를 지정하세요 (N개 가능).",
     };
     el.textContent = H[tool] || "";
   }
@@ -82,13 +84,45 @@ Views.map = (() => {
   }
 
   // ------------------------------------------------------------ 드로잉
+  function alarmOriginClick(p) {
+    const s = App.site;
+    if (!s.alarm_origins) s.alarm_origins = [];
+    const r = 12 / (mc ? mc.s : 1);
+    const hit = s.alarm_origins.find((o) => Math.hypot(o.xy[0] - p.x, o.xy[1] - p.y) <= r);
+    if (!hit) {
+      const idx = s.alarm_origins.length + 1;
+      s.alarm_origins.push({ id: `ao${idx}`, name: `경보원 ${idx}`, xy: [p.x, p.y] });
+    }
+    refresh();
+  }
+
+  function alarmOriginDblClick(p) {
+    const s = App.site;
+    if (!s.alarm_origins) return false;
+    const r = 12 / (mc ? mc.s : 1);
+    const idx = s.alarm_origins.findIndex((o) => Math.hypot(o.xy[0] - p.x, o.xy[1] - p.y) <= r);
+    if (idx < 0) return false;
+    s.alarm_origins.splice(idx, 1);
+    refresh();
+    return true;
+  }
+
   function onClick(p) {
     if (tool === "graph") { graphClick(p); return; }
+    if (tool === "alarm_origin") { alarmOriginClick(p); return; }
     if (!draft) return;
     const site = App.site;
     if (tool === "scale") {
       if (!site.map) { hint("먼저 맵 이미지를 업로드하세요.", true); return; }
-      if (draft.pts.length < 2) draft.pts.push([p.x, p.y]);
+      // 두 번째 점 클릭 시 스냅 적용
+      let px = p.x, py = p.y;
+      if (scaleSnapOn && draft.pts.length === 1) {
+        const [x0, y0] = draft.pts[0];
+        const dx = Math.abs(px - x0), dy = Math.abs(py - y0);
+        if (dx > dy) py = y0;   // 수평 강제
+        else px = x0;            // 수직 강제
+      }
+      if (draft.pts.length < 2) draft.pts.push([px, py]);
       if (draft.pts.length === 2) applyScale();
     } else if (tool === "exit") {
       if (draft.pts.length < 2) {
@@ -167,9 +201,30 @@ Views.map = (() => {
   function cancelDraft() { if (draft) { draft = { pts: [], inside: null }; refresh(); hint(); } }
 
   // ------------------------------------------------------------ 렌더
+  function drawAlarmOrigins(g) {
+    const aos = App.site && App.site.alarm_origins;
+    if (!aos || !aos.length) return;
+    const { ctx, TX, TY } = g;
+    const r = 9;
+    aos.forEach((ao, i) => {
+      const x = TX(ao.xy[0]), y = TY(ao.xy[1]);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,80,0,0.85)";
+      ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = `bold ${Math.round(r * 1.1)}px sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(i + 1, x, y);
+    });
+  }
+
   function overlay(g) {
     drawSiteElements(g, App.site, { showScale: true });
     drawGraph(g, App.site.graph, { sel: tool === "graph" ? graphSel : null });
+    drawAlarmOrigins(g);
     if (!draft || !draft.pts.length) return;
     const { ctx } = g;
     const col = MC_COLORS[tool] || "#fff";
@@ -263,6 +318,23 @@ Views.map = (() => {
           () => { s.exits.splice(i, 1); refresh(); }));
       });
     })();
+    // 경보 발생원
+    (function fillAlarmOrigins() {
+      const box = $("listAlarmOrigins"); box.innerHTML = "";
+      const aos = s.alarm_origins || [];
+      $("cntAlarmOrigins").textContent = aos.length;
+      aos.forEach((ao, i) => {
+        box.appendChild(elItem(
+          ao.name || ao.id,
+          `(${Math.round(ao.xy[0])}, ${Math.round(ao.xy[1])})`,
+          "#ff5000",
+          () => { aos.splice(i, 1); refresh(); }
+        ));
+      });
+      $("alarmOriginMeta").textContent = aos.length
+        ? `${aos.length}개 경보원 — IDR D(zone, origin) 격자 BFS 평균 후 평균 IDR`
+        : "경보원 없음 — [경보원] 도구로 맵에 클릭하여 추가하세요";
+    })();
     // 공간그래프 — 노드·엣지 요약 1행 + 전체 지우기
     const gbox = $("listGraph");
     const gr = s.graph || { nodes: [], edges: [] };
@@ -300,6 +372,10 @@ Views.map = (() => {
       min_conf: (() => { const v = parseFloat($("thC").value); return isNaN(v) ? 0.35 : v; })(),
       q_design: parseFloat($("thQd").value) || 60.0,
     };
+    // 격자 셀 크기
+    const cellM = parseFloat($("gridCellSize").value);
+    if (cellM > 0) s.grid = { ...(s.grid || {}), cell_size_m: cellM };
+    // alarm_origins는 이미 s.alarm_origins 직접 수정 중이므로 별도 처리 불필요
     // 출입구 design_capacity 자동 계산: 선 길이(px) × m_per_px × q_design
     const mpp = mPerPx();
     if (mpp && s.exits) {
@@ -351,7 +427,11 @@ Views.map = (() => {
     mc = new MapCanvas($("mapSetupCv"), {
       onClick, onDragDraw,
       onDragEnd: () => {},
-      onDblClick: (p) => { if (tool === "graph") { graphDblClick(p); return; } finishDraft(); },
+      onDblClick: (p) => {
+        if (tool === "graph") { graphDblClick(p); return; }
+        if (tool === "alarm_origin") { alarmOriginDblClick(p); return; }
+        finishDraft();
+      },
       draw: overlay,
     });
     document.querySelectorAll("#mapTools .tag-btn").forEach((b) =>
@@ -375,6 +455,11 @@ Views.map = (() => {
         App.site.map.scale.meters = m; refresh();
       }
     };
+    $("scaleSnap").onclick = () => {
+      scaleSnapOn = !scaleSnapOn;
+      $("scaleSnap").textContent = scaleSnapOn ? "스냅 ON" : "스냅 OFF";
+      $("scaleSnap").classList.toggle("on", scaleSnapOn);
+    };
     window.addEventListener("keydown", (e) => {
       if ($("viewMap").classList.contains("hidden")) return;
       if (e.target.tagName === "INPUT") return;
@@ -388,6 +473,9 @@ Views.map = (() => {
     init();
     if (App.mapImg && App.site.map) mc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
     else mc.setImage(null, 1000, 600);
+    // 사이트 설정 → gridCellSize 입력값 동기화
+    const g = App.site && App.site.grid;
+    if (g && g.cell_size_m) $("gridCellSize").value = g.cell_size_m;
     refresh();
   }
 

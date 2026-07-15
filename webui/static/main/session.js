@@ -81,12 +81,28 @@ const Session = (() => {
     $("resReopen").onclick = () => { if (result) showResultModal(); };
   }
 
+  async function _startWithOrigins(origins) {
+    try {
+      live = await API.startSession(null, { origins });
+      stoppedId = null; result = null; timeline = []; personSeries = null;
+      renderDev(); startPoll(); switchPanel("sess");
+      hint(`세션 시작 — ${live.session_id} (경보원 ${origins.length}개)`);
+    } catch (e) { hint("세션 시작 실패: " + e.message, true); }
+    updateUI();
+  }
+
   function onBtn() {
     if (live) { stop(); return; }
     if (placing) { placing = false; setBtn(); hint(""); return; }
+    // 사이트에 alarm_origins 가 설정되어 있으면 즉시 시작 (맵 클릭 불필요)
+    const aos = App.site && App.site.alarm_origins;
+    if (aos && aos.length) {
+      _startWithOrigins(aos.map((ao) => ao.xy));
+      return;
+    }
     placing = true;
     setBtn();
-    hint("맵에서 경보 발생 위치를 클릭하세요 (버튼을 다시 누르면 취소)");
+    hint("맵에서 경보 발생 위치를 클릭하세요 (버튼을 다시 누르면 취소) · 또는 맵설정에서 경보원을 미리 지정하면 즉시 시작");
   }
 
   /** 맵 클릭 훅 (view_live) — 배치 모드였으면 true. */
@@ -96,7 +112,7 @@ const Session = (() => {
     setBtn();
     (async () => {
       try {
-        live = await API.startSession([p.x, p.y]);
+        live = await API.startSession(null, { origins: [[p.x, p.y]] });
         stoppedId = null;
         result = null;
         timeline = [];
@@ -636,10 +652,21 @@ const Session = (() => {
     wrap.innerHTML = zm.map((z) => {
       const name = nameOf(zones, z.zone_id);
       const det = z.status === "started";
+      // IDR 배지: avg + (per-origin 목록, N>1일 때)
+      let idrBadge = "—";
+      if (det) {
+        const avg = z.idr != null ? z.idr.toFixed(3) : null;
+        const perO = (z.idr_per_origin || []).filter((v) => v != null);
+        if (avg) {
+          idrBadge = perO.length > 1
+            ? `<span title="경보원별: ${perO.map((v) => v.toFixed(3)).join(" / ")}">${avg}m/s</span>`
+            : `${avg}m/s`;
+        }
+      }
       return `<div class="idr-row ${det ? "det" : ""}">
         <span class="idr-zn" title="${name}">${name}</span>
         <canvas class="idr-cv" id="idrcv_${z.zone_id}" height="46"></canvas>
-        <span class="idr-bdg ${det ? "ok" : ""}">${det ? z.response_delay_sec.toFixed(1) + "s" : "—"}</span>
+        <span class="idr-bdg ${det ? "ok" : ""}">${idrBadge}</span>
       </div>`;
     }).join("");
 
@@ -677,7 +704,12 @@ const Session = (() => {
       ${row("경보 시각", hhmmss(r.alarm_ts))}
       ${row("종료 시각", r.ended_at ? hhmmss(r.ended_at) : "—")}
       ${row("평가 시간", `${Math.floor(dur / 60)}분 ${Math.floor(dur % 60)}초`)}
-      ${row("경보 위치 (맵 px)", `(${Math.round(r.alarm_origin[0])}, ${Math.round(r.alarm_origin[1])})`)}
+      ${row("경보 발생원", (() => {
+        const aos = r.alarm_origins && r.alarm_origins.length
+          ? r.alarm_origins
+          : [r.alarm_origin];
+        return aos.map((o, i) => `#${i+1}(${Math.round(o[0])},${Math.round(o[1])})`).join(" · ");
+      })())}
       ${row("출구 총 통과", `${totOut}명 · 출구 ${r.exit_metrics.length}곳`)}
       ${row("추적 객체", `${r.person_metrics.length}개`)}
       ${row("설정 버전", `calibration v${r.calibration_version} · config v${r.config_version}`)}
@@ -695,6 +727,13 @@ const Session = (() => {
   return {
     init, bootstrap, onState, placeAlarm, updateCards,
     isPlacing: () => placing,
+    alarmOrigins: () => {
+      const src = live || result;
+      if (!src) return [];
+      return (src.alarm_origins && src.alarm_origins.length)
+        ? src.alarm_origins
+        : (src.alarm_origin ? [src.alarm_origin] : []);
+    },
     alarmOrigin: () => (live ? live.alarm_origin : (result ? result.alarm_origin : null)),
     isActive: () => !!live,
   };
