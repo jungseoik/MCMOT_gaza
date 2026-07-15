@@ -652,21 +652,21 @@ const Session = (() => {
     wrap.innerHTML = zm.map((z) => {
       const name = nameOf(zones, z.zone_id);
       const det = z.status === "started";
-      // IDR 배지: avg + (per-origin 목록, N>1일 때)
-      let idrBadge = "—";
-      if (det) {
-        const avg = z.idr != null ? z.idr.toFixed(3) : null;
-        const perO = (z.idr_per_origin || []).filter((v) => v != null);
-        if (avg) {
-          idrBadge = perO.length > 1
-            ? `<span title="경보원별: ${perO.map((v) => v.toFixed(3)).join(" / ")}">${avg}m/s</span>`
-            : `${avg}m/s`;
-        }
-      }
+      const perO = (z.idr_per_origin || []).filter((v) => v != null);
+      const idrTip = perO.length > 1
+        ? `title="경보원별: ${perO.map((v) => v.toFixed(2)).join(" / ")} m/s"` : "";
+      const idrTxt = det && z.idr != null ? z.idr.toFixed(2) : "—";
+      const delayTxt = det ? `반응 ${fmt1(z.response_delay_sec)}s` : "미반응";
       return `<div class="idr-row ${det ? "det" : ""}">
-        <span class="idr-zn" title="${name}">${name}</span>
-        <canvas class="idr-cv" id="idrcv_${z.zone_id}" height="46"></canvas>
-        <span class="idr-bdg ${det ? "ok" : ""}">${idrBadge}</span>
+        <div class="idr-top">
+          <span class="idr-zn" title="${name}">${name}</span>
+          <canvas class="idr-cv" id="idrcv_${z.zone_id}" height="46"></canvas>
+        </div>
+        <div class="idr-stat">
+          <span class="idr-delay ${det ? "ok" : ""}">${delayTxt}</span>
+          <span class="idr-val ${det && z.idr != null ? "ok" : ""}" ${idrTip}>${idrTxt}</span>
+          <span class="idr-unit">m/s</span>
+        </div>
       </div>`;
     }).join("");
 
