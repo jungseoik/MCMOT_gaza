@@ -10,7 +10,10 @@ const Session = (() => {
   let timeline = [];       // TimelinePoint[]
   let personSeries = null; // {gid: {route_id, series: [[t, d_m],...]}} — v1.4
   let lastSiteV = 0;       // 최신 site_version (설정 변경 경고용)
-  let placing = false;     // 경보 위치 클릭 대기
+  let placing = false;     // 경보 위치 클릭 대기 (레거시 — addingOrigin으로 대체)
+  let addingOrigin = false;    // + 추가 모드: 맵 클릭 → pendingOrigins에 추가
+  let pendingOrigins = [];    // [[x,y], ...] — 세션 시작 전 경보 발생원 목록 (세션 한 회용)
+  let pendingInited = false;  // _initPending 1회 수행 여부 — clear 후 재로드 방지
   let pollT = null;
   let stoppedId = null;    // stop 직후 지연 SSE 스냅샷 무시용
   let onMapRender = null;  // 맵 canvas 다시 그리기 콜백
@@ -72,6 +75,14 @@ const Session = (() => {
     if (inited) return;
     inited = true;
     $("sessBtn").onclick = onBtn;
+    $("sessStopBtn").onclick = stop;
+    $("alarmAddBtn").onclick = toggleAdding;
+    $("alarmClearBtn").onclick = () => {
+      pendingOrigins = [];
+      addingOrigin = false;
+      renderAlarmPanel();
+      hint("");
+    };
     $("pmSess").onclick = () => switchPanel("sess");
     $("pmRt").onclick = () => switchPanel("rt");
     $("resClose").onclick = () => $("resultModal").classList.add("hidden");
@@ -81,7 +92,49 @@ const Session = (() => {
     $("resReopen").onclick = () => { if (result) showResultModal(); };
   }
 
+  function _initPending() {
+    if (pendingInited) return;
+    pendingInited = true;
+    const aos = App.site && App.site.alarm_origins;
+    if (aos && aos.length) pendingOrigins = aos.map((ao) => [ao.xy[0], ao.xy[1]]);
+  }
+
+  function toggleAdding() {
+    addingOrigin = !addingOrigin;
+    $("alarmAddBtn").classList.toggle("on", addingOrigin);
+    hint(addingOrigin ? "맵에서 경보 발생 위치를 클릭하세요 (여러 개 가능). 완료 후 [+ 추가] 재클릭 또는 [🔔 경보 시작]." : "");
+    if (onMapRender) onMapRender();
+  }
+
+  function renderAlarmPanel() {
+    const setup = $("alarmSetup");
+    const list = $("alarmOriginList");
+    if (!setup || !list) return;
+    const isLive = !!live;
+    setup.classList.toggle("hidden", isLive);
+    $("sessStopBtn").classList.toggle("hidden", !isLive);
+    if (isLive) return;
+
+    _initPending();
+    list.innerHTML = pendingOrigins.length
+      ? pendingOrigins.map((o, i) =>
+          `<span class="alarm-chip">경보원 ${i + 1}<button class="alarm-chip-x" data-idx="${i}">×</button></span>`
+        ).join("")
+      : `<span class="alarm-none">없음 — [+ 추가] 또는 맵설정에서 지정</span>`;
+
+    list.querySelectorAll(".alarm-chip-x").forEach((btn) => {
+      btn.onclick = () => {
+        pendingOrigins.splice(Number(btn.dataset.idx), 1);
+        renderAlarmPanel();
+      };
+    });
+
+    $("sessBtn").disabled = pendingOrigins.length === 0;
+    if (onMapRender) onMapRender();
+  }
+
   async function _startWithOrigins(origins) {
+    addingOrigin = false;
     try {
       live = await API.startSession(null, { origins });
       stoppedId = null; result = null; timeline = []; personSeries = null;
@@ -92,38 +145,18 @@ const Session = (() => {
   }
 
   function onBtn() {
-    if (live) { stop(); return; }
-    if (placing) { placing = false; setBtn(); hint(""); return; }
-    // 사이트에 alarm_origins 가 설정되어 있으면 즉시 시작 (맵 클릭 불필요)
-    const aos = App.site && App.site.alarm_origins;
-    if (aos && aos.length) {
-      _startWithOrigins(aos.map((ao) => ao.xy));
-      return;
-    }
-    placing = true;
-    setBtn();
-    hint("맵에서 경보 발생 위치를 클릭하세요 (버튼을 다시 누르면 취소) · 또는 맵설정에서 경보원을 미리 지정하면 즉시 시작");
+    if (live) return;
+    _initPending();
+    if (!pendingOrigins.length) { hint("경보 발생원을 먼저 추가하세요.", true); return; }
+    _startWithOrigins(pendingOrigins.slice());
   }
 
-  /** 맵 클릭 훅 (view_live) — 배치 모드였으면 true. */
+  /** 맵 클릭 훅 (view_live) — addingOrigin 모드면 경보원 추가 후 true 반환. */
   function placeAlarm(p) {
-    if (!placing) return false;
-    placing = false;
-    setBtn();
-    (async () => {
-      try {
-        live = await API.startSession(null, { origins: [[p.x, p.y]] });
-        stoppedId = null;
-        result = null;
-        timeline = [];
-        personSeries = null;
-        renderDev();
-        startPoll();
-        switchPanel("sess");
-        hint(`세션 시작 — ${live.session_id}`);
-      } catch (e) { hint("세션 시작 실패: " + e.message, true); }
-      updateUI();
-    })();
+    if (!addingOrigin) return false;
+    pendingOrigins.push([p.x, p.y]);
+    renderAlarmPanel();
+    hint(`경보원 ${pendingOrigins.length}개 추가됨 — 계속 클릭하거나 [🔔 경보 시작]을 누르세요.`);
     return true;
   }
 
@@ -132,6 +165,9 @@ const Session = (() => {
       result = await API.stopSession();
       stoppedId = live && live.session_id;
       live = null;
+      addingOrigin = false;
+      pendingOrigins = [];
+      pendingInited = false;  // 다음 세션 시작 시 App.site에서 재로드
       stopPoll();
       try { timeline = await API.getSessionTimeline(); } catch (e) { /* keep */ }
       loadSeries();
@@ -143,9 +179,8 @@ const Session = (() => {
 
   function setBtn() {
     const b = $("sessBtn");
-    if (live) { b.textContent = "⏹ 세션 종료"; b.classList.add("stop"); }
-    else if (placing) { b.textContent = "✕ 위치 클릭 대기 — 취소"; b.classList.remove("stop"); }
-    else { b.textContent = "🔔 경보 시작"; b.classList.remove("stop"); }
+    b.textContent = "🔔 경보 시작";
+    b.classList.remove("stop");
   }
 
   function hint(msg, warn) {
@@ -736,13 +771,15 @@ const Session = (() => {
   // ================================================== 외부 노출
   function updateUI() {
     setBtn();
+    renderAlarmPanel();
     updateCards();
     if (onMapRender) onMapRender();
   }
 
   return {
     init, bootstrap, onState, placeAlarm, updateCards,
-    isPlacing: () => placing,
+    isPlacing: () => addingOrigin,
+    pendingAlarmOrigins: () => pendingOrigins,
     alarmOrigins: () => {
       const src = live || result;
       if (!src) return [];

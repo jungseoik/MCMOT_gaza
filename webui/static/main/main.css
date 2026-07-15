@@ -44,6 +44,23 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .hint{ font-size:12px; color:var(--text-3); padding:0 4px; min-height:16px; }
 .hint.warn{ color:var(--warning); }
 
+/* ---- 경보 발생원 패널 (운영뷰 세션 시작 전) */
+.alarm-setup{ display:flex; align-items:center; gap:10px; flex-wrap:nowrap; flex-shrink:0;
+  background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-lg);
+  padding:8px 12px; overflow:hidden; }
+.alarm-setup-label{ font-size:13px; font-weight:600; color:var(--text-2); white-space:nowrap; flex-shrink:0; }
+.alarm-origin-list{ display:flex; flex-wrap:nowrap; gap:6px; flex:1; min-width:0; overflow-x:auto; }
+.alarm-chip{ display:inline-flex; align-items:center; gap:4px; height:26px; padding:0 8px;
+  border-radius:var(--r-md); background:rgba(48,220,251,.12); border:1px solid var(--pia-cyan);
+  color:var(--pia-cyan); font-size:12px; white-space:nowrap; }
+.alarm-chip-x{ background:none; border:none; cursor:pointer; color:var(--text-3); font-size:14px;
+  padding:0 2px; line-height:1; }
+.alarm-chip-x:hover{ color:var(--warning); }
+.alarm-none{ font-size:12px; color:var(--text-3); }
+.alarm-add-btn{ flex-shrink:0; }
+.btn.stop{ background:#c0392b; color:#fff; }
+.btn.stop:hover{ background:#a93226; }
+
 .btn{ border:0; border-radius:var(--r-md); cursor:pointer; font:var(--button-14); padding:0 16px; height:36px; }
 .btn.sm{ height:30px; padding:0 12px; display:inline-flex; align-items:center; }
 .btn.primary{ background:var(--pia-blue); color:#fff; }

@@ -10,7 +10,7 @@ Views.live = (() => {
   let mc = null, es = null, watchdog = null;
   let state = null, lastMsg = 0;
   let showGraph = false;                 // IDR 공간그래프 표시 토글
-  let showHulls = true;                  // 카메라 매핑 커버리지 다각형 표시
+  let showHulls = false;                 // 카메라 매핑 커버리지 다각형 표시
   let selGid = null;                     // 객체 목록에서 선택된 gid (맵 하이라이트)
   let objSort = "dev";                   // 객체 정렬: dev(이탈)|speed|dwell
 
@@ -181,17 +181,43 @@ Views.live = (() => {
   }
 
   function drawAlarm(g) {
-    const o = window.Session && Session.alarmOrigin();
-    if (!o) return;
+    if (!window.Session) return;
+    const isActive = Session.isActive();
+    const origins = isActive
+      ? Session.alarmOrigins()
+      : Session.pendingAlarmOrigins();
     const { ctx, TX, TY } = g;
-    const x = TX(o[0]), y = TY(o[1]);
-    ctx.strokeStyle = Session.isActive() ? "#ff5b5b" : "rgba(255,91,91,.45)";
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y, 10, 0, 7); ctx.stroke();
-    ctx.beginPath(); ctx.arc(x, y, 3, 0, 7);
-    ctx.fillStyle = ctx.strokeStyle; ctx.fill();
-    ctx.font = "13px Pretendard, sans-serif";
-    ctx.fillText("🔔", x + 12, y - 8);
+
+    if (origins && origins.length) {
+      const stroke = isActive ? "#ff5b5b" : "rgba(255,91,91,.65)";
+      origins.forEach((o, i) => {
+        const x = TX(o[0]), y = TY(o[1]);
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, 10, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, 3, 0, 7);
+        ctx.fillStyle = stroke; ctx.fill();
+        ctx.font = "13px Pretendard, sans-serif";
+        ctx.fillText(origins.length > 1 ? `🔔${i + 1}` : "🔔", x + 12, y - 8);
+      });
+    }
+
+    // 추가 모드 안내 오버레이
+    if (!isActive && Session.isPlacing()) {
+      const W = g.mc.cw, H = g.mc.ch;
+      ctx.save();
+      ctx.strokeStyle = "#ff5b5b";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(2, 2, W - 4, H - 4);
+      ctx.setLineDash([]);
+      ctx.font = "bold 13px Pretendard, sans-serif";
+      ctx.fillStyle = "#ff7b7b";
+      ctx.textAlign = "center";
+      ctx.fillText("맵 클릭 → 경보 발생원 추가", W / 2, 22);
+      ctx.textAlign = "left";
+      ctx.restore();
+    }
   }
 
   function row(label, value, over) {
