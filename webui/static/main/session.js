@@ -550,35 +550,112 @@ const Session = (() => {
     ctx.textAlign = "left";
   }
 
+  function drawIdrTimeline(cv, { maxWindow, delay, elapsed, isDetected }) {
+    const ctx = cv.getContext("2d");
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const AX = 6, AXR = W - 6, AY = Math.round(H * 0.45);
+    const usable = AXR - AX;
+    const scale = usable / maxWindow;
+
+    const dashV = (x, color, y0, y1) => {
+      ctx.save(); ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x + 0.5, y0); ctx.lineTo(x + 0.5, y1); ctx.stroke();
+      ctx.restore();
+    };
+
+    // axis + arrow
+    ctx.strokeStyle = "#3a3f4b"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(AX, AY); ctx.lineTo(AXR, AY); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(AXR, AY); ctx.lineTo(AXR - 5, AY - 3);
+    ctx.moveTo(AXR, AY); ctx.lineTo(AXR - 5, AY + 3);
+    ctx.stroke();
+
+    if (isDetected) {
+      const dx = Math.min(AX + delay * scale, AXR - 4);
+      const grd = ctx.createLinearGradient(AX, 0, dx, 0);
+      grd.addColorStop(0, "rgba(63,185,80,.12)");
+      grd.addColorStop(1, "rgba(63,185,80,.45)");
+      ctx.fillStyle = grd;
+      ctx.fillRect(AX, AY - 8, dx - AX, 16);
+
+      dashV(AX, "#6a7080", AY - 16, AY + 14);
+      dashV(dx, "#3FB950", AY - 16, AY + 14);
+
+      ctx.font = "9px sans-serif"; ctx.textAlign = "center";
+      ctx.fillStyle = "#6a7080"; ctx.fillText("경보", AX + 10, AY + 24);
+      ctx.fillStyle = "#3FB950"; ctx.fillText("개시", Math.min(dx, AXR - 16), AY + 24);
+
+      ctx.fillStyle = "#3FB950"; ctx.font = "bold 10px monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(`Δt ${delay.toFixed(1)}s`, AXR - 2, AY - 11);
+    } else {
+      const nx = Math.min(AX + elapsed * scale, AXR - 8);
+      ctx.fillStyle = "rgba(200,210,230,.07)";
+      ctx.fillRect(AX, AY - 8, nx - AX, 16);
+
+      dashV(AX, "#6a7080", AY - 16, AY + 14);
+      ctx.save(); ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = "#3a3f4b"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(nx + 0.5, AY - 12); ctx.lineTo(nx + 0.5, AY + 10); ctx.stroke();
+      ctx.restore();
+
+      ctx.font = "9px sans-serif"; ctx.fillStyle = "#6a7080"; ctx.textAlign = "center";
+      ctx.fillText("경보", AX + 10, AY + 24);
+      ctx.fillStyle = "#464c58"; ctx.textAlign = "right"; ctx.font = "10px monospace";
+      ctx.fillText(`${elapsed.toFixed(0)}s…`, AXR - 2, AY - 11);
+    }
+  }
+
   function renderIdr() {
     const zones = (App.site && App.site.zones) || [];
     const wrap = $("idrTblWrap");
+
+    const zm = live
+      ? (live.zone_metrics || [])
+      : (result ? (result.zone_metrics || []) : []);
+    const elapsed = live ? live.elapsed_sec : (result ? (result.ended_at || result.alarm_ts) - result.alarm_ts : 0);
+
     if (live) {
       $("idrProg").textContent = `${live.zones_started}/${live.zones_total}`;
-      const tl = timeline.map((t) => t.zones_started);
-      wrap.innerHTML = `<div class="mnote">구역 개시 판정 진행 중 — 종료 시 구역별 상세(개시시각·지연·IDR)가 표시됩니다.</div>` +
-        (zones.length ? `<table class="mtbl"><tr><th>구역</th><th>상태</th></tr>` +
-          zones.map((z) => `<tr class="ns"><td>${z.name || z.id}</td><td>판정 중…</td></tr>`).join("") +
-          `</table>` : `<div class="mnote">구역 없음 — 맵 설정에서 추가</div>`);
-      void tl;
+    } else if (result) {
+      $("idrProg").textContent = `${zm.filter((z) => z.status === "started").length}/${zm.length}`;
+    }
+
+    if (!zm.length) {
+      wrap.innerHTML = `<div class="mnote">구역 없음 — 맵 설정에서 추가</div>`;
       return;
     }
-    const zm = result.zone_metrics || [];
-    const started = zm.filter((z) => z.status === "started").length;
-    $("idrProg").textContent = `${started}/${zm.length}`;
-    if (!zm.length) { wrap.innerHTML = `<div class="mnote">구역 없음 — 맵 설정에서 추가</div>`; return; }
-    wrap.innerHTML = `<table class="mtbl">
-      <tr><th>구역</th><th>개시</th><th>지연(s)</th><th>IDR</th><th>상태</th></tr>` +
-      zm.map((z) => {
-        const ns = z.status !== "started";
-        return `<tr class="${ns ? "ns" : ""}">
-          <td>${nameOf(zones, z.zone_id)}</td>
-          <td class="t-num">${z.evacuation_start_at ? hhmmss(z.evacuation_start_at) : "—"}</td>
-          <td class="t-num">${z.response_delay_sec != null ? fmt1(z.response_delay_sec) : "—"}</td>
-          <td class="t-num">${z.idr != null ? z.idr.toFixed(2) : "—"}</td>
-          <td>${ns ? "미개시" : "개시"}</td>
-        </tr>`;
-      }).join("") + `</table>`;
+
+    const maxDelay = zm.reduce((mx, z) => Math.max(mx, z.response_delay_sec || 0), 0);
+    const maxWindow = Math.max(elapsed, maxDelay + 5, 20);
+
+    wrap.innerHTML = zm.map((z) => {
+      const name = nameOf(zones, z.zone_id);
+      const det = z.status === "started";
+      return `<div class="idr-row ${det ? "det" : ""}">
+        <span class="idr-zn" title="${name}">${name}</span>
+        <canvas class="idr-cv" id="idrcv_${z.zone_id}" height="46"></canvas>
+        <span class="idr-bdg ${det ? "ok" : ""}">${det ? z.response_delay_sec.toFixed(1) + "s" : "—"}</span>
+      </div>`;
+    }).join("");
+
+    requestAnimationFrame(() => {
+      zm.forEach((z) => {
+        const cv = document.getElementById(`idrcv_${z.zone_id}`);
+        if (!cv) return;
+        cv.width = cv.getBoundingClientRect().width || 180;
+        drawIdrTimeline(cv, {
+          maxWindow,
+          delay: z.response_delay_sec,
+          elapsed,
+          isDetected: z.status === "started",
+        });
+      });
+    });
   }
 
   // ================================================== 결과 모달

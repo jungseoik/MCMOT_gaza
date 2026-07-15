@@ -189,6 +189,7 @@ class SessionLive(BaseModel):
     epfi_avg: float | None = None
     zones_started: int = 0
     zones_total: int = 0
+    zone_metrics: list["ZoneMetric"] = []  # 구역별 실시간 판정 상태 (IDR 타임라인용)
 
 
 MapState.model_rebuild()  # session: SessionLive forward ref 해석

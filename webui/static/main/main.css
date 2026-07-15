@@ -254,3 +254,11 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .objbadge{ font-size:9px; border-radius:3px; padding:0 4px; }
 .objbadge.ok{ background:rgba(63,185,80,.2); color:#3FB950; }
 .objbadge.out{ background:rgba(48,220,251,.15); color:var(--pia-cyan); }
+
+/* IDR 구역별 타임라인 */
+.idr-row{ display:flex; align-items:center; gap:5px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+.idr-row.det .idr-zn{ color:var(--text-2); }
+.idr-zn{ width:46px; font-size:10.5px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 0 auto; }
+.idr-cv{ flex:1; min-width:0; display:block; height:46px; }
+.idr-bdg{ width:38px; text-align:right; font-family:var(--font-num); font-size:11px; color:var(--text-3); flex:0 0 auto; }
+.idr-bdg.ok{ color:#3FB950; }

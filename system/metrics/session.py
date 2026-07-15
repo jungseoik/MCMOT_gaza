@@ -359,6 +359,22 @@ class EvaluationSession:
                       "series": [[round(t, 3), round(d, 3)] for t, d in p.series]}
                 for gid, p in self.persons.items() if p.series}
 
+    def _zone_metric_now(self, zacc: "_ZoneAcc") -> ZoneMetric:
+        started = zacc.started_at is not None
+        delay = (zacc.started_at - self.alarm_ts) if started else None
+        idr = None
+        if started and zacc.graph_distance_m is not None:
+            idr = zacc.graph_distance_m / max(delay, IDR_EPS_SEC)
+        return ZoneMetric(
+            zone_id=zacc.zone.id,
+            evacuation_start_at=zacc.started_at,
+            response_delay_sec=delay,
+            graph_distance=zacc.graph_distance_m,
+            idr=idr,
+            participant_ratio=zacc.participant_ratio,
+            status="started" if started else "not_started",
+        )
+
     def live(self, now: float) -> SessionLive:
         return SessionLive(
             session_id=self.session_id,
@@ -371,6 +387,7 @@ class EvaluationSession:
             epfi_avg=self._epfi_avg(),
             zones_started=sum(1 for z in self.zones if z.started_at is not None),
             zones_total=len(self.zones),
+            zone_metrics=[self._zone_metric_now(z) for z in self.zones],
         )
 
     def finalize(self, now: float) -> EvaluationResult:
@@ -379,22 +396,7 @@ class EvaluationSession:
         if now > self.last_sample_ts:      # 마지막 부분 구간(<1s)도 적분·판정
             self._sample(now)
 
-        th_eps = IDR_EPS_SEC
-        zone_metrics = []
-        for zacc in self.zones:
-            started = zacc.started_at is not None
-            delay = (zacc.started_at - self.alarm_ts) if started else None
-            idr = None
-            if started and zacc.graph_distance_m is not None:
-                idr = zacc.graph_distance_m / max(delay, th_eps)
-            zone_metrics.append(ZoneMetric(
-                zone_id=zacc.zone.id,
-                evacuation_start_at=zacc.started_at,
-                response_delay_sec=delay,
-                graph_distance=zacc.graph_distance_m,
-                idr=idr,
-                participant_ratio=zacc.participant_ratio,
-                status="started" if started else "not_started"))
+        zone_metrics = [self._zone_metric_now(z) for z in self.zones]
 
         person_metrics = [self._person_metric(p)
                           for p in self.persons.values()]
