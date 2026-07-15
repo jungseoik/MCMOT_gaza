@@ -358,7 +358,7 @@ const Session = (() => {
     box.innerHTML =
       `<div class="sei-legend"><span class="sei-leg-d">■ 설계</span><span class="sei-leg-a">■ 실제</span></div>` +
       `<canvas id="seiChartCv"></canvas>` +
-      `<div class="sei-delta-hd">출구별 분포 차이 (실제 − 설계)</div>` +
+      `<div class="sei-delta-hd" style="display:flex;justify-content:space-between"><span>출구별 분포 차이 (실제 − 설계)</span><span style="width:36px;text-align:right">점수</span></div>` +
       `<div id="seiDeltas"></div>`;
 
     requestAnimationFrame(() => {
@@ -369,6 +369,9 @@ const Session = (() => {
       if (!dbox) return;
       const worstIdx = deltas.reduce((mi, d, i) => Math.abs(d) > Math.abs(deltas[mi]) ? i : mi, 0);
       dbox.innerHTML = deltas.map((d, i) => {
+        // 출구별 SEI 점수: max(0, 1 − |delta|) × 100
+        const exitScore = Math.max(0, (1 - Math.abs(d)) * 100);
+        const scoreCls = exitScore >= 80 ? "sei-sc-hi" : exitScore >= 50 ? "sei-sc-mid" : "sei-sc-lo";
         // 발산형 바: 중심(50%)에서 좌(under) 또는 우(over)로 뻗음
         const halfPct = Math.min(Math.abs(d) / DELTA_MAX_SCALE * 50, 50).toFixed(1);
         const posStyle = d >= 0
@@ -384,6 +387,7 @@ const Session = (() => {
             <div class="sei-dbar ${cls}" style="${posStyle}"></div>
           </div>
           <div class="sei-dval ${cls}">${sign}${(d * 100).toFixed(1)}%</div>
+          <div class="sei-dscore ${scoreCls}">${exitScore.toFixed(0)}</div>
         </div>`;
       }).join("");
     });
