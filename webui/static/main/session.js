@@ -316,7 +316,7 @@ const Session = (() => {
       `<b>${sid}</b> · 경보 ${hhmmss(alarmTs)} · ` +
       (live ? `<span class="st-run">진행 중</span>` : `<span class="st-end">종료</span>`) +
       ` · 경과 <span class="t-num">${elapsedTxt()}</span>` + cfgWarn;
-    document.querySelectorAll("#sessGrid .mela").forEach((el) => {
+    document.querySelectorAll("#sessGrid .mela:not(#idrHeadEl)").forEach((el) => {
       el.textContent = "경과 " + elapsedTxt();
     });
 
