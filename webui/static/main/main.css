@@ -75,17 +75,17 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .bfield{ display:flex; align-items:center; gap:3px; font-size:11px; color:var(--text-3); white-space:nowrap; }
 .bni{ width:44px; height:22px; background:var(--bg-3); color:var(--text-1);
   border:1px solid var(--stroke-1); border-radius:4px; font-size:11px; text-align:right; padding:0 3px; }
-.sei-legend{ display:flex; gap:12px; font-size:10px; padding:4px 0 3px; }
+.sei-legend{ display:flex; gap:12px; font-size:12px; padding:4px 0 3px; }
 .sei-leg-d{ color:#5ab4e0; } .sei-leg-a{ color:#f09050; }
 #seiChartCv{ display:block; width:100%; border-radius:4px; }
-.sei-delta-hd{ font-size:10px; color:var(--text-3); margin:8px 0 4px; font-weight:600; }
-.sei-drow{ display:flex; align-items:center; gap:6px; margin-bottom:4px; padding:2px 4px; border-radius:3px; }
+.sei-delta-hd{ font-size:12px; color:var(--text-3); margin:10px 0 5px; font-weight:600; }
+.sei-drow{ display:flex; align-items:center; gap:8px; margin-bottom:5px; padding:3px 5px; border-radius:3px; }
 .sei-drow.sei-worst{ background:rgba(255,255,255,.04); }
-.sei-dlab{ font-size:10px; color:var(--text-2); width:56px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sei-dbar-wrap{ flex:1; height:7px; background:var(--bg-3); border-radius:3px; overflow:hidden; }
+.sei-dlab{ font-size:12px; color:var(--text-2); width:72px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sei-dbar-wrap{ flex:1; height:9px; background:var(--bg-3); border-radius:3px; overflow:hidden; }
 .sei-dbar{ height:100%; border-radius:3px; }
 .sei-dbar.sei-over{ background:#3eb88a; } .sei-dbar.sei-under{ background:#e87640; } .sei-dbar.sei-even{ background:#3a5068; }
-.sei-dval{ font-size:10px; font-family:monospace; width:42px; text-align:right; flex-shrink:0; }
+.sei-dval{ font-size:12px; font-family:monospace; width:48px; text-align:right; flex-shrink:0; }
 .sei-dval.sei-over{ color:#3eb88a; } .sei-dval.sei-under{ color:#e87640; } .sei-dval.sei-even{ color:#4a6080; }
 .th-metric{ margin-top:10px; }
 .th-metric-hd{ font-size:11px; font-weight:600; color:var(--text-2); display:flex; align-items:center; gap:5px; margin-bottom:5px; }
@@ -153,49 +153,49 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .mgrid{ display:grid; grid-template-columns:1fr; gap:10px; align-content:start; }
 /* 정사각 '근사' — 내용이 넘치면 카드가 자연스럽게 늘어나도록 강제 비율·클리핑 없음 */
 .mcard{ background:var(--bg-2); border:1px solid var(--stroke-2); border-radius:var(--r-lg);
-  padding:10px 12px; display:flex; flex-direction:column; gap:6px;
-  min-width:0; min-height:240px; }
-.mhead{ display:flex; align-items:baseline; gap:6px; }
-.mhead b{ font-size:14px; letter-spacing:.3px; }
-.msub{ font-size:11px; color:var(--text-3); flex:1; min-width:0;
+  padding:14px 16px; display:flex; flex-direction:column; gap:8px;
+  min-width:0; min-height:200px; }
+.mhead{ display:flex; align-items:baseline; gap:8px; }
+.mhead b{ font-size:20px; letter-spacing:.3px; }
+.msub{ font-size:13px; color:var(--text-3); flex:1; min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mela{ font-size:10px; color:var(--text-3); }
+.mela{ font-size:13px; color:var(--text-3); }
 .mela.active{ color:#3FB950; font-weight:600; }
-.mbig{ font-size:26px; font-weight:700; line-height:1.1; }
+.mbig{ font-size:38px; font-weight:700; line-height:1.1; }
 
 /* canvas 크기는 CSS 박스가 결정 (session.js cvCtx가 rect 기준으로 백킹 해상도 설정) */
 .mgaugewrap{ height:84px; flex:0 0 auto; }
 .mgaugewrap canvas{ width:100%; height:100%; display:block; }
-.mspark{ width:100%; height:30px; flex:0 0 auto; display:block; }
+.mspark{ width:100%; height:44px; flex:0 0 auto; display:block; }
 /* 높이 고정은 canvas에만 — 안의 노트 텍스트가 넘쳐 아래 요소(devWrap)를 가리지 않게 */
 .mhistwrap{ flex:0 0 auto; }
-.mhistwrap canvas{ width:100%; height:54px; display:block; }
-.mhistwrap .mnote{ margin-top:2px; }
-.mnote{ font-size:10px; color:var(--text-3); }
+.mhistwrap canvas{ width:100%; height:70px; display:block; }
+.mhistwrap .mnote{ margin-top:3px; }
+.mnote{ font-size:12px; color:var(--text-3); }
 /* d(t) 곡선 뷰어 — 히스토그램 x축 라벨과 겹치지 않게 아래로 분리 */
 #devWrap{ margin-top:10px; padding-top:8px; border-top:1px solid var(--stroke-2); }
 
 /* SEI 출구 분포 바 */
-.mbars{ display:flex; flex-direction:column; gap:4px; font-size:11px; }
-.bhead{ display:flex; gap:8px; justify-content:flex-end; color:var(--text-3); font-size:10px; }
+.mbars{ display:flex; flex-direction:column; gap:6px; font-size:13px; }
+.bhead{ display:flex; gap:8px; justify-content:flex-end; color:var(--text-3); font-size:12px; }
 .bk.a::before{ content:"■ "; color:var(--cyan, #30DCFB); }
 .bk.d::before{ content:"■ "; color:var(--text-3); }
-.brow{ display:flex; gap:6px; align-items:center; }
-.blab{ width:72px; flex:0 0 auto; overflow:hidden; text-overflow:ellipsis;
+.brow{ display:flex; gap:8px; align-items:center; }
+.blab{ width:88px; flex:0 0 auto; overflow:hidden; text-overflow:ellipsis;
   white-space:nowrap; color:var(--text-2); }
-.btracks{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-.btrack{ position:relative; height:12px; background:var(--bg-3); border-radius:3px; overflow:hidden; }
+.btracks{ flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.btrack{ position:relative; height:16px; background:var(--bg-3); border-radius:3px; overflow:hidden; }
 .bfill{ position:absolute; inset:0 auto 0 0; border-radius:3px; }
 .bfill.a{ background:var(--cyan, #30DCFB); opacity:.75; }
 .bfill.d{ background:var(--text-3); opacity:.45; }
-.bval{ position:absolute; right:4px; top:0; font-size:9px; line-height:12px; color:var(--text-1); }
+.bval{ position:absolute; right:5px; top:0; font-size:11px; line-height:16px; color:var(--text-1); }
 
 /* CBS 병목 목록 */
-.mbnlist{ display:flex; flex-direction:column; gap:4px; overflow-y:auto; min-height:0; max-height:170px; }
-.bnrow{ display:flex; flex-direction:column; gap:2px; }
-.bnlab{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-2); gap:6px; }
+.mbnlist{ display:flex; flex-direction:column; gap:8px; min-height:0; }
+.bnrow{ display:flex; flex-direction:column; gap:3px; }
+.bnlab{ display:flex; justify-content:space-between; font-size:13px; color:var(--text-2); gap:6px; }
 .bnval{ color:var(--text-1); }
-.bnspark{ width:100%; height:22px; display:block; }
+.bnspark{ width:100%; height:32px; display:block; }
 .risk.low{ color:var(--green, #3FB950); } .risk.mid{ color:#F5A623; } .risk.high{ color:#FF5B5B; }
 
 /* IDR 표 */
@@ -255,23 +255,23 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .objbadge.out{ background:rgba(48,220,251,.15); color:var(--pia-cyan); }
 
 /* IDR 진행 헤더 */
-.idr-prog-row{ display:flex; align-items:baseline; gap:5px; }
-.idr-prog-row .t-num{ font-size:22px; font-weight:700; line-height:1.1; }
-.idr-prog-lab{ font-size:11px; color:var(--text-3); }
+.idr-prog-row{ display:flex; align-items:baseline; gap:6px; }
+.idr-prog-row .t-num{ font-size:28px; font-weight:700; line-height:1.1; }
+.idr-prog-lab{ font-size:13px; color:var(--text-3); }
 /* IDR 컬럼 헤더 — zone 목록 위 */
-.idr-colhd{ display:flex; justify-content:flex-end; font-size:9px; color:var(--text-3);
-  letter-spacing:.4px; text-transform:uppercase; padding-bottom:4px;
-  border-bottom:1px solid rgba(255,255,255,.06); margin-bottom:2px; }
+.idr-colhd{ display:flex; justify-content:flex-end; font-size:11px; color:var(--text-3);
+  letter-spacing:.4px; text-transform:uppercase; padding-bottom:5px;
+  border-bottom:1px solid rgba(255,255,255,.06); margin-bottom:3px; }
 /* IDR 구역별 타임라인 — 1행 컴팩트: [구역명+Δt] [타임라인] [IDR값] */
-.idr-row{ display:flex; align-items:center; gap:6px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+.idr-row{ display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.04); }
 .idr-row:last-child{ border-bottom:none; }
 .idr-row.det .idr-zn{ color:var(--text-2); }
-.idr-zg{ display:flex; flex-direction:column; gap:1px; width:42px; flex:0 0 auto; }
-.idr-zn{ font-size:10px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.idr-dt{ font-size:9px; color:var(--text-3); font-family:var(--font-num); }
+.idr-zg{ display:flex; flex-direction:column; gap:2px; width:54px; flex:0 0 auto; }
+.idr-zn{ font-size:12px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.idr-dt{ font-size:11px; color:var(--text-3); font-family:var(--font-num); }
 .idr-row.det .idr-dt{ color:#3FB950; }
-.idr-cv{ flex:1; min-width:0; display:block; height:32px; }
-.idr-sc{ width:50px; flex:0 0 auto; display:flex; align-items:baseline; justify-content:flex-end; gap:2px; }
-.idr-val{ font-family:var(--font-num); font-size:15px; font-weight:700; color:var(--text-2); }
+.idr-cv{ flex:1; min-width:0; display:block; height:38px; }
+.idr-sc{ width:62px; flex:0 0 auto; display:flex; align-items:baseline; justify-content:flex-end; gap:2px; }
+.idr-val{ font-family:var(--font-num); font-size:20px; font-weight:700; color:var(--text-2); }
 .idr-val.ok{ color:#3FB950; }
-.idr-unit{ font-size:9px; color:var(--text-3); }
+.idr-unit{ font-size:11px; color:var(--text-3); }

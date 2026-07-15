@@ -383,8 +383,8 @@ const Session = (() => {
 
   function drawSeiGrouped(cv, labels, dShares, aShares) {
     const n = labels.length;
-    const W = cv.parentElement.clientWidth || 260;
-    const H = 120;
+    const W = cv.parentElement.clientWidth || 300;
+    const H = 160;
     cv.width = W; cv.height = H;
     const ctx = cv.getContext("2d");
 
@@ -665,7 +665,7 @@ const Session = (() => {
           <span class="idr-zn" title="${name}">${name}</span>
           <span class="idr-dt">${dtTxt}</span>
         </div>
-        <canvas class="idr-cv" id="idrcv_${z.zone_id}" height="32"></canvas>
+        <canvas class="idr-cv" id="idrcv_${z.zone_id}" height="38"></canvas>
         <div class="idr-sc" ${tip}>
           <span class="idr-val ${det && z.idr != null ? "ok" : ""}">${idrTxt}</span>
           <span class="idr-unit">m/s</span>
