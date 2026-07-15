@@ -150,8 +150,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .sessmeta .st-run{ color:var(--green, #3FB950); font-weight:600; }
 .sessmeta .st-end{ color:var(--text-3); font-weight:600; }
 
-.mgrid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; align-content:start; }
-@media (max-width:1500px){ .mgrid{ grid-template-columns:1fr; } }
+.mgrid{ display:grid; grid-template-columns:1fr; gap:10px; align-content:start; }
 /* 정사각 '근사' — 내용이 넘치면 카드가 자연스럽게 늘어나도록 강제 비율·클리핑 없음 */
 .mcard{ background:var(--bg-2); border:1px solid var(--stroke-2); border-radius:var(--r-lg);
   padding:10px 12px; display:flex; flex-direction:column; gap:6px;
