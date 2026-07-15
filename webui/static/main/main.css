@@ -156,12 +156,12 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
   padding:14px 16px; display:flex; flex-direction:column; gap:8px;
   min-width:0; min-height:200px; }
 .mhead{ display:flex; align-items:baseline; gap:8px; }
-.mhead b{ font-size:20px; letter-spacing:.3px; }
+.mhead b{ font-size:28px; letter-spacing:.3px; }
 .msub{ font-size:13px; color:var(--text-3); flex:1; min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mela{ font-size:13px; color:var(--text-3); }
 .mela.active{ color:#3FB950; font-weight:600; }
-.mbig{ font-size:38px; font-weight:700; line-height:1.1; }
+.mbig{ font-size:24px; font-weight:700; line-height:1.1; }
 
 /* canvas 크기는 CSS 박스가 결정 (session.js cvCtx가 rect 기준으로 백킹 해상도 설정) */
 .mgaugewrap{ height:84px; flex:0 0 auto; }
