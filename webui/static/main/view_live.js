@@ -21,9 +21,7 @@ Views.live = (() => {
   let interpDuration = 1000; // 측정된 SSE 간격 (ms), 수신 시마다 갱신
   let lastSseTime = 0;       // 이전 SSE 도착 시각
   let rafId = null;          // requestAnimationFrame handle
-  const FPS_OPTS = [10, 20, 30];
-  let fpsCursor = 1;                     // 기본 20fps
-  const renderFps = () => FPS_OPTS[fpsCursor];
+  const renderFps = () => Math.max(1, parseInt($("fpsInput").value) || 30);
 
   // ------------------------------------------------------------ 수신
   function connect() {
@@ -348,10 +346,8 @@ Views.live = (() => {
       $("hullToggle").classList.toggle("on", showHulls);
       if (mc) mc.render();
     };
-    $("fpsToggle").onclick = () => {
-      fpsCursor = (fpsCursor + 1) % FPS_OPTS.length;
-      $("fpsToggle").textContent = `${renderFps()}fps`;
-    };
+    // fpsInput — 값 변경 즉시 반영 (RAF 루프가 다음 프레임에 적용)
+    $("fpsInput").oninput = () => setConn(`LIVE · ${renderFps()}fps 보간`, "ok");
     $("objSort").onclick = () => {                 // 객체 목록 정렬 전환
       const keys = Object.keys(SORTS);
       objSort = keys[(keys.indexOf(objSort) + 1) % keys.length];
