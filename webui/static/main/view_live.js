@@ -21,7 +21,7 @@ Views.live = (() => {
   let interpDuration = 1000; // 측정된 SSE 간격 (ms), 수신 시마다 갱신
   let lastSseTime = 0;       // 이전 SSE 도착 시각
   let rafId = null;          // requestAnimationFrame handle
-  const renderFps = () => Math.max(1, parseInt($("fpsInput").value) || 30);
+  const renderFps = () => Math.min(30, Math.max(1, parseInt($("fpsInput").value) || 20));
 
   // ------------------------------------------------------------ 수신
   function connect() {
