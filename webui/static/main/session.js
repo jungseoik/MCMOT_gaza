@@ -648,8 +648,9 @@ const Session = (() => {
     const avgIdr = validIdrs.length ? validIdrs.reduce((s, v) => s + v, 0) / validIdrs.length : null;
     const avgEl = $("idrAvgEl");
     if (avgEl) {
-      avgEl.textContent = avgIdr != null ? `avg ${avgIdr.toFixed(2)} m/s` : "—";
-      avgEl.classList.toggle("active", avgIdr != null);
+      avgEl.innerHTML = avgIdr != null
+        ? `${avgIdr.toFixed(2)}<span style="font-size:.55em;font-weight:400;margin-left:4px">m/s</span>`
+        : "—";
     }
 
     if (!zm.length) {
