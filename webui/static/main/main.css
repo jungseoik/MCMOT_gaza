@@ -200,7 +200,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .risk.low{ color:var(--green, #3FB950); } .risk.mid{ color:#F5A623; } .risk.high{ color:#FF5B5B; }
 
 /* IDR 표 */
-.mtblwrap{ flex:1; min-height:0; max-height:200px; overflow:auto; }
+.mtblwrap{ flex:1; min-height:0; }
 .mtbl{ width:100%; border-collapse:collapse; font-size:11px; }
 .mtbl th{ text-align:left; color:var(--text-3); font-weight:600; padding:2px 4px;
   border-bottom:1px solid var(--stroke-2); position:sticky; top:0; background:var(--bg-2); }
@@ -255,15 +255,16 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .objbadge.ok{ background:rgba(63,185,80,.2); color:#3FB950; }
 .objbadge.out{ background:rgba(48,220,251,.15); color:var(--pia-cyan); }
 
-/* IDR 구역별 타임라인 — 2행: 상단=구역명+타임라인, 하단=반응시간+IDR점수 */
-.idr-row{ display:flex; flex-direction:column; gap:0; padding:4px 0 5px; border-bottom:1px solid rgba(255,255,255,.04); }
+/* IDR 구역별 타임라인 — 1행 컴팩트: [구역명+Δt] [타임라인] [IDR값] */
+.idr-row{ display:flex; align-items:center; gap:6px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+.idr-row:last-child{ border-bottom:none; }
 .idr-row.det .idr-zn{ color:var(--text-2); }
-.idr-top{ display:flex; align-items:center; gap:5px; }
-.idr-zn{ width:46px; font-size:10.5px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 0 auto; }
-.idr-cv{ flex:1; min-width:0; display:block; height:46px; }
-.idr-stat{ display:flex; align-items:baseline; gap:4px; padding:2px 2px 0 51px; }
-.idr-delay{ font-size:10px; color:var(--text-3); flex:1; }
-.idr-delay.ok{ color:var(--text-2); }
-.idr-val{ font-family:var(--font-num); font-size:17px; font-weight:700; color:var(--text-3); line-height:1; }
+.idr-zg{ display:flex; flex-direction:column; gap:1px; width:42px; flex:0 0 auto; }
+.idr-zn{ font-size:10px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.idr-dt{ font-size:9px; color:var(--text-3); font-family:var(--font-num); }
+.idr-row.det .idr-dt{ color:#3FB950; }
+.idr-cv{ flex:1; min-width:0; display:block; height:32px; }
+.idr-sc{ width:50px; flex:0 0 auto; display:flex; align-items:baseline; justify-content:flex-end; gap:2px; }
+.idr-val{ font-family:var(--font-num); font-size:15px; font-weight:700; color:var(--text-2); }
 .idr-val.ok{ color:#3FB950; }
-.idr-unit{ font-size:10px; color:var(--text-3); }
+.idr-unit{ font-size:9px; color:var(--text-3); }

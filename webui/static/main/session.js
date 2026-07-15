@@ -571,59 +571,52 @@ const Session = (() => {
     const W = cv.width, H = cv.height;
     ctx.clearRect(0, 0, W, H);
 
-    const AX = 6, AXR = W - 6, AY = Math.round(H * 0.45);
-    const usable = AXR - AX;
+    const PAD = 4, MID = Math.round(H / 2), BH = Math.round(H * 0.38);
+    const AX = PAD, AXR = W - PAD, usable = AXR - AX;
     const scale = usable / maxWindow;
 
-    const dashV = (x, color, y0, y1) => {
-      ctx.save(); ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x + 0.5, y0); ctx.lineTo(x + 0.5, y1); ctx.stroke();
-      ctx.restore();
-    };
-
-    // axis + arrow
-    ctx.strokeStyle = "#3a3f4b"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
-    ctx.beginPath(); ctx.moveTo(AX, AY); ctx.lineTo(AXR, AY); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(AXR, AY); ctx.lineTo(AXR - 5, AY - 3);
-    ctx.moveTo(AXR, AY); ctx.lineTo(AXR - 5, AY + 3);
-    ctx.stroke();
+    // 배경 트랙
+    ctx.fillStyle = "rgba(255,255,255,.05)";
+    ctx.fillRect(AX, MID - BH, usable, BH * 2);
 
     if (isDetected) {
-      const dx = Math.min(AX + delay * scale, AXR - 4);
+      const dx = Math.min(AX + delay * scale, AXR - 2);
+      // 반응까지 채움 (gradient)
       const grd = ctx.createLinearGradient(AX, 0, dx, 0);
-      grd.addColorStop(0, "rgba(63,185,80,.12)");
-      grd.addColorStop(1, "rgba(63,185,80,.45)");
+      grd.addColorStop(0, "rgba(63,185,80,.08)");
+      grd.addColorStop(1, "rgba(63,185,80,.42)");
       ctx.fillStyle = grd;
-      ctx.fillRect(AX, AY - 8, dx - AX, 16);
+      ctx.fillRect(AX, MID - BH, dx - AX, BH * 2);
 
-      dashV(AX, "#6a7080", AY - 16, AY + 14);
-      dashV(dx, "#3FB950", AY - 16, AY + 14);
+      // 반응 마커
+      ctx.strokeStyle = "#3FB950"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(dx + .5, MID - BH - 2); ctx.lineTo(dx + .5, MID + BH + 2); ctx.stroke();
 
-      ctx.font = "9px sans-serif"; ctx.textAlign = "center";
-      ctx.fillStyle = "#6a7080"; ctx.fillText("경보", AX + 10, AY + 24);
-      ctx.fillStyle = "#3FB950"; ctx.fillText("개시", Math.min(dx, AXR - 16), AY + 24);
-
-      ctx.fillStyle = "#3FB950"; ctx.font = "bold 10px monospace";
-      ctx.textAlign = "right";
-      ctx.fillText(`Δt ${delay.toFixed(1)}s`, AXR - 2, AY - 11);
+      // Δt 레이블
+      ctx.fillStyle = "#3FB950"; ctx.font = "bold 9px monospace"; ctx.textAlign = "left";
+      ctx.fillText(`Δt ${delay.toFixed(1)}s`, AX + 3, MID + BH - 1);
     } else {
-      const nx = Math.min(AX + elapsed * scale, AXR - 8);
-      ctx.fillStyle = "rgba(200,210,230,.07)";
-      ctx.fillRect(AX, AY - 8, nx - AX, 16);
+      // 경과 진행 표시
+      const nx = Math.min(AX + elapsed * scale, AXR - 6);
+      ctx.fillStyle = "rgba(255,255,255,.04)";
+      ctx.fillRect(AX, MID - BH, nx - AX, BH * 2);
 
-      dashV(AX, "#6a7080", AY - 16, AY + 14);
-      ctx.save(); ctx.setLineDash([3, 4]);
-      ctx.strokeStyle = "#3a3f4b"; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(nx + 0.5, AY - 12); ctx.lineTo(nx + 0.5, AY + 10); ctx.stroke();
+      // 이동 커서
+      ctx.save(); ctx.setLineDash([2, 3]);
+      ctx.strokeStyle = "#464c58"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(nx + .5, MID - BH - 2); ctx.lineTo(nx + .5, MID + BH + 2); ctx.stroke();
       ctx.restore();
 
-      ctx.font = "9px sans-serif"; ctx.fillStyle = "#6a7080"; ctx.textAlign = "center";
-      ctx.fillText("경보", AX + 10, AY + 24);
-      ctx.fillStyle = "#464c58"; ctx.textAlign = "right"; ctx.font = "10px monospace";
-      ctx.fillText(`${elapsed.toFixed(0)}s…`, AXR - 2, AY - 11);
+      // 경과 시간
+      ctx.fillStyle = "#464c58"; ctx.font = "9px monospace"; ctx.textAlign = "right";
+      ctx.fillText(`${elapsed.toFixed(0)}s`, AXR - 2, MID + BH - 1);
     }
+
+    // 경보 기점 마커
+    ctx.save(); ctx.setLineDash([2, 3]);
+    ctx.strokeStyle = "#6a7080"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(AX + .5, MID - BH - 2); ctx.lineTo(AX + .5, MID + BH + 2); ctx.stroke();
+    ctx.restore();
   }
 
   function renderIdr() {
@@ -653,18 +646,18 @@ const Session = (() => {
       const name = nameOf(zones, z.zone_id);
       const det = z.status === "started";
       const perO = (z.idr_per_origin || []).filter((v) => v != null);
-      const idrTip = perO.length > 1
+      const tip = perO.length > 1
         ? `title="경보원별: ${perO.map((v) => v.toFixed(2)).join(" / ")} m/s"` : "";
       const idrTxt = det && z.idr != null ? z.idr.toFixed(2) : "—";
-      const delayTxt = det ? `반응 ${fmt1(z.response_delay_sec)}s` : "미반응";
+      const dtTxt  = det ? `${fmt1(z.response_delay_sec)}s` : "—";
       return `<div class="idr-row ${det ? "det" : ""}">
-        <div class="idr-top">
+        <div class="idr-zg">
           <span class="idr-zn" title="${name}">${name}</span>
-          <canvas class="idr-cv" id="idrcv_${z.zone_id}" height="46"></canvas>
+          <span class="idr-dt">${dtTxt}</span>
         </div>
-        <div class="idr-stat">
-          <span class="idr-delay ${det ? "ok" : ""}">${delayTxt}</span>
-          <span class="idr-val ${det && z.idr != null ? "ok" : ""}" ${idrTip}>${idrTxt}</span>
+        <canvas class="idr-cv" id="idrcv_${z.zone_id}" height="32"></canvas>
+        <div class="idr-sc" ${tip}>
+          <span class="idr-val ${det && z.idr != null ? "ok" : ""}">${idrTxt}</span>
           <span class="idr-unit">m/s</span>
         </div>
       </div>`;
