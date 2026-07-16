@@ -93,10 +93,7 @@ const Session = (() => {
   }
 
   function _initPending() {
-    if (pendingInited) return;
-    pendingInited = true;
-    const aos = App.site && App.site.alarm_origins;
-    if (aos && aos.length) pendingOrigins = aos.map((ao) => [ao.xy[0], ao.xy[1]]);
+    pendingInited = true;  // App.site 미사용 — 운영뷰 패널에서만 관리
   }
 
   function toggleAdding() {
@@ -166,8 +163,18 @@ const Session = (() => {
       stoppedId = live && live.session_id;
       live = null;
       addingOrigin = false;
-      pendingOrigins = [];
-      pendingInited = false;  // 다음 세션 시작 시 App.site에서 재로드
+      // 직전 세션에서 쓴 경보원 그대로 유지 (사용자가 명시적으로 바꾸지 않는 한 유지)
+      const usedOrigins = result &&
+        ((result.alarm_origins && result.alarm_origins.length)
+          ? result.alarm_origins
+          : (result.alarm_origin ? [result.alarm_origin] : []));
+      if (usedOrigins && usedOrigins.length) {
+        pendingOrigins = usedOrigins.map((o) => [o[0], o[1]]);
+        pendingInited = true;
+      } else {
+        pendingOrigins = [];
+        pendingInited = false;
+      }
       stopPoll();
       try { timeline = await API.getSessionTimeline(); } catch (e) { /* keep */ }
       loadSeries();
