@@ -3,6 +3,14 @@
 > 설계: [docs/architecture/02-멀티카메라-시스템-전환-설계.md](../docs/architecture/02-멀티카메라-시스템-전환-설계.md) ·
 > 계약: [CONTRACT.md](CONTRACT.md) (v1.1) · M0 실측: [docs/architecture/03](../docs/architecture/03-M0-환경검증-디코딩스택-실측.md)
 
+## 사전 설치 (1회)
+
+```bash
+# pm2 — 프로세스 관리자. Node.js가 없으면 먼저 설치
+node -v || curl -fsSL https://fnm.vercel.app/install | bash  # fnm으로 Node 설치
+npm install -g pm2
+```
+
 ## 실행
 
 ```bash

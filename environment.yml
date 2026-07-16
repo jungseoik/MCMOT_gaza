@@ -1,8 +1,10 @@
+# DEPRECATED: 이 파일은 초기 버전이며 requirements.txt와 동기화되지 않습니다.
+# 신규 설치는 README.md 의 "환경 설정" 절차(requirements.txt 기준, Python 3.12)를 따르세요.
 name: boosttrack
 channels:
   - defaults
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
   - pip:
       - numpy==1.23.5

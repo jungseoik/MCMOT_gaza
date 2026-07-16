@@ -3,6 +3,30 @@
 수동 실측 없이 **메트릭 km/h**를 뽑는 모드. 시작 시 1회 깊이를 떠서 바닥 기하를
 자동 추정하고, 그 결과를 **사용자가 미리보기로 확인한 뒤** 측정으로 넘어간다.
 
+## da3 conda env 설치 (1회)
+
+```bash
+# 1. da3 전용 환경 생성 (Python 3.11 — DA3 의존성이 3.12와 충돌)
+conda create -n da3 python=3.11 -y
+conda activate da3
+
+# 2. DA3 호환 PyTorch (cu128 계열) 설치
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# 3. Depth-Anything-3 및 의존성 설치
+pip install depth-anything-v3
+pip install xformers open3d
+
+# 4. 모델 자동 다운로드 확인 (Hugging Face 토큰 필요)
+# 첫 실행 시 depth-anything/DA3METRIC-LARGE 가 자동 다운로드됨 (~2 GB)
+# HF 인증: huggingface-cli login
+
+# 5. 서버에서 da3 파이썬 경로 지정 (기본값이 아닌 경로면 명시)
+# export DA3_PYTHON=~/miniconda3/envs/da3/bin/python
+```
+
+> **왜 별도 env인지는 아래 참조.**
+
 ## 왜 별도 env / subprocess인가
 
 Depth-Anything-3는 `numpy<2`, `torch cu128`, `xformers`, `open3d`, `pycolmap` 등을

@@ -20,10 +20,15 @@ $ bash install_yolox.sh
 
 ## 모델 가중치 다운로드
 
+Hugging Face 토큰이 필요합니다 (`huggingface-cli login` 또는 `HUGGING_FACE_HUB_TOKEN` 환경변수).
+
 | 모델 종류 | 파일명 | 저장 경로 |
 |-----------|--------------------------|----------------------------|
 | ReID 모델 | `mot20_sbs_S50.pth` | `./external/weights/mot20_sbs_S50.pth` |
 | ByteTrack 탐지 모델 | `bytetrack_x_mot20.tar` | `./external/weights/bytetrack_x_mot20.tar` |
+
+모델 파일을 위 경로에 직접 복사하거나, 제공된 `gdown`/`huggingface_hub` 스크립트로 다운로드하세요.
+외부 공개 URL이 없는 경우 프로젝트 관리자에게 문의.
 
 <br>
 
@@ -115,6 +120,36 @@ $ python -m webui                          # http://localhost:8000
 
 <br>
 
+## 멀티카메라 2D맵 시스템 (system/, 포트 8900)
+
+여러 대의 CCTV(RTSP)를 등록해 **공통 2D 평면도 위에서 사람을 실시간 추적**하고,
+경보 세션을 통해 **4대 정량지표(IDR·EPFI·CBS·SEI)** 를 산출하는 독립 서버입니다.
+
+```bash
+# 사전: pm2 설치 (1회)
+npm install -g pm2
+
+# system/ 추가 의존성 (1회)
+pip install -r requirements.txt   # Pillow 포함
+
+# 실행 (pm2 상시 기동)
+pm2 start tools/run_system_server.sh --name macs-system
+# → http://<host>:8900/   (맵 설정 → 카메라 등록·매핑 → 운영 뷰 → 경보 세션)
+
+# 재시작 / 로그
+pm2 restart macs-system
+pm2 logs macs-system
+```
+
+환경변수: `SITE_ID`(기본 default) · `SITE_ROOT`(기본 data/sites) · `GPU_DEVICES`(기본 0,1)
+→ 상세: `.env.example` · 실행 옵션: [system/README.md](system/README.md)
+→ 사용 가이드(스크린샷): [docs/guide/멀티카메라-시스템/](docs/guide/멀티카메라-시스템/)
+
+> **⚠️ 기존 단일채널 웹 UI(webui/server.py, :8000)와 동시 기동 금지** — 전역 설정 충돌.
+> 각각 별도 포트로 독립 실행하고, 단일채널 UI 좌측 레일 맵 아이콘이 :8900을 엽니다.
+
+<br>
+
 ## MOT 데이터셋 평가 (⚠️ 미포함 / WIP)
 
 > **현재 저장소에는 평가 글루 코드(`src/eval_common.py`, `src/eval_torch.py`,
@@ -170,10 +205,19 @@ src/                           # 추론 + 평가 모듈
   # eval_torch.py              # MOT 평가 — PyTorch 백엔드
   # eval_trt.py                # MOT 평가 — TRT 기본 백엔드
   # eval_trt_opt.py            # MOT 평가 — TRT FP16 + GPU 최적화 백엔드
-webui/                         # 실시간 추적 웹 UI (독립 모듈, FastAPI)
+webui/                         # 단일채널 실시간 추적 웹 UI (FastAPI, :8000)
   server.py                    # FastAPI 앱 (upload/stream/status/result)
   index.html                   # 프론트엔드
   __main__.py                  # python -m webui 진입점
+system/                        # 멀티카메라 2D맵 시스템 (FastAPI, :8900)
+  api/server.py                # 실서버 진입점 (uvicorn system.api.server:app)
+  api/mock_server.py           # 프론트 개발용 mock (GPU 불필요)
+  config/                      # pydantic 스키마 + JSON 영속화 (SiteStore)
+  ingest/                      # ffmpeg-NVDEC 카메라 워커·FrameQueue·재접속 워치독
+  tracking/                    # 공유 TRT 검출·ReID + 카메라별 BoostTrack
+  spatial/                     # 호모그래피 맵 투영·polygon/통과선/polyline 기하
+  metrics/                     # MetricsEngine — 4대 지표 세션 산출
+  README.md                    # 실행·환경변수·pm2·모듈 소유 정보
 docs/
   optimization-report.md       # 최적화 상세 보고서
   webui.md                     # 실시간 추적 웹 UI 사용법

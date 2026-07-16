@@ -21,7 +21,8 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 평면도 좌표 변환·속도·밀도·피난 이벤트를 산출하는 피난 분석 엔진 + 웹 UI.
 
 - **추론 엔진**: `src/` — `inference.py`(PyTorch), `inference_gpu.py`/`inference_trt.py`(TRT 최적화), `build_trt.py`
-- **웹 UI**: `webui/` — `server.py`, 속도/밀도/카운팅/뎁스 모듈, RTSP 라이브
+- **단일채널 웹 UI**: `webui/` — `server.py`, 속도/밀도/카운팅/뎁스 모듈, RTSP 라이브 (포트 8000)
+- **멀티카메라 시스템**: `system/` — 다채널 RTSP·TRT·4대 지표 세션·2D 맵 UI (포트 8900). `system/README.md` 참조
 - **트래커**: `tracker/`, `boostracker/`, 외부 의존 `external/`
 
 ## 문서 맵 (docs/)
@@ -34,8 +35,9 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 | `docs/weekly/` | **주간 미팅 자료(주차별 폴더)** — 진척 보고서·시각화 보고서·최신 WBS(`vN.xlsx`) |
 | `docs/webui-dev/` | 웹 UI 개발 문서(아키텍처·스트리밍·속도·캘리브·맵·카운팅 등) |
 | `docs/reports/` | YOLO26·해상도·다채널 비교 실측 보고서 + 요구사항 점검 + 벤치 스크립트 |
-| `docs/guide/` | 웹 UI 사용 가이드(스크린샷 기반) |
+| `docs/guide/` | 웹 UI 사용 가이드(스크린샷 기반) · 멀티카메라 시스템 가이드 포함 |
 | `docs/optimization-report.md` | 추론 최적화 보고서 |
+| `system/README.md` | 멀티카메라 2D맵 시스템 실행·환경변수·pm2·모듈별 소유 정보 |
 
 ## 작업 규칙
 
