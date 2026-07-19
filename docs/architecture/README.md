@@ -15,6 +15,9 @@
 3. **[03-M0-환경검증-디코딩스택-실측.md](03-M0-환경검증-디코딩스택-실측.md)**
    — M0 실측: GStreamer/DeepStream 미설치, **ffmpeg+NVDEC 16ch 디코드 dec 3%·CPU 2.2코어**
    → ingest 디코딩 스택 = ffmpeg 서브프로세스(NVDEC) 확정.
+4. **[04-DeepStream-zero-copy-인제스트-전환.md](04-DeepStream-zero-copy-인제스트-전환.md)**
+   — ffmpeg 경로 4ch@5fps 한계 실측 → **DeepStream 워커(16ch@5fps/GPU, 총 79fps)** 채택.
+   `INGEST_BACKEND` 스위치(기본 ffmpeg)로 병행, 출력 유사도 검증·제약·롤백 절차 포함.
 
 ## 한 줄 요약
 

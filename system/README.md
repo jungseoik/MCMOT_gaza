@@ -25,11 +25,28 @@ conda run -n boosttrack uvicorn system.api.server:app --host 0.0.0.0 --port 8900
 conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
 ```
 
-- 환경변수: `SITE_ID`(기본 default) · `SITE_ROOT`(기본 data/sites) · `GPU_DEVICES`(기본 0,1 — ffmpeg NVDEC 분산)
+- 환경변수: `SITE_ID`(기본 default) · `SITE_ROOT`(기본 data/sites) ·
+  `GPU_DEVICES`(ffmpeg 모드 기본 0,1 — NVDEC 분산 / deepstream 모드 기본 1) ·
+  `INGEST_BACKEND`(기본 **ffmpeg** — 아래 '인제스트 백엔드' 참조)
 - 설정은 `data/sites/<site_id>/`(site.json·cameras/*.json·map.png)에 영속화 — 재시작 시 자동 복원
 - 평가 세션: 운영 뷰 🔔 경보 시작(맵 클릭) → 4대 지표 카드 → 종료 시 결과 산출,
   `sessions/<id>.json` 영속화 + `GET /api/sessions` 이력 (계약 v1.3)
 - **기존 webui PoC(webui/server.py)와 같은 프로세스 동시 구동 금지** (전역 GeneralSettings 충돌, CONTRACT v1.1 §5). 별도 포트로 각각 실행 — 기존 UI 좌측 레일의 맵 아이콘이 :8900을 연다.
+
+## 인제스트 백엔드 (INGEST_BACKEND)
+
+| 값 | 경로 | 한계 실측 | 비고 |
+|----|------|-----------|------|
+| `ffmpeg` (기본) | 카메라별 ffmpeg-NVDEC → FrameQueue → 호스트 직렬 TRT | **4ch@5fps** (총 ~21fps 포화) | 기존 경로 — 미지정 시 100% 기존 동작 |
+| `deepstream` | GPU별 DS 워커 컨테이너(zero-copy 배치 추론·트래킹) → ZMQ 브리지 | **16ch@5fps/GPU** (총 78.7fps) | 선행조건·워커 실행법: [ingest_ds/README.md](ingest_ds/README.md) |
+
+```bash
+INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
+# 롤백: INGEST_BACKEND 제거(기본 ffmpeg)로 재기동. git 레벨 롤백·제약(스냅샷 폴백,
+# hot add/remove 시 워커 재시작 ~50s 등)은 ADR 04 참조.
+```
+
+근거·제약·롤백 절차: [docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md](../docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md)
 
 ## 모듈 (트랙별 소유 — CONTRACT §6)
 
@@ -37,6 +54,7 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
 |------|------|------|
 | `config/` | pydantic 스키마 + JSON 영속화(SiteStore) | B |
 | `ingest/` | ffmpeg-NVDEC 카메라 워커·FrameQueue(oldest-drop)·재접속 워치독 | A |
+| `ingest_ds/` | DeepStream zero-copy 워커·멀티 GPU 런처·ZMQ 브리지 (`INGEST_BACKEND=deepstream`) | A |
 | `tracking/` | 공유 TRT 검출·ReID + 카메라별 BoostTrack + 분석 스레드 | A |
 | `spatial/` | 호모그래피 맵 투영·polygon/통과선/polyline 기하 | B |
 | `metrics/` | MetricsEngine — 속도·정렬도·구역 밀도·병목·출입구 카운트 → MapState | B |
@@ -45,8 +63,15 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
 
 테스트: `conda run -n boosttrack python -m pytest tests/system -q` (33개)
 
-## 통합 검증 실측 (2026-07-13, M7)
+## 통합 검증 실측 (2026-07-13, M7 · 2026-07-19 DS 갱신)
 
-- 2ch 실추적 e2e: RTSP→NVDEC→TRT→트래커→맵 투영→SSE 전 구간 동작. 수신 5fps/ch·드랍 0, 평균 추론 56.7ms/frame(타 워크로드와 GPU 공유 조건), 큐 지연 0.17s
-- **처리량 한계(공유 GPU)**: 분석 ~18fps 지속 — 16ch×5fps(80fps)는 GPU 전유 또는 채널 fps 하향·검출 배치 필요(트랙 A 보고와 일치). oldest-drop이라 과부하에도 시스템은 안정(최신 프레임 우선)
-- 개별 실측: 16ch ingest 드랍 0(트랙 A) · 재접속 14s 복구 · ID 공간 독립 · 단일영상 회귀 무손상
+| 항목 | ffmpeg 경로 (M7) | DeepStream 경로 (P1~P7) |
+|------|------------------|------------------------|
+| e2e 전 구간 | 2ch 실추적: RTSP→NVDEC→TRT→트래커→맵→SSE 동작, 5fps/ch·드랍 0 | 4ch 등록→운영뷰 SSE 동일 스키마, 5fps/ch·드랍 0 (:8902 검증) |
+| 채널당 5fps 한계 | **4ch** (라이브 스윕 — 6ch부터 미달) | **16ch/GPU** (12ch는 드랍 0 여유) |
+| 총 처리량 포화 | ~21fps | **78.7fps** (약 4배, GPU1 단독) |
+| 평균 추론 | 56.7ms/frame (GPU 공유 조건) | 12.7ms/frame (배치 16 환산) |
+| 출력 동등성 | (기준) | 검출 매칭 99.4%·트랙 98.95% — [유사도 검증](../docs/reports/DeepStream-전환-유사도-검증.md) |
+
+- 상세: [DeepStream-한계처리량-실측](../docs/reports/DeepStream-한계처리량-실측.md) · ADR 04
+- 개별 실측(ffmpeg 경로): 16ch ingest 드랍 0 · 재접속 14s 복구 · ID 공간 독립 · 단일영상 회귀 무손상

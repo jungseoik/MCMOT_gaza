@@ -1,7 +1,11 @@
 """멀티카메라 시스템 실서버 — CONTRACT §4 (mock_server.py와 동일 계약).
 
-배선: IngestManager(ffmpeg-NVDEC) → FrameQueue → AnalyzerThread(TRT 공유)
-      → MetricsEngine.on_tracks → MapState → REST/SSE → main 탭 canvas.
+배선(INGEST_BACKEND 스위치 — 기본 ffmpeg, 안 건드리면 기존 동작과 동일):
+  ffmpeg     IngestManager(ffmpeg-NVDEC) → FrameQueue → AnalyzerThread(TRT 공유)
+             → MetricsEngine.on_tracks → MapState → REST/SSE → main 탭 canvas.
+  deepstream DsIngestManager(GPU별 DS 워커 컨테이너 — zero-copy 디코드·배치
+             추론·트래킹까지 컨테이너 안) → ZMQ 브리지 → MetricsEngine.on_tracks
+             → 이후 동일. 근거·제약: docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md
 
 실행:
   conda run -n boosttrack uvicorn system.api.server:app --host 0.0.0.0 --port 8900
@@ -39,6 +43,10 @@ logger = logging.getLogger("system.api")
 SITE_ID = os.environ.get("SITE_ID", "default")
 SITE_ROOT = os.environ.get("SITE_ROOT", "data/sites")
 GPU_DEVICES = [int(x) for x in os.environ.get("GPU_DEVICES", "0,1").split(",") if x != ""]
+# 인제스트 백엔드 스위치 — "ffmpeg"(기본, 기존 경로 그대로) | "deepstream"(DS 워커)
+INGEST_BACKEND = os.environ.get("INGEST_BACKEND", "ffmpeg").strip().lower()
+if INGEST_BACKEND not in ("ffmpeg", "deepstream"):
+    raise ValueError(f"INGEST_BACKEND는 ffmpeg|deepstream — 받은 값: {INGEST_BACKEND!r}")
 FRONT_DIR = Path(__file__).resolve().parents[2] / "webui" / "static" / "main"
 
 
@@ -48,10 +56,23 @@ class Runtime:
     def __init__(self) -> None:
         self.store = SiteStore(SITE_ROOT)
         self.queue = FrameQueue(maxsize=64)
-        self.ingest = IngestManager(self.queue, gpu_devices=GPU_DEVICES or None)
+        if INGEST_BACKEND == "deepstream":
+            # 지연 import — ffmpeg 모드에서는 pyzmq/docker 의존이 전혀 없어야 한다
+            from system.ingest_ds.launcher import DsIngestManager, parse_gpu_devices
+            # 주의: GPU_DEVICES 미지정 시 기본값이 갈린다 — ffmpeg "0,1" / DS "1"
+            # (DS 워커는 GPU 전유 전제, GPU0은 타 프로젝트 상주 — launcher 기본 유지)
+            self.ingest = DsIngestManager(self._dispatch_tracks,
+                                          gpu_devices=parse_gpu_devices())
+        else:
+            self.ingest = IngestManager(self.queue, gpu_devices=GPU_DEVICES or None)
         self.engine: MetricsEngine | None = None
         self.analyzer = None  # AnalyzerThread | None — TRT 로드 실패 시 None
         self._lock = threading.Lock()
+
+    def _dispatch_tracks(self, cam_id: str, ts: float, tracks) -> None:
+        """DS 브리지 → 엔진 어댑터 (엔진은 startup에서 생성되므로 지연 위임)."""
+        if self.engine is not None:
+            self.engine.on_tracks(cam_id, ts, tracks)
 
     # ------------------------------------------------------------ 설정 접근
     def site(self) -> SiteConfig:
@@ -73,6 +94,11 @@ class Runtime:
         site, cams = self.site(), self.cameras()
         self.engine = MetricsEngine(site, cams)
         self.ingest.start(cams)
+
+        if INGEST_BACKEND == "deepstream":
+            # 추론·트래킹은 DS 워커 컨테이너 안 — 호스트 AnalyzerThread 불필요
+            logger.info("DeepStream 인제스트 기동 (%d cams) — 호스트 TRT 미로드", len(cams))
+            return
 
         try:  # TRT 미가용 환경에서도 API/UI는 동작
             from system.tracking.analyzer import AnalyzerThread
@@ -98,7 +124,10 @@ class Runtime:
 
     # ------------------------------------------------------------ 스냅샷
     def grab_frame(self, cfg: CameraConfig) -> np.ndarray | None:
-        """실행 중 워커 프레임 우선, 없으면 1회성 캡처(test/미기동 카메라용)."""
+        """실행 중 워커 프레임 우선, 없으면 1회성 캡처(test/미기동 카메라용).
+
+        deepstream 모드에서는 get_snapshot()이 항상 None(픽셀이 컨테이너 밖으로
+        안 나옴) → 아래 ffmpeg 단발 캡처(cv2 CAP_FFMPEG)로 폴백된다."""
         frame = self.ingest.get_snapshot(cfg.cam_id)
         if frame is not None:
             return frame
@@ -504,8 +533,18 @@ def debug_tracks():
 @app.get("/api/status")
 def status():
     try:
+        if rt.analyzer is not None:
+            pipeline = rt.analyzer.stats()
+        elif INGEST_BACKEND == "deepstream":
+            # 추론 통계는 워커 컨테이너 로그(STATS) 소관 — 여기는 브리지 수신 통계
+            bridge = getattr(rt.ingest, "bridge", None)
+            pipeline = {"tracking": "deepstream",
+                        **(bridge.stats() if bridge is not None else {})}
+        else:
+            pipeline = {"tracking": "disabled"}
         return {
-            "pipeline": rt.analyzer.stats() if rt.analyzer is not None else {"tracking": "disabled"},
+            "backend": INGEST_BACKEND,
+            "pipeline": pipeline,
             "queue": {"size": rt.queue.qsize(), "drops": rt.queue.dropped},
             "cameras": [s.model_dump() for s in rt.ingest.states()],
         }

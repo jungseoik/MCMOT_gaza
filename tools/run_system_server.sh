@@ -1,5 +1,14 @@
 #!/bin/bash
 # MACS 멀티카메라 시스템 서버 (pm2 등록용) — system/README.md 참조
+#
+# INGEST_BACKEND (기본 ffmpeg — 미지정 시 기존 동작과 동일):
+#   ffmpeg      카메라별 ffmpeg-NVDEC 디코드 + 호스트 직렬 TRT (기존 경로, ~4ch@5fps)
+#   deepstream  GPU별 DS 워커 컨테이너(zero-copy 배치 추론, 16ch@5fps/GPU)
+#               사전조건: macs-deepstream:9.0 이미지 + external/weights/trt_ds/ 엔진
+#               (system/ingest_ds/README.md). GPU_DEVICES 기본값이 갈림에 주의 —
+#               ffmpeg는 "0,1"(NVDEC 라운드로빈), deepstream은 "1"(GPU 전유 전제).
+#   예) INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
+# 롤백: INGEST_BACKEND 제거(또는 =ffmpeg)로 재기동 — docs/architecture/04 참조
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 export SITE_ID="${SITE_ID:-default}"
