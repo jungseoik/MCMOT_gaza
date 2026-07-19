@@ -23,12 +23,14 @@ nvurisrcbin ×N ─ queue(leaky) ─ nvstreammux(batch)
 | 파일 | 역할 |
 |------|------|
 | `worker.py` | 컨테이너 메인 — 파이프라인·게이트·배치 추론·트래킹·ZMQ PUSH |
-| `bridge.py` | 호스트 측 ZMQ PULL → `on_tracks` 콜백 어댑터 (+ `__main__` 수신 통계) |
+| `bridge.py` | 호스트 측 ZMQ PULL → `on_tracks` 콜백 어댑터 (+ `__main__` 수신 통계). 멀티 엔드포인트 통합 수신 지원 |
+| `launcher.py` | **멀티 GPU 런처** — GPU별 워커 컨테이너 기동/중지 + `DsIngestManager`(기존 IngestManager+AnalyzerThread 대체 인터페이스) |
 | `trt_infer.py` | TRT 엔진 래퍼(src/inference_trt.py 이식) + dynamic-batch 검출기·ReID |
 | `gpu_embedding.py` | GPU 텐서에서 직접 crop하는 ReID 임베더 (GPUEmbeddingComputer의 GPU판) |
 | `yolox_post.py` | yolox postprocess 벤더링 (컨테이너에 yolox 패키지 불필요) |
 | `run_worker.sh` | docker run 래퍼 (`GPU=1` 기본) |
 | `configs/cams_*.json` | 카메라 목록 예시 — `[{cam_id, rtsp, analyze_fps}, ...]` |
+| `configs/runtime/` | launcher가 쓰는 GPU별 분할 cams JSON (자동 생성, git 제외) |
 | `docker/Dockerfile` | DS 9.0 + pyds + torch cu130 + tensorrt-cu13 + cupy 등 |
 
 ## 실행
@@ -62,6 +64,41 @@ worker.py 주요 인자: `--batch-size`(추론 배치 상한, 엔진 max 16) ·
 `--max-age N`(트래커 max_age 강제). 사용법과 결과는
 `docs/reports/bench/verify_ds_similarity.py` ·
 `docs/reports/DeepStream-전환-유사도-검증.md` 참조.
+
+## 멀티 GPU 스케일 (launcher.py)
+
+GPU 1장/2장/N장 환경에서 **같은 코드·설정**으로 동작한다 — GPU당 워커
+컨테이너 1개 + 호스트 중앙 수신(bridge) 구조.
+
+```bash
+# 단독 실행(검증) — GPU_DEVICES에 따라 카메라가 자동 분할된다
+GPU_DEVICES=0,1 conda run -n boosttrack python -m system.ingest_ds.launcher \
+    --cams system/ingest_ds/configs/cams_12ch.json
+# 잔여 컨테이너 정리
+conda run -n boosttrack python -m system.ingest_ds.launcher --stop
+```
+
+- **분할**: 채널의 `analyze_fps` 합 기준 greedy 부하 균등. 입력이 같으면
+  결과도 같다(결정적) — 재시작해도 배정이 흔들리지 않는다.
+- **포트 컨벤션**: GPU `K`의 워커는 `tcp://*:{5701+K}`에 PUSH,
+  bridge PULL 소켓 1개가 전 엔드포인트를 fair-queuing으로 통합 수신.
+- **컨테이너**: `macs-ds-worker-gpu{K}` (`docker run -d --rm --gpus device=K
+  --network host`). GPU별 cams JSON은 `configs/runtime/`에 자동 생성.
+- **`DsIngestManager`**: 기존 `IngestManager`+`AnalyzerThread` 조합과 동일한
+  외부 인터페이스(`start(cams)/stop()/states()/add·remove·update_camera/
+  set_enabled` + `on_tracks(cam_id, ts, tracks)` 콜백) — server.py에서
+  `INGEST_BACKEND=deepstream` 스위치로 교체하는 것을 전제로 한다.
+  `cams`는 `CameraConfig`(pydantic)든 dict든 받는다.
+- **hot add/remove(최소 구현)**: 해당 카메라가 배정된 GPU 워커만 cams JSON
+  갱신 후 컨테이너 재시작 — **다른 GPU 워커는 무영향**(docker StartedAt
+  불변 + 수신 fps 유지로 검증). 워커 재시작 비용은 엔진 로드 포함 ~50초.
+  DS 파이프라인 동적 소스 add/remove는 다음 단계.
+- **`get_snapshot()`은 None**: 프레임 픽셀이 컨테이너 밖으로 나오지 않는
+  구조라 스냅샷 미지원 — 셋업 UI가 필요하면 ffmpeg 단발 캡처를 따로 쓴다.
+- **states()**: 수신 슬라이딩 윈도(10초) 기반 `fps_in`,
+  `running`(최근 수신) / `reconnecting`(컨테이너 생존·수신 없음) /
+  `disconnected`(컨테이너 사망) / `disabled`. 워커 내부 큐 드랍은 컨테이너
+  로그(`docker logs macs-ds-worker-gpuK`)의 STATS로 관찰.
 
 ## 엔진 빌드 (컨테이너 안에서 — TRT 버전 일치 필수)
 

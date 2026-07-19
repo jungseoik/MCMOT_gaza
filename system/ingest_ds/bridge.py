@@ -49,10 +49,12 @@ class TrackBridge(threading.Thread):
     """ZMQ PULL → TrackedObject 복원 → on_tracks 콜백 (수신 전용 스레드)."""
 
     def __init__(self, on_tracks: OnTracks,
-                 connect: str = "tcp://127.0.0.1:5701") -> None:
+                 connect: str | list[str] = "tcp://127.0.0.1:5701") -> None:
         super().__init__(daemon=True, name="ds-bridge")
         self.on_tracks = on_tracks
-        self.connect_addr = connect
+        # 멀티 GPU 워커 통합 수신 — PULL 소켓 1개가 여러 엔드포인트에
+        # connect하면 fair-queuing으로 합쳐진다 (launcher.py 멀티 워커용).
+        self.connect_addrs = [connect] if isinstance(connect, str) else list(connect)
         self._stop_evt = threading.Event()
 
         # 통계
@@ -78,10 +80,11 @@ class TrackBridge(threading.Thread):
         ctx = zmq.Context.instance()
         sock = ctx.socket(zmq.PULL)
         sock.setsockopt(zmq.RCVHWM, 1000)
-        sock.connect(self.connect_addr)
+        for addr in self.connect_addrs:
+            sock.connect(addr)
         poller = zmq.Poller()
         poller.register(sock, zmq.POLLIN)
-        logger.info("브리지 수신 시작: %s", self.connect_addr)
+        logger.info("브리지 수신 시작: %s", ", ".join(self.connect_addrs))
         try:
             while not self._stop_evt.is_set():
                 if not poller.poll(500):
@@ -122,7 +125,8 @@ class TrackBridge(threading.Thread):
 def _main() -> None:
     """단독 실행 — 수신 통계를 5초마다 출력 (워커 검증용)."""
     ap = argparse.ArgumentParser(description="DS 워커 트랙 수신 브리지 (통계 모드)")
-    ap.add_argument("--connect", default="tcp://127.0.0.1:5701")
+    ap.add_argument("--connect", default="tcp://127.0.0.1:5701",
+                    help="워커 엔드포인트 — 쉼표로 여러 개 (멀티 GPU 워커 통합)")
     ap.add_argument("--duration", type=float, default=0.0, help="N초 후 종료 (0=무한)")
     args = ap.parse_args()
 
@@ -134,7 +138,8 @@ def _main() -> None:
     def on_tracks(cam_id: str, ts: float, tracks: list[TrackedObject]) -> None:
         latest[cam_id] = len(tracks)
 
-    bridge = TrackBridge(on_tracks, connect=args.connect)
+    endpoints = [e.strip() for e in args.connect.split(",") if e.strip()]
+    bridge = TrackBridge(on_tracks, connect=endpoints)
     bridge.start()
 
     t_end = time.time() + args.duration if args.duration > 0 else None
