@@ -56,6 +56,13 @@ worker.py 주요 인자: `--batch-size`(추론 배치 상한, 엔진 max 16) ·
 `--codec json|msgpack` · `--copy-mode`(zero-copy 끄고 CPU 복사 강제) ·
 `--duration N`(N초 후 자동 종료, 테스트용).
 
+검증 전용 인자(기본 비활성 — 기존 동작 불변): `--verify-dump DIR`(프레임별
+검출/임베딩/트랙 npz 덤프) · `--lossless`(drop 없는 backpressure + EOS 자동
+종료, **file:// 소스 전용**) · `--dump-frames N`(mux RGBA 프레임 npy 덤프) ·
+`--max-age N`(트래커 max_age 강제). 사용법과 결과는
+`docs/reports/bench/verify_ds_similarity.py` ·
+`docs/reports/DeepStream-전환-유사도-검증.md` 참조.
+
 ## 엔진 빌드 (컨테이너 안에서 — TRT 버전 일치 필수)
 
 컨테이너 TRT는 **10.14.1**, 호스트 conda TRT는 10.16.1 —
@@ -90,7 +97,10 @@ docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace macs-deepstre
   로그(`gpumap=OFF(copy)`)에 표시한다.
 - **GPU 선택**: GPU0은 타 프로젝트 사용 중 — 테스트는 `GPU=1`(기본값)로.
 - **전처리 수치**: `dataset.preproc`(cv2 uint8 bilinear)를 GPU float 보간으로
-  재현 — 픽셀당 ±1/255 수준 차이가 있으나 검출·임베딩 결과에는 무시 가능.
+  재현 — 보간 차이는 ±1/255 수준. 단 NVDEC+nvvideoconvert의 YUV→RGB 변환이
+  ffmpeg와 채널당 ~2/255 체계적으로 다르다(실측). e2e 영향은 검출 매칭률
+  99.4%·트랙 매칭률 99.0%로 동등 —
+  `docs/reports/DeepStream-전환-유사도-검증.md` 참조.
 - **트래커 전역 설정**: worker는 `GeneralSettings`를 mot20/ECC-off로 설정한다.
   컨테이너 프로세스 전용이라 호스트 단일영상 PoC와 충돌하지 않는다.
 - **analyze_fps 게이트**: 디코드는 풀레이트로 돌고 추론만 게이트한다.

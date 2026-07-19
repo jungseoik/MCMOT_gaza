@@ -124,13 +124,22 @@ class _CamGate:
 
 
 class _OldestDropQueue:
-    """가득 차면 가장 오래된 항목을 버리는 큐 (system/ingest FrameQueue 패턴)."""
+    """가득 차면 가장 오래된 항목을 버리는 큐 (system/ingest FrameQueue 패턴).
 
-    def __init__(self, maxsize: int = 64):
+    lossless=True(검증 모드)면 버리는 대신 블로킹 — GStreamer 스트리밍 스레드가
+    막혀 파일 소스 디코드에 backpressure가 걸리고, 전 프레임이 유실 없이
+    추론 스레드로 전달된다 (라이브 소스에서는 사용 금지).
+    """
+
+    def __init__(self, maxsize: int = 64, lossless: bool = False):
         self.q: queue.Queue[_Item] = queue.Queue(maxsize=maxsize)
         self.dropped = 0
+        self.lossless = lossless
 
     def put(self, item: _Item) -> None:
+        if self.lossless:
+            self.q.put(item)
+            return
         while True:
             try:
                 self.q.put_nowait(item)
@@ -159,9 +168,23 @@ class DsWorker:
         self.gather_sec = args.gather_ms / 1000.0
         self.det_thresh = args.det_thresh
         self.use_reid = not args.no_reid
-        self.queue = _OldestDropQueue(maxsize=args.queue_size)
+        self.lossless = args.lossless
+        self.queue = _OldestDropQueue(maxsize=args.queue_size, lossless=self.lossless)
         self._stop_evt = threading.Event()
         self._use_gpu_map = not args.copy_mode   # 실패 시 CPU 복사 폴백으로 전환
+
+        # --- 검증 덤프 모드 (기본 비활성 — 기존 동작 불변) ---
+        self._dump_dir = args.verify_dump
+        self._dump_frames = args.dump_frames
+        self._max_age_override = args.max_age
+        self._emb_rec: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        self._frames_dumped: dict[str, int] = {}
+        self._eos = False
+        self._drain_prev = -1
+        self._loop: GLib.MainLoop | None = None
+        if self._dump_dir:
+            import os
+            os.makedirs(self._dump_dir, exist_ok=True)
 
         # --- ZMQ PUSH (논블로킹 — 수신자 없으면 버리고 카운트) ---
         self._zmq_ctx = zmq.Context.instance()
@@ -231,7 +254,7 @@ class DsWorker:
         mux.set_property("batched-push-timeout", 40000)
         mux.set_property("width", MUX_W)
         mux.set_property("height", MUX_H)
-        mux.set_property("live-source", 1)
+        mux.set_property("live-source", 0 if self.lossless else 1)
         mux.set_property("nvbuf-memory-type", 3)   # NVBUF_MEM_CUDA_UNIFIED (dGPU 필수)
         self.pipeline.add(mux)
 
@@ -245,7 +268,8 @@ class DsWorker:
             self._set_if(src, "drop-on-latency", True)
 
             q = Gst.ElementFactory.make("queue", f"q_{i}")
-            q.set_property("leaky", 2)               # downstream(oldest) drop
+            # lossless(검증) 모드: drop 없이 backpressure — 파일 소스 전용
+            q.set_property("leaky", 0 if self.lossless else 2)
             q.set_property("max-size-buffers", 4)
 
             self.pipeline.add(src)
@@ -264,7 +288,7 @@ class DsWorker:
         sink.set_property("emit-signals", True)
         sink.set_property("sync", False)
         sink.set_property("max-buffers", 8)
-        sink.set_property("drop", True)
+        sink.set_property("drop", not self.lossless)
         sink.connect("new-sample", self._on_new_sample)
 
         for e in (conv, capsf, sink):
@@ -296,7 +320,25 @@ class DsWorker:
             # nvurisrcbin이 내부 재접속을 계속하므로 파이프라인은 유지한다
             logger.error("GST ERROR from %s: %s (%s)", msg.src.get_name(), err, dbg)
         elif t == Gst.MessageType.EOS:
-            logger.warning("GST EOS — 라이브 소스에서는 발생하지 않아야 함 (송출 중단?)")
+            if self.lossless:
+                logger.info("GST EOS — lossless 모드: 큐 소진 후 종료 예정")
+                self._eos = True
+            else:
+                logger.warning("GST EOS — 라이브 소스에서는 발생하지 않아야 함 (송출 중단?)")
+
+    def _check_eos_drain(self) -> bool:
+        """lossless 모드 전용 — EOS 후 추론 큐가 다 비면 메인 루프 종료."""
+        if not self._eos:
+            return True
+        with self._st_lock:
+            total = sum(self._st_analyzed.values())
+        if self.queue.q.qsize() == 0 and total == self._drain_prev:
+            logger.info("EOS 후 큐 소진 완료 (analyzed=%d) — 종료", total)
+            if self._loop is not None:
+                self._loop.quit()
+            return False
+        self._drain_prev = total
+        return True
 
     # ------------------------------------------------------- appsink 콜백
     def _on_new_sample(self, sink) -> Gst.FlowReturn:
@@ -322,6 +364,9 @@ class DsWorker:
                     rgba = self._map_frame(buf, fm)
                     det, rgb, r = self._preproc(rgba)
                     gate.seq += 1
+                    if (self._dump_dir and
+                            self._frames_dumped.get(gate.cam_id, 0) < self._dump_frames):
+                        self._dump_rgba_frame(gate.cam_id, gate.seq, rgba)
                     self.queue.put(_Item(gate.cam_id, now, gate.seq, det, rgb, r,
                                          fm.source_frame_width,
                                          fm.source_frame_height))
@@ -384,6 +429,45 @@ class DsWorker:
         canvas /= 255.0
         return canvas, rgb, r
 
+    # ------------------------------------------------------- 검증 덤프 헬퍼
+    def _dump_path(self, cam_id: str, name: str) -> str:
+        import os
+        d = os.path.join(self._dump_dir, cam_id)
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, name)
+
+    def _dump_rgba_frame(self, cam_id: str, seq: int, rgba: torch.Tensor) -> None:
+        """디코드+mux 스케일 직후의 RGBA 프레임 원본 덤프 (PSNR 비교용)."""
+        arr = rgba.detach().contiguous().cpu().numpy()
+        np.save(self._dump_path(cam_id, f"frame_{seq:06d}.npy"), arr)
+        self._frames_dumped[cam_id] = self._frames_dumped.get(cam_id, 0) + 1
+
+    def _dump_frame_result(self, item: _Item, pred, targets,
+                           tracks: list[dict]) -> None:
+        """프레임 1건의 검출/임베딩/트랙 산출물을 npz로 저장."""
+        if pred is None:
+            pred_np = np.zeros((0, 5), np.float32)
+        else:
+            pred_np = (pred.detach().cpu().numpy()
+                       if hasattr(pred, "cpu") else np.asarray(pred)).astype(np.float32)
+        tag = f"{item.cam_id}:{item.seq}"
+        emb_bbox, emb = self._emb_rec.pop(tag, (np.zeros((0, 4), np.float32),
+                                                np.zeros((0, 0), np.float32)))
+        targets_np = np.asarray(targets, np.float32).reshape(
+            -1, targets.shape[1] if getattr(targets, "size", 0) else 6)
+        out_xyxy = np.array([t["bbox_xyxy"] for t in tracks], np.float32).reshape(-1, 4)
+        out_ids = np.array([t["local_track_id"] for t in tracks], np.int64)
+        out_conf = np.array([t["conf"] for t in tracks], np.float32)
+        np.savez_compressed(
+            self._dump_path(item.cam_id, f"det_{item.seq:06d}.npz"),
+            seq=item.seq, ts=item.ts, scale_r=item.scale_r,
+            src_w=item.src_w, src_h=item.src_h, mux_w=MUX_W, mux_h=MUX_H,
+            pred=pred_np,                       # 모델 입력(896x1600) 좌표 [x1,y1,x2,y2,conf]
+            emb_bbox=emb_bbox.astype(np.float32),  # mux px — 임베더에 전달된 bbox
+            emb=emb.astype(np.float32),            # L2 정규화된 임베딩
+            targets=targets_np,                 # 트래커 원출력 (mux px, [x1,y1,x2,y2,id,conf])
+            out_xyxy=out_xyxy, out_ids=out_ids, out_conf=out_conf)  # 원본 px 계약 출력
+
     # ------------------------------------------------------- 추론 스레드
     def _infer_loop(self) -> None:
         logger.info("추론 스레드 시작 (batch<=%d, gather=%.0fms)",
@@ -424,10 +508,23 @@ class DsWorker:
         if tracker is not None:
             return tracker
         fps = self._cam_fps.get(cam_id, 5.0)
-        max_age = max(int(round(fps * TRACK_BUFFER_SEC)), 3)
+        if self._max_age_override > 0:
+            max_age = self._max_age_override
+        else:
+            max_age = max(int(round(fps * TRACK_BUFFER_SEC)), 3)
         tracker = BoostTrack(per_instance_ids=True, max_age=max_age)
         if self._embedder is not None and tracker.embedder is not None:
-            tracker.embedder.compute_embedding = self._embedder.compute_embedding
+            if self._dump_dir:
+                # 검증 모드: 임베더 호출을 가로채 (bbox, 임베딩)을 태그별로 기록
+                def _recorded(img, bbox, tag,
+                              _f=self._embedder.compute_embedding):
+                    emb = _f(img, bbox, tag)
+                    self._emb_rec[tag] = (np.asarray(bbox, np.float32).copy(),
+                                          np.asarray(emb).copy())
+                    return emb
+                tracker.embedder.compute_embedding = _recorded
+            else:
+                tracker.embedder.compute_embedding = self._embedder.compute_embedding
             tracker.embedder.model = self._trt_reid    # lazy torch 로드 차단
         assert tracker.ecc is None, "고정 CCTV 전제 — ECC는 비활성이어야 함"
         self._trackers[cam_id] = tracker
@@ -466,6 +563,9 @@ class DsWorker:
                 "bbox_xyxy": [x1, y1, x2, y2],
                 "conf": conf,
             })
+
+        if self._dump_dir:
+            self._dump_frame_result(item, pred, targets, tracks)
 
         self._send({"cam_id": item.cam_id, "ts": item.ts, "tracks": tracks})
         with self._st_lock:
@@ -540,7 +640,10 @@ class DsWorker:
         self._infer_thread.start()
         self.pipeline.set_state(Gst.State.PLAYING)
         loop = GLib.MainLoop()
+        self._loop = loop
         GLib.timeout_add_seconds(STATS_INTERVAL_SEC, self._log_stats)
+        if self.lossless:
+            GLib.timeout_add(500, self._check_eos_drain)
         if duration > 0:
             GLib.timeout_add(int(duration * 1000), lambda: (loop.quit(), False)[1])
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -582,6 +685,16 @@ def main() -> None:
     ap.add_argument("--codec", choices=("json", "msgpack"), default="json")
     ap.add_argument("--copy-mode", action="store_true",
                     help="zero-copy 대신 CPU 복사 경로 강제 (디버그/비교용)")
+    ap.add_argument("--verify-dump", default="",
+                    help="검증 덤프 디렉토리 — 프레임별 검출/임베딩/트랙 npz 저장 "
+                         "(기본 비활성, docs/reports/bench/verify_ds_similarity.py 용)")
+    ap.add_argument("--lossless", action="store_true",
+                    help="drop 없는 backpressure 파이프라인 + EOS 시 자동 종료 "
+                         "(file:// 소스 검증 전용 — 라이브 RTSP에 쓰지 말 것)")
+    ap.add_argument("--dump-frames", type=int, default=0,
+                    help="카메라별 앞 N개 mux RGBA 프레임을 npy로 덤프 (PSNR 비교용)")
+    ap.add_argument("--max-age", type=int, default=0,
+                    help="트래커 max_age 강제 지정 (0=기존 규칙: analyze_fps×2초)")
     ap.add_argument("--duration", type=float, default=0.0,
                     help="N초 후 자동 종료 (0=무한, 테스트용)")
     ap.add_argument("--log-level", default="INFO")
