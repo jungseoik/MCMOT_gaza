@@ -113,6 +113,84 @@ def _bounds(doc, obstacles, exits, occupants):
     return (xs.min(), ys.min(), xs.max(), ys.max())
 
 
+def load_dxf_entities(path):
+    """DXF → 엔티티 단위 지오메트리(웹 편집기용 — 엔티티별 삭제 지원).
+
+    top-level 엔티티 1개 = 삭제 단위. INSERT(블록참조)는 통째로 한 단위
+    (문짝 블록을 한 번에 지우는 게 목적에 부합). 특수레이어(Evac_*)는 제외.
+
+    반환: (entities, exits, occupants, bounds, doc)
+      entities = [{"handle": str, "layer": str, "segs": [(x1,y1,x2,y2), ...]}]
+    """
+    import ezdxf
+    doc = ezdxf.readfile(path)
+    msp = doc.modelspace()
+    entities, exits, occupants = [], [], []
+
+    def collect(e, out):
+        t = e.dxftype()
+        def add_poly(pts, closed):
+            pts = [(p[0], p[1]) for p in pts]
+            if closed and len(pts) >= 2:
+                pts = pts + [pts[0]]
+            for a, b in zip(pts[:-1], pts[1:]):
+                out.append((a[0], a[1], b[0], b[1]))
+        try:
+            if t == "LINE":
+                out.append((e.dxf.start.x, e.dxf.start.y, e.dxf.end.x, e.dxf.end.y))
+            elif t == "LWPOLYLINE":
+                add_poly(list(e.get_points()), e.closed)
+            elif t == "POLYLINE":
+                add_poly([(p[0], p[1]) for p in e.points()], e.is_closed)
+            elif t in ("ARC", "CIRCLE", "ELLIPSE", "SPLINE"):
+                pts = list(e.flattening(distance=2.0))
+                add_poly([(p[0], p[1]) for p in pts], closed=(t == "CIRCLE"))
+            elif t == "INSERT":
+                stack = deque(e.virtual_entities())
+                guard = 0
+                while stack:
+                    guard += 1
+                    if guard > 200000:
+                        break
+                    ve = stack.popleft()
+                    if ve.dxftype() == "INSERT":
+                        try:
+                            stack.extend(ve.virtual_entities())
+                        except Exception:
+                            pass
+                    else:
+                        collect(ve, out)
+        except Exception:
+            pass
+
+    for e in msp:
+        layer, t = e.dxf.layer, e.dxftype()
+        if layer == "Evac_Exit" and t == "LINE":
+            exits.append(((e.dxf.start.x + e.dxf.end.x) / 2.0,
+                          (e.dxf.start.y + e.dxf.end.y) / 2.0))
+            continue
+        if layer == "Evac_Occupant":
+            if t == "LWPOLYLINE":
+                occupants.extend((p[0], p[1]) for p in e.get_points())
+            elif t == "POLYLINE":
+                occupants.extend((p[0], p[1]) for p in e.points())
+            elif t == "LINE":
+                occupants.append((e.dxf.start.x, e.dxf.start.y))
+                occupants.append((e.dxf.end.x, e.dxf.end.y))
+            continue
+        if layer in SKIP_LAYERS or t == "HATCH":
+            continue
+        segs = []
+        collect(e, segs)
+        if segs:
+            entities.append({"handle": str(e.dxf.handle), "layer": layer, "segs": segs})
+
+    all_segs = [s for ent in entities for s in ent["segs"]]
+    obstacles = np.array(all_segs, float) if all_segs else np.zeros((0, 4))
+    bounds = _bounds(doc, obstacles, exits, occupants)
+    return entities, exits, occupants, bounds, doc
+
+
 def load_reference_paths(doc):
     """매크로 원본 출력 경로(검증 비교용). {'pass':[[(x,y)]], 'fail':[...]}"""
     msp = doc.modelspace()

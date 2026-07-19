@@ -8,12 +8,25 @@
 > 이 문서는 공유받은 소스(`TravelDistance_Analyzer.zip` 내 `Class1.cs`, 1,131줄)를
 > 직접 열어 읽고, 설명과 실제 구현을 대조해 작성했다. **대조 결과 §4에 정리.**
 
+## 0. 문서 체계 (읽는 순서)
+
+| 문서 | 내용 |
+|------|------|
+| **README.md** (이 문서) | 매크로 소스 분석 · 파이썬 포팅 · 검증 · 이력 |
+| [기능명세.md](기능명세.md) | `evac/` 모듈 공개 API · CLI · 입력규약 · 통합 포인트 |
+| [삼성화재-회신-샘플도면-검증-2026-07-16.md](삼성화재-회신-샘플도면-검증-2026-07-16.md) | **최신 상태.** 삼성 회신 정리 + 샘플도면(터치업 17F) 검증 — **17F 차단 이슈 해소** |
+| [발표_피난경로_리눅스구현_검증.md](발표_피난경로_리눅스구현_검증.md) | 발표용 요약(노션) — §5 "17F 불가"는 2026-07-16부로 해소됨(위 문서 참조) |
+
 ## 1. 폴더 구성
 
 ```
 CAD_API_Based_Optimal_Evacuation_Route_Algorithm/
-├── README.md                    ← (이 문서)
-├── Egress_Review-Test.dwg       테스트 도면(피난검토용, 1.8MB)
+├── README.md / 기능명세.md / 발표_… / 삼성화재-회신-…   문서(위 표)
+├── evac/                        ★파이썬 포팅 모듈(core·cad·render·pick·cli)
+├── evac_route.py                CLI 진입점(route/pick/connect)
+├── Egress_Review-Test.dwg       삼성 테스트 도면(피난검토용, 1.8MB)
+├── ../17F_Egress Review(Sample).dwg  삼성 샘플도면(터치업 17F 4패널 튜토리얼, 9.4MB·git 제외)
+├── evac_*.png / sample_*.png    검증·진단 이미지
 └── TravelDistance_Analyzer.zip  공유받은 원본 소스(9.4MB, VS 솔루션 전체)
     └── TravelDistance_Analyzer/
         ├── TravelDistance_Analyzer.slnx
@@ -142,8 +155,13 @@ CAD_API_Based_Optimal_Evacuation_Route_Algorithm/
 
 ```
 evac/  core(순수 알고리즘) · cad(DXF입출력) · render · pick(GUI) · cli
+       · web(브라우저 도면 편집기 :8910 — 터치업·Exit·검증·적용) · static/editor.html
 evac_route.py  = CLI 얇은 진입점(python -m evac.cli 와 동일)
 ```
+
+> **웹 편집기**(2026-07-16 추가): CAD 없이 브라우저에서 문 열기(개구부)·치수선 삭제·
+> Exit 지정·worst-N 검증 후 `data/sites/<site>/`에 map.png+floor.json+거리장 저장 —
+> 운영 웹(:8900) 맵설정과 규약(A-6 m_per_px)으로 연동. 상세: [기능명세.md](기능명세.md) §3.5.
 
 ```bash
 PY=~/miniconda3/envs/boosttrack/bin/python
@@ -199,12 +217,15 @@ $PY evac_route.py connect --dxf 17F.dxf --out conn.png
 2. **CLI 주입**(캐드 불필요): `--exits "x,y;..." --starts "x,y;..."`(SW코너=0 미터). 구현됨.
 3. ezdxf로 DXF에 `Evac_Exit`/`Evac_Occupant` 엔티티를 코드로 써넣기(재현·버전관리).
 
-### 17F 평면도엔 바로 적용 불가 — 주석만으론 부족(실측)
+### 17F 평면도엔 바로 적용 불가 — 주석만으론 부족(실측) → ✅ 2026-07-16 해소
 `cad/17F.dxf`는 **PDF→벡터 트레이스**본이라 (a)`Evac_Exit`/`Evac_Occupant` 태그가 없고
 (주입으로 해결) **(b)문 개구부가 벡터에 없다** — 방들이 닫힌 외곽선으로 그려져 있다.
 결과적으로 이격 25~305mm 어디서도 보행공간이 **~1,800개 조각**으로 분리되고(외곽 blob +
 큰 내부구역 여러 개 + 방 조각들), **내부 재실자가 Exit까지 도달하는 통로가 격리**된다
 (진단: `evac_17F_connectivity.png` — 초록=최대연결영역, 주황=고립된 방/집기).
-→ 17F로 의미있는 결과를 내려면 **깨끗한 원본 벡터 CAD(벽 레이어+문 개구부)** 를 받거나,
-17F를 전처리(문 열기·집기 제거·외곽 정리)해야 한다. 삼성 매크로가 "필요 레이어 제외하고"
-돌릴 수 있는 건 **이미 정리된 CAD**에서 실행하기 때문. `Egress_Review-Test.dwg`가 그 예.
+
+> **[해소 — 2026-07-16]** 삼성 회신로 확인: 삼성 공정 자체가 **PDF Import + 문/치수선
+> 수동 삭제(터치업)** 방식이며("원본 설계 CAD" 전제는 오판), 샘플도면
+> `cad/17F_Egress Review(Sample).dwg` 안에 **동일 17F를 터치업한 판(P2/P3)** 이 제공됨.
+> 이 판으로 **17F 전층 1,148개 경로 산출 성공** + 매크로 원본 출력과 85% ±1m 일치.
+> 상세: [삼성화재-회신-샘플도면-검증-2026-07-16.md](삼성화재-회신-샘플도면-검증-2026-07-16.md)

@@ -385,6 +385,23 @@ Views.map = (() => {
     $("msTabHelp").onclick = () => msTab(true);
     $("siteSave").onclick = save;
     $("mapUpload").onchange = (e) => { if (e.target.files.length) upload(e.target.files); };
+    // CAD 도면 편집기(:8910, 별도 서비스) — 새 창에서 터치업·Exit 지정 후 [저장 & 적용]하면
+    // postMessage('evac-floor-applied')로 돌아와 아래 리스너가 맵을 자동 갱신한다.
+    $("mapFromCad").onclick = () => {
+      const url = location.protocol + "//" + location.hostname + ":8910/?live=1";
+      const w = window.open(url, "evacFloorEditor", "width=1560,height=980");
+      if (!w) { hint("팝업이 차단되었습니다 — 브라우저 팝업 허용 후 다시 시도.", true); return; }
+      hint("도면 편집기(새 창)에서 정리·Exit 지정 후 [저장 & 적용]하면 이 맵에 반영됩니다.");
+    };
+    window.addEventListener("message", async (ev) => {
+      if (!ev.data || ev.data.type !== "evac-floor-applied") return;
+      try {
+        await App.reloadSite();
+        if (App.site.map) mc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
+        hint("도면 편집기 적용 완료 — 맵·축척(m/px)이 자동 반영되었습니다.");
+        refresh();
+      } catch (e) { hint("맵 갱신 실패: " + e.message, true); }
+    });
     $("scaleMeters").onchange = () => {              // 이미 지정된 축척의 실거리 갱신
       const m = parseFloat($("scaleMeters").value);
       if (App.site.map && App.site.map.scale && m > 0) {

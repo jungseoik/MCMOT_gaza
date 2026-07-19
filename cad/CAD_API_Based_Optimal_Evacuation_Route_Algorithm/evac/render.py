@@ -39,8 +39,10 @@ def _scale_axes(ax, np_, bounds, grid_m):
 
 
 def render_routes(out, obstacles, bounds, analysis, *, exits=None, ref=None,
-                  threshold_mm=30000.0, grid_m=5.0, dpi=200, title_extra=""):
-    """경로 결과 렌더. analysis=core.Analysis. exits=[(x,y)] 표시용."""
+                  threshold_mm=30000.0, grid_m=5.0, dpi=200, title_extra="",
+                  labels=True, lw=2.0, alpha=1.0):
+    """경로 결과 렌더. analysis=core.Analysis. exits=[(x,y)] 표시용.
+    labels=False: 경로가 수백 개 이상(mesh 스캔)일 때 거리라벨·시작원 생략."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
@@ -64,12 +66,13 @@ def render_routes(out, obstacles, bounds, analysis, *, exits=None, ref=None,
     for p in analysis.paths:
         color = "#00a000" if p["is_pass"] else "#e00000"
         xs, ys = zip(*p["path_m"])
-        ax.plot(xs, ys, "-", color=color, lw=2.0, zorder=5)
-        ax.scatter([xs[0]], [ys[0]], s=70, facecolors="none", edgecolors=color,
-                   linewidths=1.6, zorder=6)
-        ax.text(xs[0] + 100, ys[0] + 25, f"{p['dist_mm']/1000:.1f}m", color=color,
-                fontsize=9, weight="bold", zorder=8,
-                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.7))
+        ax.plot(xs, ys, "-", color=color, lw=lw, alpha=alpha, zorder=5)
+        if labels:
+            ax.scatter([xs[0]], [ys[0]], s=70, facecolors="none", edgecolors=color,
+                       linewidths=1.6, zorder=6)
+            ax.text(xs[0] + 100, ys[0] + 25, f"{p['dist_mm']/1000:.1f}m", color=color,
+                    fontsize=9, weight="bold", zorder=8,
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.7))
         n_pass += p["is_pass"]; n_fail += (not p["is_pass"])
     ax.plot([], [], "-", color="#00a000", lw=2, label=f"Pass ≤{threshold_mm/1000:.0f}m ({n_pass})")
     ax.plot([], [], "-", color="#e00000", lw=2, label=f"Fail >{threshold_mm/1000:.0f}m ({n_fail})")

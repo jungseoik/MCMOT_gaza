@@ -58,6 +58,36 @@ def build_obstacle_grid(obstacles, minx, miny, cols, rows, cell,
     return grid
 
 
+def carve_free(grid, lines, minx, miny, cell, width=900.0):
+    """개구부(문) 마커: 선분 주변 width/2 이내 셀을 강제 통행가능 처리.
+
+    CAD에서 문짝을 지우는 터치업의 격자 레벨 등가물 — 원본 도면 무손상.
+    lines = [(x1,y1,x2,y2), ...] (도면단위 mm). grid 를 in-place 수정."""
+    cols, rows = grid.shape
+    r = width / 2.0
+    for (x1, y1, x2, y2) in lines:
+        bx1, by1 = min(x1, x2) - r, min(y1, y2) - r
+        bx2, by2 = max(x1, x2) + r, max(y1, y2) + r
+        c1 = max(0, int(math.floor((bx1 - minx) / cell)))
+        r1 = max(0, int(math.floor((by1 - miny) / cell)))
+        c2 = min(cols - 1, int(math.floor((bx2 - minx) / cell)))
+        r2 = min(rows - 1, int(math.floor((by2 - miny) / cell)))
+        if c2 < c1 or r2 < r1:
+            continue
+        cc = minx + (np.arange(c1, c2 + 1) + 0.5) * cell
+        rr = miny + (np.arange(r1, r2 + 1) + 0.5) * cell
+        PX, PY = np.meshgrid(cc, rr, indexing="ij")
+        dx, dy = x2 - x1, y2 - y1
+        lensq = dx * dx + dy * dy
+        if lensq < 1e-10:
+            d = np.hypot(PX - x1, PY - y1)
+        else:
+            t = np.clip(((PX - x1) * dx + (PY - y1) * dy) / lensq, 0.0, 1.0)
+            d = np.hypot(PX - (x1 + t * dx), PY - (y1 + t * dy))
+        grid[c1:c2 + 1, r1:r2 + 1] &= ~(d < r)
+    return grid
+
+
 # ───────────────────────────────────────────── 멀티소스 다익스트라 (scipy)
 def run_dijkstra(grid, exit_cells, cell):
     """모든 exit_cells 를 dist=0 으로 동시 시드. 8방향(직교 cell, 대각 cell·√2).
@@ -182,7 +212,8 @@ class Analysis:
 
 def analyze(obstacles, exits, bounds, *, starts=None, mode="occupant",
             worst_n=5, cell=CELL_SIZE, clearance=CLEARANCE,
-            threshold_mm=30000.0, max_cells=30_000_000):
+            threshold_mm=30000.0, max_cells=30_000_000,
+            openings=None, opening_width=900.0):
     """
     피난경로 산출 (재사용 진입점).
 
@@ -203,6 +234,8 @@ def analyze(obstacles, exits, bounds, *, starts=None, mode="occupant",
     exit_cells = list({world_to_grid(x, y, minx, miny, cell) for (x, y) in exits})
     grid = build_obstacle_grid(obstacles, minx, miny, cols, rows, cell,
                                clearance, exit_cells)
+    if openings:
+        carve_free(grid, openings, minx, miny, cell, width=opening_width)
     dist, pred, inv_c, inv_r, idx = run_dijkstra(grid, exit_cells, cell)
 
     if mode == "occupant":
@@ -258,12 +291,15 @@ def _worst_seeds(dist, grid, bounds, cell, n):
     return [grid_to_world(c, r, minx, miny, cell) for c, r in picked]
 
 
-def connectivity(obstacles, bounds, cell=CELL_SIZE, clearance=CLEARANCE):
+def connectivity(obstacles, bounds, cell=CELL_SIZE, clearance=CLEARANCE,
+                 openings=None, opening_width=900.0):
     """보행공간 연결성 진단(도면 품질 점검용). 반환 dict."""
     from scipy.ndimage import label
     minx, miny, maxx, maxy = bounds
     cols = int(math.ceil((maxx - minx) / cell)); rows = int(math.ceil((maxy - miny) / cell))
     grid = build_obstacle_grid(obstacles, minx, miny, cols, rows, cell, clearance, ())
+    if openings:
+        carve_free(grid, openings, minx, miny, cell, width=opening_width)
     free = ~grid
     lab, n = label(free)
     sizes = np.bincount(lab.ravel()); sizes[0] = 0

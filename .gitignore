@@ -202,7 +202,9 @@ cad/ODATrial.tar.gz
 # 원본 CAD(대용량 바이너리) — 로컬 보관/필요시 Git LFS. synth 실행엔 17F.dxf 필요
 cad/17F.dwg
 cad/17F.dxf
+cad/17F_v2.dwg
 cad/17F_Egress Route.pdf
+cad/17F_Egress Review(Sample).dwg
 # 피난경로 알고리즘: 변환 DXF(대용량, dwg에서 재생성 가능)만 제외. dwg/zip/png/py는 추적
 cad/CAD_API_Based_Optimal_Evacuation_Route_Algorithm/*.dxf
 # 멀티카메라 시스템 런타임 사이트 데이터(데모/운영) — 의도적 커밋만 허용

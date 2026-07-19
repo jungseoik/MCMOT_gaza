@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>도면 편집기 — 피난경로 설정</title>
+<style>
+  :root { --bg:#14171c; --panel:#1d2128; --line:#2c323c; --fg:#e6e9ee; --dim:#8b94a3;
+          --acc:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font-family:system-ui,'Noto Sans KR',sans-serif; height:100vh;
+         display:flex; flex-direction:column; overflow:hidden; }
+  header { display:flex; align-items:center; gap:18px; padding:10px 16px;
+           background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  #steps { display:flex; gap:6px; font-size:12px; color:var(--dim); }
+  #steps b { color:var(--fg); }
+  #steps span.done { color:var(--ok); }
+  main { flex:1; display:flex; min-height:0; }
+  #canvasWrap { flex:1; position:relative; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; }
+  #hud { position:absolute; left:10px; bottom:8px; font-size:12px; color:var(--dim);
+         background:rgba(20,23,28,.75); padding:4px 8px; border-radius:6px; }
+  aside { width:280px; background:var(--panel); border-left:1px solid var(--line);
+          padding:14px; display:flex; flex-direction:column; gap:12px; overflow-y:auto; }
+  .grp { display:flex; flex-direction:column; gap:6px; }
+  .grp h2 { font-size:12px; color:var(--dim); margin:0 0 2px; font-weight:600;
+            text-transform:uppercase; letter-spacing:.04em; }
+  button { background:#262c36; color:var(--fg); border:1px solid var(--line);
+           border-radius:8px; padding:8px 10px; font-size:13px; cursor:pointer;
+           text-align:left; }
+  button:hover { border-color:#3d4654; }
+  button.mode.on { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button.primary { background:var(--ok); border-color:var(--ok); color:#08130b;
+                   font-weight:700; text-align:center; }
+  button.primary:disabled { opacity:.4; cursor:not-allowed; }
+  button.small { padding:5px 8px; font-size:12px; }
+  input[type=text], input[type=number] {
+    background:#10131a; color:var(--fg); border:1px solid var(--line);
+    border-radius:6px; padding:6px 8px; font-size:13px; width:100%; }
+  label.chk { display:flex; gap:8px; align-items:center; font-size:13px; cursor:pointer; }
+  #stats { font-size:12px; color:var(--dim); line-height:1.7; }
+  #stats b { color:var(--fg); }
+  #connStat { font-size:12px; }
+  #connStat .ok { color:var(--ok); } #connStat .warn { color:var(--warn); }
+  #dropzone { position:absolute; inset:0; display:flex; align-items:center;
+              justify-content:center; flex-direction:column; gap:12px;
+              background:rgba(20,23,28,.92); z-index:5; }
+  #dropzone.hidden { display:none; }
+  #dropzone .box { border:2px dashed #3d4654; border-radius:14px; padding:46px 60px;
+                   text-align:center; color:var(--dim); font-size:15px; }
+  #dropzone .box b { color:var(--fg); font-size:17px; }
+  #toast { position:absolute; top:12px; left:50%; transform:translateX(-50%);
+           background:#262c36; border:1px solid var(--line); padding:8px 16px;
+           border-radius:8px; font-size:13px; z-index:9; display:none; }
+  #spin { display:none; width:14px; height:14px; border:2px solid var(--dim);
+          border-top-color:var(--acc); border-radius:50%; animation:sp 1s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  kbd { background:#10131a; border:1px solid var(--line); border-radius:4px;
+        padding:1px 5px; font-size:11px; }
+</style>
+<body>
+<header>
+  <h1>🏗 도면 편집기</h1>
+  <div id="steps">
+    <span id="st1"><b>① 업로드</b></span> ›
+    <span id="st2">② 정리</span> ›
+    <span id="st3">③ Exit</span> ›
+    <span id="st4">④ 검증</span> ›
+    <span id="st5">⑤ 적용</span>
+  </div>
+  <div id="spin"></div>
+  <span id="fileName" style="font-size:12px;color:var(--dim);margin-left:auto"></span>
+</header>
+<main>
+  <div id="canvasWrap">
+    <canvas id="cv"></canvas>
+    <div id="hud">-</div>
+    <div id="toast"></div>
+    <div id="dropzone">
+      <div class="box">
+        <b>DWG / DXF 도면을 끌어다 놓으세요</b><br><br>
+        또는 <button class="small" onclick="document.getElementById('fi').click()">파일 선택</button>
+        <input id="fi" type="file" accept=".dwg,.dxf" style="display:none">
+        <br><br><span style="font-size:12px">PDF는 AutoCAD에서 PDF Import 후 DWG로 저장해 업로드</span>
+      </div>
+    </div>
+  </div>
+  <aside>
+    <div class="grp">
+      <h2>모드</h2>
+      <button class="mode on" id="m-pan">✋ 이동/줌 <span style="float:right;color:var(--dim)">휠·드래그</span></button>
+      <button class="mode" id="m-del">🧹 삭제 (치수선 등) <span style="float:right;color:var(--dim)">박스</span></button>
+      <button class="mode" id="m-open">🚪 개구부 (문 열기) <span style="float:right;color:var(--dim)">선</span></button>
+      <button class="mode" id="m-exit">🟦 Exit 지정 <span style="float:right;color:var(--dim)">선</span></button>
+      <button id="undoBtn" class="small">↩ 실행취소 <kbd>Ctrl+Z</kbd></button>
+    </div>
+    <div class="grp">
+      <h2>보기</h2>
+      <label class="chk"><input type="checkbox" id="connChk"> 연결성 오버레이 (초록=연결·주황=고립)</label>
+      <div id="connStat"></div>
+    </div>
+    <div class="grp">
+      <h2>검증</h2>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="font-size:12px;color:var(--dim)">기준거리(m)</span>
+        <input type="number" id="thr" value="30" style="width:70px">
+        <span style="font-size:12px;color:var(--dim)">worst</span>
+        <input type="number" id="wn" value="5" style="width:56px">
+      </div>
+      <button id="verifyBtn">🔍 경로 검증 (worst-N)</button>
+      <label class="chk"><input type="checkbox" id="pathChk" checked> 경로 표시</label>
+      <label class="chk"><input type="checkbox" id="heatChk"> 거리 열지도 (모든 지점→최근접 Exit)</label>
+      <div id="heatStat" style="font-size:12px;color:var(--dim)"></div>
+    </div>
+    <div class="grp">
+      <h2>적용</h2>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="font-size:12px;color:var(--dim)">site</span>
+        <input type="text" id="site" value="default">
+      </div>
+      <label class="chk"><input type="checkbox" id="liveChk">
+        운영 서버(:8900) 맵 즉시 교체 <span style="color:var(--warn)">⚠ 운영 맵 덮어씀</span></label>
+      <button class="primary" id="applyBtn" disabled>💾 저장 &amp; 적용</button>
+      <div id="applyMsg" style="font-size:12px;color:var(--dim)"></div>
+    </div>
+    <div class="grp">
+      <h2>상태</h2>
+      <div id="stats">도면 없음</div>
+    </div>
+  </aside>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+let DPR = window.devicePixelRatio || 1;
+
+// ── 데이터
+let segs = null;            // Float32Array n*4 (mm)
+let segAlive = null;        // Uint8Array n (삭제 반영)
+let entIndex = [];          // [{h, layer, o, n}]
+let bounds = null;          // [minx,miny,maxx,maxy] mm
+let deleted = new Set(), openings = [], exits = [];
+let undoStack = [];         // {type, data}
+let verifyPaths = null;
+let connImg = null;         // 연결성 오버레이 Image
+let heatImg = null;         // 거리 열지도 Image
+
+// ── 뷰 (world mm ↔ screen px)
+let view = { s: 0.01, tx: 0, ty: 0 };   // s = px/mm
+const W2SX = x => (x - view.tx) * view.s;
+const W2SY = y => cv.height / DPR - (y - view.ty) * view.s;
+const S2WX = mx => view.tx + mx / view.s;
+const S2WY = my => view.ty + (cv.height / DPR - my) / view.s;
+
+let mode = "pan";
+let drag = null;            // {x0,y0,x1,y1, panTx, panTy}
+let base = null;            // 오프스크린 도면 비트맵 {canvas, view}
+let renderTimer = null;
+
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  cv.width = r.width * DPR; cv.height = r.height * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  scheduleRender(0);
+}
+window.addEventListener("resize", resize);
+
+function fitView() {
+  const [x1, y1, x2, y2] = bounds;
+  const w = cv.width / DPR, h = cv.height / DPR;
+  view.s = Math.min(w / (x2 - x1), h / (y2 - y1)) * 0.95;
+  view.tx = x1 - ((w / view.s) - (x2 - x1)) / 2;
+  view.ty = y1 - ((h / view.s) - (y2 - y1)) / 2;
+}
+
+// ── 도면 렌더(오프스크린, 뷰포트 컬링)
+function renderBase() {
+  if (!segs) return;
+  const w = cv.width, h = cv.height;
+  const off = document.createElement("canvas");
+  off.width = w; off.height = h;
+  const c = off.getContext("2d");
+  c.setTransform(DPR, 0, 0, DPR, 0, 0);
+  c.fillStyle = "#ffffff"; c.fillRect(0, 0, w / DPR, h / DPR);
+  c.strokeStyle = "#3a3f47"; c.lineWidth = Math.max(0.4, Math.min(1.2, view.s * 40));
+  const vx1 = view.tx, vy1 = view.ty,
+        vx2 = S2WX(w / DPR), vy2 = view.ty + (h / DPR) / view.s;
+  c.beginPath();
+  let batch = 0;
+  const n = segs.length / 4;
+  for (let i = 0; i < n; i++) {
+    if (!segAlive[i]) continue;
+    const x1 = segs[i*4], y1 = segs[i*4+1], x2 = segs[i*4+2], y2 = segs[i*4+3];
+    if ((x1 < vx1 && x2 < vx1) || (x1 > vx2 && x2 > vx2) ||
+        (y1 < vy1 && y2 < vy1) || (y1 > vy2 && y2 > vy2)) continue;
+    c.moveTo(W2SX(x1), W2SY(y1)); c.lineTo(W2SX(x2), W2SY(y2));
+    if (++batch >= 20000) { c.stroke(); c.beginPath(); batch = 0; }
+  }
+  c.stroke();
+  base = { canvas: off, view: { ...view } };
+}
+
+function scheduleRender(delay = 150) {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(() => { renderBase(); draw(); }, delay);
+  draw();   // 즉시: 이전 비트맵 변환 블릿(팬/줌 중 반응성)
+}
+
+// ── 합성 draw
+function draw() {
+  const w = cv.width / DPR, h = cv.height / DPR;
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
+  if (base) {
+    if (base.view.s === view.s && base.view.tx === view.tx && base.view.ty === view.ty) {
+      ctx.drawImage(base.canvas, 0, 0, w, h);
+    } else {
+      const k = view.s / base.view.s;
+      const dx = (base.view.tx - view.tx) * view.s;
+      const dy = -(base.view.ty - view.ty) * view.s - (k - 1) * h;
+      ctx.drawImage(base.canvas, dx, dy, w * k, h * k);
+    }
+  }
+  if (!bounds) return;
+  // 연결성 오버레이
+  if (connImg && $("connChk").checked) {
+    const [x1, y1, x2, y2] = bounds;
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(connImg, W2SX(x1), W2SY(y2),
+                  (x2 - x1) * view.s, (y2 - y1) * view.s);
+    ctx.globalAlpha = 1;
+  }
+  // 거리 열지도
+  if (heatImg && $("heatChk").checked) {
+    const [x1, y1, x2, y2] = bounds;
+    ctx.drawImage(heatImg, W2SX(x1), W2SY(y2),
+                  (x2 - x1) * view.s, (y2 - y1) * view.s);
+  }
+  // 개구부
+  ctx.lineCap = "round";
+  for (const [x1, y1, x2, y2] of openings) {
+    ctx.strokeStyle = "rgba(34,197,94,.85)"; ctx.lineWidth = Math.max(4, 900 * view.s);
+    ctx.beginPath(); ctx.moveTo(W2SX(x1), W2SY(y1)); ctx.lineTo(W2SX(x2), W2SY(y2)); ctx.stroke();
+  }
+  // Exit
+  for (const [x1, y1, x2, y2] of exits) {
+    ctx.strokeStyle = "#1d4ed8"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(W2SX(x1), W2SY(y1)); ctx.lineTo(W2SX(x2), W2SY(y2)); ctx.stroke();
+    const mx = W2SX((x1 + x2) / 2), my = W2SY((y1 + y2) / 2);
+    ctx.fillStyle = "#1d4ed8"; ctx.fillRect(mx - 6, my - 6, 12, 12);
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.strokeRect(mx - 6, my - 6, 12, 12);
+  }
+  // 검증 경로
+  if (verifyPaths && $("pathChk").checked) {
+    for (const p of verifyPaths) {
+      ctx.strokeStyle = p.pass ? "#16a34a" : "#dc2626"; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      p.pts.forEach(([x, y], i) => i ? ctx.lineTo(W2SX(x), W2SY(y)) : ctx.moveTo(W2SX(x), W2SY(y)));
+      ctx.stroke();
+      const [sx, sy] = p.pts[0];
+      ctx.fillStyle = p.pass ? "#16a34a" : "#dc2626";
+      ctx.beginPath(); ctx.arc(W2SX(sx), W2SY(sy), 5, 0, 7); ctx.fill();
+      ctx.font = "bold 13px sans-serif";
+      ctx.fillText(`${p.dist_m}m`, W2SX(sx) + 8, W2SY(sy) - 6);
+    }
+  }
+  // 드래그 프리뷰
+  if (drag && mode !== "pan") {
+    if (mode === "del") {
+      ctx.strokeStyle = "#ef4444"; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5;
+      ctx.strokeRect(drag.sx0, drag.sy0, drag.sx1 - drag.sx0, drag.sy1 - drag.sy0);
+      ctx.setLineDash([]);
+    } else {
+      ctx.strokeStyle = mode === "open" ? "rgba(34,197,94,.9)" : "#1d4ed8";
+      ctx.lineWidth = mode === "open" ? Math.max(4, 900 * view.s) : 5;
+      ctx.beginPath(); ctx.moveTo(drag.sx0, drag.sy0); ctx.lineTo(drag.sx1, drag.sy1); ctx.stroke();
+    }
+  }
+}
+
+// ── 입력
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  if (!bounds) return;
+  const k = e.deltaY < 0 ? 1.25 : 0.8;
+  const wx = S2WX(e.offsetX), wy = S2WY(e.offsetY);
+  view.s *= k;
+  view.tx = wx - e.offsetX / view.s;
+  view.ty = wy - (cv.height / DPR - e.offsetY) / view.s;
+  scheduleRender();
+}, { passive: false });
+
+cv.addEventListener("mousedown", e => {
+  if (!bounds) return;
+  drag = { sx0: e.offsetX, sy0: e.offsetY, sx1: e.offsetX, sy1: e.offsetY,
+           tx: view.tx, ty: view.ty, panning: mode === "pan" || e.button === 1 };
+});
+cv.addEventListener("mousemove", e => {
+  if (bounds) $("hud").textContent =
+    `(${(S2WX(e.offsetX)/1000).toFixed(1)}, ${(S2WY(e.offsetY)/1000).toFixed(1)}) m · 줌 ${(view.s*1000).toFixed(1)}px/m`;
+  if (!drag) return;
+  drag.sx1 = e.offsetX; drag.sy1 = e.offsetY;
+  if (drag.panning) {
+    view.tx = drag.tx - (drag.sx1 - drag.sx0) / view.s;
+    view.ty = drag.ty + (drag.sy1 - drag.sy0) / view.s;
+    scheduleRender();
+  } else draw();
+});
+window.addEventListener("mouseup", e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.panning) { scheduleRender(0); return; }
+  const wx0 = S2WX(d.sx0), wy0 = S2WY(d.sy0), wx1 = S2WX(d.sx1), wy1 = S2WY(d.sy1);
+  const moved = Math.hypot(d.sx1 - d.sx0, d.sy1 - d.sy0) > 4;
+  if (!moved) { draw(); return; }
+  if (mode === "del") doDelete(Math.min(wx0,wx1), Math.min(wy0,wy1), Math.max(wx0,wx1), Math.max(wy0,wy1));
+  else if (mode === "open") { openings.push([wx0, wy0, wx1, wy1]); undoStack.push({t:"open"}); afterEdit(); }
+  else if (mode === "exit") { exits.push([wx0, wy0, wx1, wy1]); undoStack.push({t:"exit"}); stepDone(3); afterEdit(); }
+});
+
+function doDelete(x1, y1, x2, y2) {
+  const hit = [];
+  for (const ent of entIndex) {
+    if (deleted.has(ent.h)) continue;
+    for (let i = ent.o; i < ent.o + ent.n; i++) {
+      const ax = segs[i*4], ay = segs[i*4+1], bx = segs[i*4+2], by = segs[i*4+3];
+      if ((ax >= x1 && ax <= x2 && ay >= y1 && ay <= y2) ||
+          (bx >= x1 && bx <= x2 && by >= y1 && by <= y2)) { hit.push(ent); break; }
+    }
+  }
+  if (!hit.length) { toast("선택된 요소 없음"); return; }
+  for (const ent of hit) {
+    deleted.add(ent.h);
+    segAlive.fill(0, ent.o, ent.o + ent.n);
+  }
+  undoStack.push({ t: "del", hs: hit.map(e => e.h) });
+  toast(`${hit.length}개 요소 삭제`);
+  stepDone(2); afterEdit(true);
+}
+
+function undo() {
+  const op = undoStack.pop();
+  if (!op) return;
+  if (op.t === "del") {
+    for (const h of op.hs) {
+      deleted.delete(h);
+      const ent = entIndex.find(e => e.h === h);
+      if (ent) segAlive.fill(1, ent.o, ent.o + ent.n);
+    }
+    afterEdit(true);
+  } else if (op.t === "open") { openings.pop(); afterEdit(); }
+  else if (op.t === "exit") { exits.pop(); afterEdit(); }
+}
+$("undoBtn").onclick = undo;
+window.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
+});
+
+let editSyncTimer = null, connTimer = null;
+function afterEdit(geomChanged = false) {
+  verifyPaths = null;
+  updateStats();
+  $("applyBtn").disabled = exits.length === 0;
+  clearTimeout(editSyncTimer);
+  editSyncTimer = setTimeout(() => fetch("/api/edits", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deleted: [...deleted], openings, exits })
+  }).then(() => {
+    if ($("connChk").checked) refreshConn();
+    if ($("heatChk").checked) refreshHeat(); else heatImg = null;
+  }), 250);
+  if (geomChanged) scheduleRender(50); else draw();
+}
+
+// ── 연결성
+async function refreshConn() {
+  clearTimeout(connTimer);
+  connTimer = setTimeout(async () => {
+    spin(true);
+    try {
+      const r = await fetch("/api/connectivity.png?t=" + Date.now());
+      if (!r.ok) throw new Error(await r.text());
+      const comp = r.headers.get("X-Components"), frac = r.headers.get("X-Largest-Frac");
+      const blob = await r.blob();
+      connImg = await createImageBitmap(blob);
+      const pct = (parseFloat(frac) * 100).toFixed(0);
+      $("connStat").innerHTML =
+        `연결영역 <b class="${pct > 85 ? 'ok' : 'warn'}">${pct}%</b> · 조각 ${comp}개`;
+      draw();
+    } catch (e) { toast("연결성 계산 실패: " + e.message); }
+    spin(false);
+  }, 100);
+}
+$("connChk").onchange = () => { if ($("connChk").checked) refreshConn(); else draw(); };
+
+// ── 거리 열지도 (전체 거리장: 모든 지점의 최근접 Exit 피난거리)
+async function refreshHeat() {
+  if (!exits.length) { toast("먼저 Exit를 지정하세요 (🟦 모드)"); $("heatChk").checked = false; return; }
+  spin(true);
+  try {
+    await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleted: [...deleted], openings, exits }) });
+    const r = await fetch("/api/distfield.png?t=" + Date.now());
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    const dmax = r.headers.get("X-Max-Dist-M");
+    heatImg = await createImageBitmap(await r.blob());
+    $("heatStat").innerHTML =
+      `<span style="color:#22c55e">■</span>가까움 → <span style="color:#ef4444">■</span>멂 · 최장 <b>${dmax}m</b> · 회색=도달불가`;
+    draw();
+  } catch (e) { toast("열지도 실패: " + e); $("heatChk").checked = false; }
+  spin(false);
+}
+$("heatChk").onchange = () => { if ($("heatChk").checked) refreshHeat(); else { $("heatStat").textContent=""; draw(); } };
+
+// ── 검증
+$("verifyBtn").onclick = async () => {
+  if (!exits.length) { toast("먼저 Exit를 지정하세요 (🟦 모드)"); return; }
+  spin(true); $("verifyBtn").disabled = true;
+  try {
+    await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleted: [...deleted], openings, exits }) });
+    const r = await fetch("/api/verify", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ worst_n: +$("wn").value, threshold_m: +$("thr").value }) });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    const j = await r.json();
+    verifyPaths = j.paths;
+    stepDone(4);
+    updateStats();
+    toast(`worst ${j.paths.length}개 경로 · 최장 ${Math.max(...j.paths.map(p => p.dist_m))}m`);
+    draw();
+  } catch (e) { toast("검증 실패: " + e); }
+  spin(false); $("verifyBtn").disabled = false;
+};
+
+// ── 적용
+$("applyBtn").onclick = async () => {
+  spin(true); $("applyBtn").disabled = true; $("applyMsg").textContent = "저장 중…(수십 초)";
+  try {
+    await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleted: [...deleted], openings, exits }) });
+    const r = await fetch("/api/apply", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site: $("site").value, apply_live: $("liveChk").checked }) });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    const j = await r.json();
+    stepDone(5);
+    $("applyMsg").innerHTML =
+      `✅ 저장됨 → <b>${j.saved[0]}</b><br>축척 ${j.m_per_px} m/px 자동 · worst ${j.worst_dist_m}m` +
+      (j.applied_to_system ? "<br>✅ 운영서버(:8900) 반영 완료"
+                           : "<br>💾 파일만 저장됨 (운영 반영은 체크박스 선택 시)");
+    if (window.opener) window.opener.postMessage({ type: "evac-floor-applied", site: j.site }, "*");
+  } catch (e) { $("applyMsg").textContent = "실패: " + e; }
+  spin(false); $("applyBtn").disabled = false;
+};
+
+// ── 업로드
+async function upload(file) {
+  spin(true);
+  $("dropzone").querySelector(".box").innerHTML = "<b>변환·파싱 중…</b><br>DWG는 수십 초 걸릴 수 있습니다";
+  const fd = new FormData(); fd.append("file", file);
+  try {
+    const r = await fetch("/api/load", { method: "POST", body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    const meta = await r.json();
+    const g = await fetch("/api/geometry");
+    const buf = await g.arrayBuffer();
+    const hlen = new DataView(buf).getUint32(0, true);
+    const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hlen)));
+    segs = new Float32Array(buf.slice(4 + hlen));
+    entIndex = head.index;
+    bounds = head.bounds;
+    deleted = new Set(head.deleted);
+    openings = head.openings; exits = head.exits;
+    segAlive = new Uint8Array(segs.length / 4).fill(1);
+    for (const h of deleted) {
+      const ent = entIndex.find(e => e.h === h);
+      if (ent) segAlive.fill(0, ent.o, ent.o + ent.n);
+    }
+    $("fileName").textContent = `${meta.name} · ${meta.size_m[0]}×${meta.size_m[1]} m · 요소 ${meta.entities.toLocaleString()}`;
+    $("dropzone").classList.add("hidden");
+    stepDone(1);
+    fitView(); renderBase(); updateStats(); draw();
+    $("applyBtn").disabled = exits.length === 0;
+    toast("도면 로드 완료 — 연결성 오버레이를 켜고 고립된 방(주황)의 문을 🚪로 여세요");
+  } catch (e) {
+    $("dropzone").querySelector(".box").innerHTML =
+      `<b style="color:#ef4444">로드 실패</b><br>${e.message || e}<br><br>
+       <button class="small" onclick="document.getElementById('fi').click()">다시 선택</button>`;
+  }
+  spin(false);
+}
+$("fi").onchange = e => e.target.files[0] && upload(e.target.files[0]);
+["dragover", "drop"].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
+document.addEventListener("drop", e => e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]));
+
+// ── 모드/유틸
+for (const id of ["pan", "del", "open", "exit"]) {
+  $("m-" + id).onclick = () => {
+    mode = id;
+    document.querySelectorAll(".mode").forEach(b => b.classList.remove("on"));
+    $("m-" + id).classList.add("on");
+    cv.style.cursor = id === "pan" ? "grab" : "crosshair";
+  };
+}
+function updateStats() {
+  if (!bounds) return;
+  $("stats").innerHTML =
+    `삭제 <b>${deleted.size}</b>개 · 개구부 <b>${openings.length}</b>개 · Exit <b>${exits.length}</b>개` +
+    (verifyPaths ? `<br>검증 경로 <b>${verifyPaths.length}</b>개` : "");
+}
+function stepDone(n) {
+  for (let i = 1; i <= n; i++) $("st" + i).classList.add("done");
+}
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 3200);
+}
+function spin(on) { $("spin").style.display = on ? "block" : "none"; }
+// 운영 웹(:8900) 맵설정 버튼 경유(?live=1)면 "운영 반영" 기본 ON — 사용자가 끌 수 있음
+if (new URLSearchParams(location.search).get("live") === "1") $("liveChk").checked = true;
+resize();
+</script>
+</body>
+</html>
