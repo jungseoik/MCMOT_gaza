@@ -1,0 +1,14 @@
+[
+  {"cam_id": "sample1",         "rtsp": "rtsp://127.0.0.1:8554/sample1",         "analyze_fps": 5},
+  {"cam_id": "zara01",          "rtsp": "rtsp://127.0.0.1:8554/zara01",          "analyze_fps": 5},
+  {"cam_id": "zara02",          "rtsp": "rtsp://127.0.0.1:8554/zara02",          "analyze_fps": 5},
+  {"cam_id": "eth",             "rtsp": "rtsp://127.0.0.1:8554/eth",             "analyze_fps": 5},
+  {"cam_id": "hotel",           "rtsp": "rtsp://127.0.0.1:8554/hotel",           "analyze_fps": 5},
+  {"cam_id": "students03",      "rtsp": "rtsp://127.0.0.1:8554/students03",      "analyze_fps": 5},
+  {"cam_id": "arxiepiskopi",    "rtsp": "rtsp://127.0.0.1:8554/arxiepiskopi",    "analyze_fps": 5},
+  {"cam_id": "in_out_counting", "rtsp": "rtsp://127.0.0.1:8554/in_out_counting", "analyze_fps": 5},
+  {"cam_id": "inout_sample2",   "rtsp": "rtsp://127.0.0.1:8554/inout_sample2",   "analyze_fps": 5},
+  {"cam_id": "1_v1",            "rtsp": "rtsp://127.0.0.1:8554/1_v1",            "analyze_fps": 5},
+  {"cam_id": "2_v1",            "rtsp": "rtsp://127.0.0.1:8554/2_v1",            "analyze_fps": 5},
+  {"cam_id": "3_v1",            "rtsp": "rtsp://127.0.0.1:8554/3_v1",            "analyze_fps": 5}
+]
