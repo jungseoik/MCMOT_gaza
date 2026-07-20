@@ -141,8 +141,10 @@ pm2 restart macs-system
 pm2 logs macs-system
 ```
 
-환경변수: `SITE_ID`(기본 default) · `SITE_ROOT`(기본 data/sites) · `GPU_DEVICES`(기본 0,1)
-→ 상세: `.env.example` · 실행 옵션: [system/README.md](system/README.md)
+환경변수: `SITE_ID`(기본 default) · `SITE_ROOT`(기본 data/sites) · `GPU_DEVICES` ·
+`INGEST_BACKEND`(기본 ffmpeg / deepstream 전환) → 상세: `.env.example` ·
+DeepStream 인제스트: [system/ingest_ds/README.md](system/ingest_ds/README.md) ·
+실행 옵션: [system/README.md](system/README.md)
 → 사용 가이드(스크린샷): [docs/guide/멀티카메라-시스템/](docs/guide/멀티카메라-시스템/)
 
 > **⚠️ 기존 단일채널 웹 UI(webui/server.py, :8000)와 동시 기동 금지** — 전역 설정 충돌.

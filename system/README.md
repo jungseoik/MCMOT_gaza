@@ -69,7 +69,8 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 | `api/` | `server.py`(실서버) · `mock_server.py`(개발용) | 메인/C |
 | `contracts.py` | FrameItem → TrackedObject → MapState 인터페이스 | 동결 |
 
-테스트: `conda run -n boosttrack python -m pytest tests/system -q` (33개)
+테스트: `conda run -n boosttrack python -m pytest tests/system -q` (72개 —
+spatial 17 · metrics 20 · session 24 · ds_launcher 11)
 
 ## 통합 검증 실측 (2026-07-13, M7 · 2026-07-19 DS 갱신)
 

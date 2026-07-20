@@ -59,8 +59,8 @@
 | `POST /api/site/map` | multipart: `image`(png), 선택 `meta`(cad-convert JSON) | `MapSpec` (meta 있으면 m_per_px 자동) |
 | `GET /api/site/map` | — | image/png (업로드된 맵 이미지, 없으면 404) |
 | `GET /api/cameras` | — | `list[CameraConfig]` + 런타임 상태 병합 `[{...cfg, state: CameraState}]` |
-| `POST /api/cameras` | `{name, rtsp, analyze_fps?}` | `CameraConfig` (cam_id 서버 발급 `cam01..`) |
-| `PUT /api/cameras/{id}` | `CameraConfig` 부분 갱신(enabled 토글 포함) | `CameraConfig` |
+| `POST /api/cameras` | `{name, rtsp, analyze_fps?, min_conf?}` | `CameraConfig` (cam_id 서버 발급 `cam01..`) |
+| `PUT /api/cameras/{id}` | `CameraConfig` 부분 갱신(enabled·min_conf 등). `min_conf`: 0~1이면 그 카메라 오버라이드, `null`이면 사이트값 상속. 범위 밖은 422 | `CameraConfig` |
 | `DELETE /api/cameras/{id}` | — | `{"ok": true}` |
 | `POST /api/cameras/{id}/test` | — | `{ok, width, height, snapshot_b64}` (첫 프레임. **snapshot_b64는 `data:image/jpeg;base64,…` data URL 형식** — v1.1 명문화) |
 | `GET /api/cameras/{id}/snapshot` | — | image/jpeg 1장 (온디맨드, 스트림 아님) |

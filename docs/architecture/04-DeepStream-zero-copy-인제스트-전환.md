@@ -36,8 +36,12 @@ nvurisrcbin ×N → nvstreammux(batch) → RGBA(NVMM)
 
 - 디코드~트래킹까지 컨테이너 안에서 GPU 상주로 처리 — **프레임 픽셀이
   컨테이너 밖으로 나가지 않는다** (ZMQ에는 트랙 메타만).
-- 멀티 GPU는 launcher가 GPU당 워커 1개로 분할(analyze_fps 합 greedy 균등),
+- 멀티 GPU는 launcher가 GPU별로 워커를 분할(analyze_fps 합 greedy 균등),
   호스트 bridge 1개가 통합 수신 — GPU 1/2/N장 동일 코드.
+- `WORKERS_PER_GPU`(기본 1)로 GPU당 워커 프로세스 수를 늘릴 수 있다(P8 구현).
+  단 P9 재실측 결과 5fps 한계(16ch)는 분할과 무관하게 동일하고, 과부하
+  영역(24ch+)에서만 총 처리량 +25~36% — 병목이 GPU가 아니라 프레임당
+  직렬 단가라서다(§6). **운영 기본값은 1 권장.**
 - 기존 코드는 수정 없이 유지 — 스위치를 안 건드리면 100% 기존 동작.
 
 ## 3. 실측 근거

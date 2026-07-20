@@ -22,6 +22,7 @@
 12. **[12-basic-viz-download.md](12-basic-viz-download.md)** — 기본 시각화(다운로드) 모드(ID+박스, H.264, 파일 전용) + 클린 라벨 통일(draw_utils)
 13. **[13-alignment.md](13-alignment.md)** — 방향성 정렬도(이동방향 vs 기준 피난방향 코사인, opt-in, 색 3구간, 맵 기준 벡터·사잇각)
 14. **[14-map-registration.md](14-map-registration.md)** — 지도 정합(CCTV↔지도 N점 호모그래피, 발끝→지도좌표, 축척 km/h, 정렬도·in/out 애드온, G1 충족)
+15. **[15-map-interpolation.md](15-map-interpolation.md)** — 운영뷰 객체 위치 클라이언트 사이드 보간 렌더링(1s SSE 사이 부드러운 이동)
 
 ## 한 줄 요약
 
