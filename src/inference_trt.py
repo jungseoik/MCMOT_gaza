@@ -75,6 +75,11 @@ class TRTEngine:
             self.context.set_tensor_address(name, out.data_ptr())
             outputs.append(out)
 
+        # torch.cuda.Stream()은 non-blocking 스트림 — default 스트림과 암묵 동기화가
+        # 없어, 입력 텐서를 만든 default 스트림 커널이 끝나기 전에 TRT가 읽을 수
+        # 있다(GPU 부하 시 간헐 쓰레기 입력 — system/ingest_ds 운영에서 실측).
+        # 입력 생성 스트림 완료를 명시 대기 후 실행한다.
+        self.stream.wait_stream(torch.cuda.current_stream())
         self.context.execute_async_v3(self.stream.cuda_stream)
         self.stream.synchronize()
         return outputs

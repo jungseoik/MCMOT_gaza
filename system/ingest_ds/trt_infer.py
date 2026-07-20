@@ -62,6 +62,12 @@ class TRTEngine:
             self.context.set_tensor_address(name, out.data_ptr())
             outputs.append(out)
 
+        # torch.cuda.Stream()은 non-blocking 스트림 — default 스트림과 암묵 동기화가
+        # 없다. 입력 텐서를 만드는 커널(torch.stack·letterbox·ReID crop)은 전부
+        # default 스트림에 쌓이므로, 대기 없이 실행하면 GPU 부하 시 TRT가 복사
+        # 미완료 메모리를 읽어 배치 전체가 쓰레기 검출(수천 개)로 깨진다
+        # (운영 3ch 라이브에서 프레임 ~10% 상시 재현·수정으로 소멸 — 2026-07-20).
+        self.stream.wait_stream(torch.cuda.current_stream())
         self.context.execute_async_v3(self.stream.cuda_stream)
         self.stream.synchronize()
         return outputs
