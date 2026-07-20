@@ -1,0 +1,13 @@
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b16.engine b1 median=5.92847ms mean=6.0044ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b16.engine b8 median=35.8086ms mean=35.8469ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b16.engine b16 median=75.9897ms mean=76.0908ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o16.engine b1 median=6.18616ms mean=6.25044ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o16.engine b8 median=38.0704ms mean=38.1045ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o16.engine b16 median=79.2329ms mean=79.2061ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o16.engine b24 median=121.238ms mean=121.202ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o16.engine b32 median=163.788ms mean=163.783ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o32.engine b1 median=6.42969ms mean=6.50953ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o32.engine b8 median=37.0448ms mean=37.0291ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o32.engine b16 median=77.4592ms mean=77.4819ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o32.engine b24 median=116.73ms mean=116.727ms
+PROFILE external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o32.engine b32 median=156.711ms mean=156.699ms

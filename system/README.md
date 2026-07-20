@@ -46,7 +46,7 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
 | 값 | 경로 | 한계 실측 | 비고 |
 |----|------|-----------|------|
 | `ffmpeg` (기본) | 카메라별 ffmpeg-NVDEC → FrameQueue → 호스트 직렬 TRT | **4ch@5fps** (총 ~21fps 포화) | 기존 경로 — 미지정 시 100% 기존 동작 |
-| `deepstream` | GPU별 DS 워커 컨테이너(zero-copy 배치 추론·트래킹) → ZMQ 브리지 | **16ch@5fps/GPU** (총 78.7fps) | 선행조건·워커 실행법: [ingest_ds/README.md](ingest_ds/README.md) |
+| `deepstream` | GPU별 DS 워커 컨테이너(zero-copy 배치 추론·트래킹) → ZMQ 브리지 | **16ch@5fps/GPU** (총 78.7fps, 20ch부터 5fps 붕괴 · ~54ch에서 1fps) | 선행조건·워커 실행법: [ingest_ds/README.md](ingest_ds/README.md) |
 
 ```bash
 INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
@@ -76,8 +76,8 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 | 항목 | ffmpeg 경로 (M7) | DeepStream 경로 (P1~P7) |
 |------|------------------|------------------------|
 | e2e 전 구간 | 2ch 실추적: RTSP→NVDEC→TRT→트래커→맵→SSE 동작, 5fps/ch·드랍 0 | 4ch 등록→운영뷰 SSE 동일 스키마, 5fps/ch·드랍 0 (:8902 검증) |
-| 채널당 5fps 한계 | **4ch** (라이브 스윕 — 6ch부터 미달) | **16ch/GPU** (12ch는 드랍 0 여유) |
-| 총 처리량 포화 | ~21fps | **78.7fps** (약 4배, GPU1 단독) |
+| 채널당 5fps 한계 | **4ch** (라이브 스윕 — 6ch부터 미달) | **16ch/GPU** (12ch는 드랍 0 여유 · 20ch부터 붕괴, 워커 분할·b32 엔진으로도 불변 — P9/P11) |
+| 총 처리량 포화 | ~21fps | **78.7fps** (약 4배, GPU1 단독) · 1fps 도달 ~54ch |
 | 평균 추론 | 56.7ms/frame (GPU 공유 조건) | 12.7ms/frame (배치 16 환산) |
 | 출력 동등성 | (기준) | 검출 매칭 99.4%·트랙 98.95% — [유사도 검증](../docs/reports/DeepStream-전환-유사도-검증.md) |
 

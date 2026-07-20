@@ -53,7 +53,8 @@ conda run -n boosttrack python -m system.ingest_ds.bridge --connect tcp://127.0.
 `system/tracking/analyzer.py`의 `OnTracks`와 동일 시그니처.
 호스트 conda 환경에는 `pyzmq`가 필요하다 (`pip install pyzmq`).
 
-worker.py 주요 인자: `--batch-size`(추론 배치 상한, 엔진 max 16) ·
+worker.py 주요 인자: `--batch-size`(추론 배치 상한 — 엔진 프로파일 max로
+자동 클램프) · `--det-engine`(검출 엔진 교체, 기본 b16) ·
 `--gather-ms`(배치 모으기 대기, 기본 100ms) · `--det-thresh`(기본 0.4) ·
 `--codec json|msgpack` · `--copy-mode`(zero-copy 끄고 CPU 복사 강제) ·
 `--duration N`(N초 후 자동 종료, 테스트용).
@@ -96,8 +97,14 @@ conda run -n boosttrack python -m system.ingest_ds.launcher --stop
 - **컨테이너**: `WORKERS_PER_GPU=1`이면 기존과 동일한 `macs-ds-worker-gpu{K}`,
   ≥2면 `macs-ds-worker-gpu{K}-w{j}` (`docker run -d --rm --gpus device=K
   --network host`). 슬롯별 cams JSON은 `configs/runtime/`에 자동 생성.
-- **batch-size**: 미지정 시 슬롯 담당 채널 수 기준 `min(16, N_slot)` —
-  분할하면 워커별 배치가 자연히 작아진다.
+- **batch-size**: 미지정 시 슬롯 담당 채널 수 기준 `min(max_batch, N_slot)` —
+  분할하면 워커별 배치가 자연히 작아진다. `max_batch` 기본 16(b16 엔진)이고
+  `DS_ENGINE_MAX_BATCH` 환경변수로 재정의한다(b32 엔진이면 32). 워커가
+  엔진 프로파일에서 실제 max를 읽어 재클램프하므로 과대 지정해도 안전하다.
+- **엔진 교체**: `DS_DET_ENGINE` 환경변수(레포 상대 경로)로 server.py 수정 없이
+  검출 엔진을 바꾼다. 예: b32 엔진 운영은
+  `DS_ENGINE_MAX_BATCH=32 DS_DET_ENGINE=external/weights/trt_ds/yolox_mot20_fp16_dyn_b32.engine`.
+  명시 `worker_args`에 `--det-engine`이 있으면 그쪽이 우선.
 - **`DsIngestManager`**: 기존 `IngestManager`+`AnalyzerThread` 조합과 동일한
   외부 인터페이스(`start(cams)/stop()/states()/add·remove·update_camera/
   set_enabled` + `on_tracks(cam_id, ts, tracks)` 콜백) — server.py에서
@@ -114,18 +121,43 @@ conda run -n boosttrack python -m system.ingest_ds.launcher --stop
   `disconnected`(컨테이너 사망) / `disabled`. 워커 내부 큐 드랍은 컨테이너
   로그(`docker logs macs-ds-worker-gpuK[-wj]`)의 STATS로 관찰.
 
-## 엔진 빌드 (컨테이너 안에서 — TRT 버전 일치 필수)
+## 엔진 빌드 가이드 (컨테이너 안에서 — TRT 버전 일치 필수)
 
-컨테이너 TRT는 **10.14.1**, 호스트 conda TRT는 10.16.1 —
-`external/weights/trt/*.engine`(호스트 빌드)은 컨테이너에서 재사용 불가라
-`external/weights/trt_ds/`에 컨테이너 trtexec로 따로 빌드한다 (`*.engine`은
-`.gitignore`로 커밋 제외).
+다른 서버에 이 레포를 clone한 상태에서 이 절만 보고 전 과정을 재현할 수 있도록
+쓴다. 엔진 바이너리(`*.engine`)는 `.gitignore`로 커밋 제외라 **서버마다
+반드시 새로 빌드**해야 한다.
+
+### 0. 왜 어디서 빌드하는가 — 두 가지 결합
+
+TRT 엔진은 빌드 환경에 **이중으로 결합**된다. 어느 한쪽이 바뀌면 재빌드다.
+
+| 결합 | 내용 | 재빌드 트리거 |
+|------|------|--------------|
+| **TRT 버전** | 엔진은 빌드한 TRT 메이저·마이너 버전에서만 로드된다. 컨테이너(`macs-deepstream:9.0`)는 TRT **10.14.1**, 호스트 conda(boosttrack)는 10.16.1 — 서로 호환 불가. 그래서 호스트 빌드 엔진(`external/weights/trt/`)과 별개로 `external/weights/trt_ds/`에 **컨테이너 trtexec로** 빌드한다 | DS 이미지 업그레이드(pip `tensorrt-cu13` 버전 변경 포함) |
+| **GPU 아키텍처** | trtexec는 빌드 시점 GPU의 SM 아키텍처(cc)로 커널을 선택·컴파일한다. 이 레포 실측 엔진은 RTX PRO 6000 Blackwell(sm_120) 기준 — 다른 아키텍처(GPU 세대가 다른 서버)에서는 로드가 거부되거나 성능이 다르다 | 다른 GPU 모델의 서버로 이식 |
+
+같은 서버의 같은 모델 GPU(예: GPU0/GPU1 동일 카드)면 한 번 빌드한 엔진을
+공유해도 된다. **빌드는 반드시 워커가 돌 GPU와 같은 모델의 GPU에서**,
+가능하면 다른 작업이 없는 시점에 한다(빌더가 커널 후보를 실측 타이밍으로
+고르므로 경합은 차선 커널 선택 위험).
+
+### 1. dynamic-batch ONNX 수출 (호스트 conda — 최초 1회)
+
+산출물 `external/weights/trt/yolox_mot20_dynamic.onnx`(배치 축 dynamic)가
+이미 있으면 생략. 가중치 `external/weights/bytetrack_x_mot20.tar` 필요.
 
 ```bash
-# dynamic-batch YOLOX ONNX 수출 (호스트 conda — 최초 1회, 산출물이 이미 있으면 생략)
-CUDA_VISIBLE_DEVICES=1 conda run -n boosttrack python docs/reports/bench/build_dynamic_yolox.py  # ONNX만 필요
+# ONNX 수출 + (부수적으로) 호스트 TRT 엔진도 빌드된다 — 컨테이너용으로는 ONNX만 쓴다
+CUDA_VISIBLE_DEVICES=1 conda run -n boosttrack python docs/reports/bench/build_dynamic_yolox.py
+```
 
-# 컨테이너에서 trtexec fp16 빌드
+ReID ONNX(`external/weights/trt/fastreid_sbs_s50.onnx`)는 `src/build_trt.py`
+경로에서 생성된다(단일영상 PoC 셋업 시 이미 존재하는 것이 보통).
+
+### 2. 컨테이너 trtexec 빌드 (복붙 커맨드)
+
+```bash
+# 기본 세트: YOLOX b16 + ReID b256 (레포 루트에서)
 docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace macs-deepstream:9.0 bash -c '
 /usr/src/tensorrt/bin/trtexec --onnx=external/weights/trt/yolox_mot20_dynamic.onnx \
   --saveEngine=external/weights/trt_ds/yolox_mot20_fp16_dyn_b16.engine --fp16 \
@@ -135,6 +167,80 @@ docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace macs-deepstre
   --saveEngine=external/weights/trt_ds/fastreid_sbs_s50_fp16_dyn_b256.engine --fp16 \
   --minShapes=images:1x3x384x128 --optShapes=images:32x3x384x128 --maxShapes=images:256x3x384x128 \
   --memPoolSize=workspace:4096M'
+
+# 고채널용 YOLOX b32 (P11 — opt/max 두 변형 빌드 후 비교, 자세한 근거는 §3)
+docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace \
+    macs-deepstream:9.0 bash docs/reports/bench/build_b32_engines.sh
+# 대표본(opt32)을 표준 파일명으로:
+cp external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o32.engine \
+   external/weights/trt_ds/yolox_mot20_fp16_dyn_b32.engine
+```
+
+빌드 시간은 GPU당 약 1.5분/엔진(Blackwell 실측 86초). 로그는
+`docs/reports/bench/trtexec_build_b32o*.log`로 남는다.
+
+### 3. 배치 지연 프로파일 — opt 선택 근거 (P11 실측)
+
+b32는 `--optShapes`를 16으로 줄지 32로 줄지 두 변형을 빌드해
+`docs/reports/bench/profile_engine_batches.sh`(trtexec `--loadEngine
+--shapes` GPU Compute Time median, 10초/점)로 비교했다:
+
+```bash
+docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace \
+    macs-deepstream:9.0 bash docs/reports/bench/profile_engine_batches.sh
+```
+
+| 배치 | b16 (opt8) | b32 opt16 | b32 opt32 | opt32 프레임 단가 |
+|---:|---:|---:|---:|---:|
+| 1 | 5.93 ms | **6.19 ms** | 6.43 ms | 6.43 ms |
+| 8 | 35.8 ms | 38.1 ms | **37.0 ms** | 4.63 ms |
+| 16 | 76.0 ms | 79.2 ms | **77.5 ms** | 4.84 ms |
+| 24 | — | 121.2 ms | **116.7 ms** | 4.86 ms |
+| 32 | — | 163.8 ms | **156.7 ms** | 4.90 ms |
+
+- **opt32 채택** — 운영 배치 구간(8~32)에서 opt16보다 1~4% 빠르고
+  opt16이 이기는 곳은 b1(+0.24ms)뿐이다. 고채널용 엔진은 큰 배치가 주력이므로
+  opt32. 원자료(GPU1 전유):
+  [results_engine_batch_profile.txt](../../docs/reports/bench/results_engine_batch_profile.txt) ·
+  경합 조건(타 작업 SM 17~54%) 참고본:
+  [results_engine_batch_profile_contended.txt](../../docs/reports/bench/results_engine_batch_profile_contended.txt)
+  (절대치 ~30% 부풀지만 순위는 대체로 동일).
+- 순수 커널 시간은 배치에 거의 **선형**(~4.6~4.9ms/frame — 상각할 배치
+  고정비가 없다)이다. e2e 재스윕 결과 **b32는 처리량 이득이 없어 운영
+  채택하지 않았다**(5fps 한계 16ch 불변, 프레임 단가는 배치와 함께 증가) —
+  워커 `--det-engine` 기본값은 b16 그대로다. 엔진·스크립트는 후속 실험
+  재현용으로 남긴다. 실측 근거:
+  [DeepStream-한계처리량-실측 §9](../../docs/reports/DeepStream-한계처리량-실측.md).
+
+### 4. 엔진 파일명 규칙
+
+```
+<모델>_<정밀도>_dyn_b<max배치>[o<opt배치>].engine
+yolox_mot20_fp16_dyn_b16.engine      # min1/opt8/max16   — 기본 (워커 디폴트, 운영 채택본)
+yolox_mot20_fp16_dyn_b32.engine      # min1/opt32/max32  — b32 실험 대표본(=b32o32 복사, 운영 미채택)
+yolox_mot20_fp16_dyn_b32o16.engine   # min1/opt16/max32  — opt 비교 실험용 (운영 미사용)
+fastreid_sbs_s50_fp16_dyn_b256.engine # min1/opt32/max256 — ReID crop 배치
+```
+
+`o<opt>` 접미사 없는 파일은 opt=max(b16만 예외 — opt8, 역사적 이유).
+워커는 엔진 프로파일에서 max를 직접 읽으므로 파일명은 사람 식별용이다.
+
+### 5. 빌드 후 검증
+
+```bash
+# (1) 스모크 — 4ch 워커에 새 엔진 + 과대 batch-size: 클램프 로그와 5fps 확인
+docker run -d --rm --name macs-ds-smoke --network host --gpus device=1 \
+    -v "$PWD:/workspace" -w /workspace -e PYTHONUNBUFFERED=1 macs-deepstream:9.0 \
+    python3 -m system.ingest_ds.worker --cams system/ingest_ds/configs/cams_4ch.json \
+    --det-engine external/weights/trt_ds/yolox_mot20_fp16_dyn_b32.engine \
+    --batch-size 64 --zmq-bind 'tcp://*:5799' --duration 120
+docker logs -f macs-ds-smoke   # 기대: "batch-size 64 → 엔진 프로파일 max 32로 클램프",
+                               #       STATS fps={... 5.0} qdrop=0 gpumap=on
+
+# (2) 한계 스윕 재현 (GPU 전유 + mediamtx 12본 송출 전제 — rtsp-stream 스킬 참조)
+conda run -n boosttrack python docs/reports/bench/bench_ds_limit.py \
+    --tag gpu1_b32 --gpu 1 --channels 16,20,24,28,32,40,48,64 --secs 60 --warmup 30 \
+    --engine external/weights/trt_ds/yolox_mot20_fp16_dyn_b32.engine --max-batch 32
 ```
 
 ## 제약·주의

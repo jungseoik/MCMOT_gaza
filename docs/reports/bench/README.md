@@ -31,7 +31,9 @@ python -m src.build_trt --fp16       # external/weights/trt/*.engine 생성(최�
 | `bench_mps.py` | 단일 GPU 멀티채널 fps (MPS off/on 비교용) | `results_mps_{tag}.json` | 3.H |
 | `bench_yolox_batch150.py` | 실제 검출기(YOLOX-X 896×1600 TRT FP16)의 배치 1~32 지연/VRAM | `results_yolox_batch150.json` | (배치 곡선 참고) |
 | `bench_e2e_limit.py` | 라이브 RTSP → 기존 ingest+분석 e2e 한계 스윕 (ffmpeg 베이스라인) | `results_e2e_limit_ffmpeg_gpu1.json` | [DeepStream-한계처리량-실측](../DeepStream-한계처리량-실측.md) §4 |
-| `bench_ds_limit.py` | 라이브 RTSP → **DS 워커** 경로 한계 스윕 12~64ch (launcher/worker 재사용) | `results_ds_limit_gpu1.json` | [DeepStream-한계처리량-실측](../DeepStream-한계처리량-실측.md) |
+| `bench_ds_limit.py` | 라이브 RTSP → **DS 워커** 경로 한계 스윕 12~96ch (launcher/worker 재사용, `--engine`/`--max-batch`로 b32 재스윕) | `results_ds_limit_gpu1*.json` | [DeepStream-한계처리량-실측](../DeepStream-한계처리량-실측.md) |
+| `build_b32_engines.sh` | 컨테이너 trtexec로 YOLOX b32 dynamic 엔진 2변형(opt16/opt32) 빌드 | `trtexec_build_b32o*.log` | [ingest_ds/README §엔진 빌드](../../../system/ingest_ds/README.md) |
+| `profile_engine_batches.sh` | 엔진별 배치 1/8/16/24/32 GPU Compute Time 실측 (opt 선택 근거) | `results_engine_batch_profile.txt` | [DeepStream-한계처리량-실측](../DeepStream-한계처리량-실측.md) §9 |
 | `verify_ds_similarity.py` | 기존 vs DS 경로 프레임별 검출/임베딩/트랙 유사도 검증 | — | [DeepStream-전환-유사도-검증](../DeepStream-전환-유사도-검증.md) |
 
 > `bench_mps.py {tag}`의 `{tag}`가 파일명에 그대로 들어간다. 커밋된 원자료는

@@ -98,3 +98,22 @@ conda run -n boosttrack python -m system.ingest_ds.launcher --stop
 
 `INGEST_BACKEND` 미지정(=ffmpeg)이면 DS 관련 import 자체가 일어나지 않아
 docker·pyzmq 없는 환경에서도 기존과 동일하게 동작한다.
+
+## 6. 추기 (2026-07-20, P11) — b32 dynamic 엔진 검토: 기각
+
+1GPU 한계(16ch@5fps) 돌파 후보로 b32 dynamic 엔진(min1/opt32/max32)을
+빌드·재스윕했다. **운영 채택하지 않는다 — 검출 엔진 기본값은 b16 유지.**
+
+- **가설**(한계 실측 §7.4): 배치 고정비가 지배(b8≈b16 벽시계)이므로 b32로
+  프레임 단가 절반 → 이론 ~29ch@5fps.
+- **실측 기각**: 순수 커널은 배치에 선형(4.6~4.9ms/장 — 고정비 없음)이고,
+  e2e 프레임 단가는 배치를 키울수록 오히려 증가(12.6ms@b16 → 15.8ms@b32),
+  32ch 총 처리량 74.8 → 63.5fps(−15%). 5fps 한계는 16ch로 불변, 1fps
+  도달점은 ~54ch. 근거·원자료: [DeepStream-한계처리량-실측 §9](../reports/DeepStream-한계처리량-실측.md).
+- **병목 최종 진단**: GPU 커널이 아니라 **프레임당 직렬 단가 ~12.6ms**
+  (검출 커널 4.9 + 트래킹 CPU·ReID·동기화 ~7.7). 다음 레버는 트래킹 CPU
+  절감·검출 해상도 축소·콜백 경량화·양자화 순.
+- **남는 것**: 배치 상한 인자화(워커가 엔진 프로파일에서 자동 클램프,
+  `DS_ENGINE_MAX_BATCH`·`DS_DET_ENGINE` 환경변수), b32 엔진 빌드 스크립트와
+  배치 프로파일 도구 — 후속 실험 재현용
+  ([system/ingest_ds/README §엔진 빌드 가이드](../../system/ingest_ds/README.md)).
