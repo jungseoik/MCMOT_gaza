@@ -233,6 +233,10 @@
         <div class="toolbar" id="mapToolbar2">
           <span class="fieldlab" id="selCamLabel">카메라를 선택하세요</span>
           <span class="vsep"></span>
+          <span class="fieldlab" id="minConfWrap" style="display:none" title="이 카메라의 최소 검출 신뢰도. 비우면 사이트 기본값 상속.">검출 신뢰도
+            <input id="camMinConf" type="number" min="0" max="1" step="0.05" style="width:64px" placeholder="기본 0.5" />
+            <button class="tag-btn" id="camMinConfSave">적용</button></span>
+          <span class="vsep" id="minConfSep" style="display:none"></span>
           <div class="seg" id="camTools">
             <button class="tag-btn on" data-mode="pair">대응점 (4+쌍)</button>
             <button class="tag-btn" data-mode="roi">유효 ROI</button>

@@ -16,6 +16,12 @@ Views.cams = (() => {
 
   const pairColor = (i) => `hsl(${(i * 47) % 360},80%,60%)`;
 
+  // 사이트 전역 min_conf (카메라가 오버라이드 안 하면 이 값 상속). 기본 0.5.
+  function siteMinConf() {
+    const t = App.site && App.site.thresholds;
+    return (t && t.min_conf != null) ? t.min_conf : 0.5;
+  }
+
   // H 행렬 적용 (9원소 row-major, 카메라→맵)
   function applyH(H9, x, y) {
     const w = H9[6]*x + H9[7]*y + H9[8];
@@ -77,6 +83,7 @@ Views.cams = (() => {
           <span class="nm">${c.name || c.cam_id}</span>
           ${c.mapping ? badge("ok", "매핑 ✓") : badge("warn", "매핑 필요")}
           ${c.enabled ? badge("cy", "활성") : badge("", "비활성")}
+          ${c.min_conf != null ? badge("", "conf " + c.min_conf) : ""}
           <button class="del" title="삭제">🗑</button></div>
         <div class="r2"><span>${c.cam_id}</span><span class="rtsp">${c.rtsp}</span>
           <label style="cursor:pointer"><input type="checkbox" ${c.enabled ? "checked" : ""} /> 활성</label></div>`;
@@ -133,6 +140,14 @@ Views.cams = (() => {
     renderList();
     if (!cam) { renderSel(); return; }
     $("selCamLabel").textContent = `${cam.name || cam.cam_id} (${cam.cam_id})`;
+    // min_conf 입력 복원 — 값 있으면 표시, 없으면 비워두고 placeholder에 사이트 기본값
+    const mcInp = $("camMinConf");
+    if (mcInp) {
+      mcInp.value = cam.min_conf != null ? cam.min_conf : "";
+      mcInp.placeholder = `기본 ${siteMinConf()}`;
+      $("minConfWrap").style.display = "";
+      $("minConfSep").style.display = "";
+    }
     // 기존 매핑 복원
     cctvPts = cam.mapping ? cam.mapping.cctv_pts.map((p) => p.slice()) : [];
     mapPts = cam.mapping ? cam.mapping.map_pts.map((p) => p.slice()) : [];
@@ -246,6 +261,29 @@ Views.cams = (() => {
     } catch (e) { hint("저장 실패: " + e.message, true); }
   }
 
+  // min_conf 저장 — 값 있으면 오버라이드, 비우면 null(사이트값 상속). 0~1 검증.
+  async function saveMinConf() {
+    if (!sel) return;
+    const raw = $("camMinConf").value.trim();
+    let val = null;
+    if (raw !== "") {
+      val = Number(raw);
+      if (!isFinite(val) || val < 0 || val > 1) {
+        hint("검출 신뢰도는 0~1 사이 값이거나 비워야 합니다 (비우면 사이트 기본값 상속).", true);
+        return;
+      }
+    }
+    try {
+      hint("검출 신뢰도 저장 중…");
+      await API.updateCamera(sel, { min_conf: val });
+      await App.reloadCameras();
+      renderList();
+      hint(val == null
+        ? `검출 신뢰도: 사이트 기본값(${siteMinConf()}) 상속으로 설정됨.`
+        : `검출 신뢰도 오버라이드 저장됨 — ${val}.`);
+    } catch (e) { hint("검출 신뢰도 저장 실패: " + e.message, true); }
+  }
+
   // ------------------------------------------------------------ overlays
   function drawCrosshair(g, px, py, col, label) {
     const { ctx, TX, TY } = g;
@@ -343,6 +381,8 @@ Views.cams = (() => {
     $("pairUndo").onclick = undo;
     $("pairClear").onclick = clearAll;
     $("mappingSave").onclick = saveMapping;
+    $("camMinConfSave").onclick = saveMinConf;
+    $("camMinConf").addEventListener("keydown", (e) => { if (e.key === "Enter") saveMinConf(); });
     $("hullRoi").onclick = () => {
       if (cctvPts.length < 3) { hint("대응점 3개 이상 필요합니다.", true); return; }
       roi = convexHull(cctvPts);
