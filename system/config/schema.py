@@ -162,3 +162,7 @@ class CameraConfig(BaseModel):
     analyze_fps: float = Field(default=5.0, gt=0, le=30)
     mapping: CameraMapping | None = None   # 없으면 맵 투영 불가 → 처리 제외
     valid_roi: list[Point] | None = None   # 카메라 px 유효영역 (없으면 전체)
+    min_conf: float | None = Field(default=None, ge=0, le=1)  # 카메라별 최소 검출
+                                           # 신뢰도 오버라이드. None이면 사이트
+                                           # Thresholds.min_conf 상속, 값 지정 시
+                                           # 그 카메라만 오버라이드 (하위호환 기본 None).

@@ -128,6 +128,10 @@ class MetricsEngine:
                 cam.cam_id: CameraProjector(cam, map_w, map_h)
                 for cam in cameras if cam.mapping is not None
             }
+            # 카메라별 min_conf 오버라이드 (raw) — None이면 사이트값 상속.
+            # 매 프레임 dict lookup, fallback은 on_tracks에서 site.thresholds로.
+            # reload마다 갱신되므로 site.thresholds.min_conf 변경도 즉시 반영.
+            self._cam_min_conf = {cam.cam_id: cam.min_conf for cam in cameras}
 
             # 구역/병목 — polygon + 면적(m²)은 설정 시점에 1회 계산
             self._zones = [
@@ -179,7 +183,12 @@ class MetricsEngine:
                 return
             if sess is not None:
                 sess.cams_seen.add(cam_id)
-            min_conf = self._site.thresholds.min_conf
+            # 카메라별 오버라이드 우선, 없으면(None) 사이트 임계값 상속.
+            # 필터는 호스트 엔진에서만 적용 — DS 워커는 conf 계산만 하고
+            # launcher는 min_conf를 워커로 보내지 않는다 (경로 무관).
+            cam_override = self._cam_min_conf.get(cam_id)
+            min_conf = (cam_override if cam_override is not None
+                        else self._site.thresholds.min_conf)
             for tr in tracks:
                 if tr.conf < min_conf:           # 저신뢰 관측 — 오탐 연명 트랙 차단
                     continue                     # (BYTE 저신뢰 연관 유령 객체 방지)

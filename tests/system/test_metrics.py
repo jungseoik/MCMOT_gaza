@@ -283,3 +283,54 @@ def test_min_conf_filters_low_confidence_tracks():
     eng.on_tracks("c1", 1.0, [mk(1, 0.9), mk(2, 0.27)])   # 사람 vs 의자 오탐
     gids = {o.gid for o in eng.snapshot().objects}
     assert "c1:1" in gids and "c1:2" not in gids
+
+
+def _mk_site_cam(cam_min_conf, site_min_conf=0.5):
+    """min_conf 오버라이드 테스트용 site + cam 1대 (항등 호모그래피)."""
+    from system.config.schema import (CameraConfig, CameraMapping, MapSpec,
+                                      SiteConfig, Thresholds)
+    pts = [(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0), (0.0, 1000.0)]
+    site = SiteConfig(site_id="t",
+                      map=MapSpec(image="m.png", w=1000, h=1000, m_per_px=0.01),
+                      thresholds=Thresholds(min_conf=site_min_conf))
+    cam = CameraConfig(cam_id="c1", rtsp="rtsp://x", min_conf=cam_min_conf,
+                       mapping=CameraMapping(cctv_pts=pts, map_pts=pts,
+                                             H=[1, 0, 0, 0, 1, 0, 0, 0, 1]))
+    return site, cam
+
+
+def _obs(eng, *confs):
+    """conf 리스트를 한 프레임으로 관측 → 통과한 gid 집합 반환."""
+    from system.contracts import TrackedObject
+    tracks = [TrackedObject(cam_id="c1", local_track_id=i, foot_uv=(500, 500),
+                            bbox_xyxy=(490, 460, 510, 500), conf=c, ts=1.0)
+              for i, c in enumerate(confs)]
+    eng.on_tracks("c1", 1.0, tracks)
+    return {o.gid for o in eng.snapshot().objects}
+
+
+def test_min_conf_camera_override_higher():
+    """(a) cam min_conf=0.65 오버라이드 → conf 0.6 제외, 0.7 통과 (사이트 0.5 무시)."""
+    from system.metrics import MetricsEngine
+    site, cam = _mk_site_cam(cam_min_conf=0.65, site_min_conf=0.5)
+    eng = MetricsEngine(site, [cam])
+    gids = _obs(eng, 0.6, 0.7)   # 0.6 < 0.65 제외, 0.7 >= 0.65 통과
+    assert "c1:0" not in gids and "c1:1" in gids
+
+
+def test_min_conf_none_inherits_site():
+    """(b) cam min_conf=None → 사이트값(0.5) 적용: 0.4 제외, 0.6 통과."""
+    from system.metrics import MetricsEngine
+    site, cam = _mk_site_cam(cam_min_conf=None, site_min_conf=0.5)
+    eng = MetricsEngine(site, [cam])
+    gids = _obs(eng, 0.4, 0.6)
+    assert "c1:0" not in gids and "c1:1" in gids
+
+
+def test_min_conf_camera_override_lower():
+    """(c) cam min_conf=0.2 로 낮게 오버라이드 → 사이트 0.5면 걸릴 0.3이 통과."""
+    from system.metrics import MetricsEngine
+    site, cam = _mk_site_cam(cam_min_conf=0.2, site_min_conf=0.5)
+    eng = MetricsEngine(site, [cam])
+    gids = _obs(eng, 0.1, 0.3)   # 0.1 < 0.2 제외, 0.3 >= 0.2 통과 (사이트였다면 제외)
+    assert "c1:0" not in gids and "c1:1" in gids

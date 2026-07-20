@@ -233,7 +233,8 @@ def list_cameras():
 async def add_camera(request: Request):
     body = await request.json()
     cfg = CameraConfig(cam_id=rt.next_cam_id(), name=body.get("name", ""),
-                       rtsp=body["rtsp"], analyze_fps=body.get("analyze_fps", 5.0))
+                       rtsp=body["rtsp"], analyze_fps=body.get("analyze_fps", 5.0),
+                       min_conf=body.get("min_conf"))  # None이면 사이트값 상속
     rt.store.save_camera(SITE_ID, cfg)
     rt.ingest.add_camera(cfg)
     if rt.analyzer is not None:
