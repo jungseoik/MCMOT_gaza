@@ -322,21 +322,27 @@ Views.cams = (() => {
   }
 
   function camOverlay(g) {
-    const { ctx, TX, TY } = g;
-    // 실제 탐지 영역을 백엔드 projector 규칙과 동일하게 하나만 표시:
-    //   valid_roi 지정 시 그 다각형(점 순서 그대로, 오목 가능),
-    //   미지정 시 대응점 볼록껍질(그게 실제 탐지 영역이므로).
-    // ROI 편집 모드에선 편집 중인 roi에 꼭짓점 번호도 함께 표시.
-    const area = roi.length >= 3 ? roi
-               : (mode !== "roi" && cctvPts.length >= 3 ? convexHull(cctvPts) : null);
-    if (area) {
-      mcPath(g, area, true);
-      ctx.fillStyle = "rgba(48,220,251,.11)"; ctx.fill();
-      ctx.strokeStyle = MC_COLORS.roi; ctx.lineWidth = mode === "roi" ? 2 : 1.5;
-      ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
-      if (mode === "roi") mcNumbered(g, roi, MC_COLORS.roi);
+    const { ctx } = g;
+    // 각 모드는 자기 데이터만 표시 — 점과 영역이 항상 같은 좌표라 어긋나지 않게.
+    if (mode === "roi") {
+      // 유효 ROI 편집 — 탐지영역(점 순서 그대로, 오목 가능)만.
+      if (roi.length) {
+        mcPath(g, roi, true);
+        ctx.fillStyle = "rgba(48,220,251,.12)"; ctx.fill();
+        ctx.strokeStyle = MC_COLORS.roi; ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+        mcNumbered(g, roi, MC_COLORS.roi);
+      }
+    } else {
+      // 대응점 편집 — 대응점의 커버리지(볼록껍질, 참고용)만. valid_roi는 안 겹침.
+      if (cctvPts.length >= 3) {
+        mcPath(g, convexHull(cctvPts), true);
+        ctx.fillStyle = "rgba(255,200,0,.07)"; ctx.fill();
+        ctx.strokeStyle = "rgba(255,200,0,.6)"; ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+      }
+      mcNumbered(g, cctvPts, null, pairColor);
     }
-    mcNumbered(g, cctvPts, null, pairColor);
     // hover crosshair: 맵에서 마우스 올렸을 때 역투영 위치 표시
     if (hoverMap) {
       const H9 = getCamH();
