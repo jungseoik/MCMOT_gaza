@@ -335,12 +335,13 @@ Views.cams = (() => {
       ctx.stroke(); ctx.setLineDash([]);
       ctx.restore();
     }
-    if (roi.length) {
+    // valid_roi는 "유효 ROI" 모드에서만 표시 — 대응점 모드에선 매핑 점만 보이게.
+    if (mode === "roi" && roi.length) {
       mcPath(g, roi, true);
       ctx.fillStyle = "rgba(48,220,251,.12)"; ctx.fill();
       ctx.strokeStyle = MC_COLORS.roi; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
       ctx.stroke(); ctx.setLineDash([]);
-      if (mode === "roi") mcNumbered(g, roi, MC_COLORS.roi);
+      mcNumbered(g, roi, MC_COLORS.roi);
     }
     mcNumbered(g, cctvPts, null, pairColor);
     // hover crosshair: 맵에서 마우스 올렸을 때 역투영 위치 표시
