@@ -147,6 +147,13 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .badge.cy{ color:var(--pia-cyan); border-color:var(--pia-cyan); }
 .camrow .del{ background:none;border:0;color:var(--text-3);cursor:pointer; }
 .camrow .del:hover{ color:var(--pia-coral); }
+.camrow .r3{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-3); margin-top:5px; }
+.camrow .r3 .cflab{ white-space:nowrap; }
+.camrow .r3 .cfin{ width:58px; height:24px; background:var(--bg-3); color:var(--text-1);
+  border:1px solid var(--stroke-2); border-radius:var(--r-sm); text-align:center; font-size:11px; }
+.camrow .r3 .cfap{ padding:2px 8px; font-size:11px; }
+.camrow .r3 .cfst{ margin-left:auto; font-size:10px; color:var(--text-3); white-space:nowrap; }
+.sidehead .hdr-def{ float:right; font-weight:500; font-size:11px; color:var(--text-3); }
 .side input[type=text]{ width:100%; height:30px; background:var(--bg-3); color:var(--text-1);
   border:1px solid var(--stroke-3); border-radius:var(--r-sm); padding:0 8px; font-size:12px; margin-bottom:6px; }
 .conn{ font-size:11px; color:var(--text-3); font-weight:400; }

@@ -72,22 +72,39 @@ Views.cams = (() => {
   function renderList() {
     const box = $("camList");
     box.innerHTML = "";
+    // 목록 헤더에 사이트 전역 기본 conf 표시 (상속 기준값)
+    const hdr = $("camListDefConf");
+    if (hdr) hdr.textContent = `기본 conf ${siteMinConf()}`;
     if (!App.cameras.length) {
       box.innerHTML = `<div class="grow">등록된 카메라가 없습니다. 아래에서 추가하세요.</div>`;
     }
+    const def = siteMinConf();
     App.cameras.forEach((c) => {
       const div = document.createElement("div");
       div.className = "camrow" + (c.cam_id === sel ? " sel" : "");
+      const overridden = c.min_conf != null;
+      const effVal = overridden ? c.min_conf : def;   // 입력창에 실효값을 채워둠(A안)
       div.innerHTML = `
         <div class="r1"><span class="dotc" style="background:${camColor(c.cam_id, App.cameras)}"></span>
           <span class="nm">${c.name || c.cam_id}</span>
           ${c.mapping ? badge("ok", "매핑 ✓") : badge("warn", "매핑 필요")}
           ${c.enabled ? badge("cy", "활성") : badge("", "비활성")}
-          ${c.min_conf != null ? badge("", "conf " + c.min_conf) : ""}
           <button class="del" title="삭제">🗑</button></div>
         <div class="r2"><span>${c.cam_id}</span><span class="rtsp">${c.rtsp}</span>
-          <label style="cursor:pointer"><input type="checkbox" ${c.enabled ? "checked" : ""} /> 활성</label></div>`;
-      div.onclick = (e) => { if (e.target.tagName !== "INPUT" && !e.target.classList.contains("del")) select(c.cam_id); };
+          <label style="cursor:pointer"><input type="checkbox" class="en" ${c.enabled ? "checked" : ""} /> 활성</label></div>
+        <div class="r3">
+          <span class="cflab" title="이 카메라의 최소 검출 신뢰도. 값을 지우고 적용하면 기본값(${def}) 상속.">검출 신뢰도</span>
+          <input type="number" class="cfin" min="0" max="1" step="0.05" value="${effVal}" placeholder="기본 ${def}" />
+          <button class="tag-btn cfap" title="이 카메라에 적용">적용</button>
+          <span class="cfst">${overridden ? "오버라이드" : "기본값 상속"}</span>
+        </div>`;
+      // 행 선택 (입력/버튼 클릭은 제외)
+      div.onclick = (e) => {
+        const t = e.target;
+        if (t.tagName === "INPUT" || t.tagName === "BUTTON" ||
+            t.classList.contains("cflab") || t.classList.contains("cfst")) return;
+        select(c.cam_id);
+      };
       div.querySelector(".del").onclick = async (e) => {
         e.stopPropagation();
         if (!confirm(`${c.name || c.cam_id} 카메라를 삭제할까요?`)) return;
@@ -97,14 +114,44 @@ Views.cams = (() => {
           await App.reloadCameras(); renderList(); renderSel();
         } catch (err) { alert("삭제 실패: " + err.message); }
       };
-      div.querySelector("input[type=checkbox]").onchange = async (e) => {
+      div.querySelector("input.en").onchange = async (e) => {
         try {
           await API.updateCamera(c.cam_id, { enabled: e.target.checked });
           await App.reloadCameras(); renderList();
         } catch (err) { alert("변경 실패: " + err.message); }
       };
+      // conf 인라인 적용 — 값 있으면 오버라이드, 비우면 null(상속). 0~1 검증.
+      div.querySelector(".cfap").onclick = (e) => {
+        e.stopPropagation();
+        applyMinConf(c.cam_id, div.querySelector(".cfin"));
+      };
+      div.querySelector(".cfin").onkeydown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); applyMinConf(c.cam_id, e.target); }
+      };
       box.appendChild(div);
     });
+  }
+
+  // 카메라 행 인라인 conf 적용 (버튼/Enter로만 저장 — 실시간 저장 안 함).
+  async function applyMinConf(camId, inputEl) {
+    const raw = inputEl.value.trim();
+    let val = null;                                    // 비움 = 사이트값 상속
+    if (raw !== "") {
+      val = Number(raw);
+      if (!isFinite(val) || val < 0 || val > 1) {
+        alert("검출 신뢰도는 0~1 사이 값이거나 비워야 합니다 (비우면 기본값 상속).");
+        return;
+      }
+    }
+    inputEl.disabled = true;
+    try {
+      await API.updateCamera(camId, { min_conf: val });
+      await App.reloadCameras();
+      renderList();
+    } catch (err) {
+      alert("검출 신뢰도 저장 실패: " + err.message);
+      inputEl.disabled = false;
+    }
   }
 
   // ------------------------------------------------------------ 추가·테스트
@@ -140,14 +187,7 @@ Views.cams = (() => {
     renderList();
     if (!cam) { renderSel(); return; }
     $("selCamLabel").textContent = `${cam.name || cam.cam_id} (${cam.cam_id})`;
-    // min_conf 입력 복원 — 값 있으면 표시, 없으면 비워두고 placeholder에 사이트 기본값
-    const mcInp = $("camMinConf");
-    if (mcInp) {
-      mcInp.value = cam.min_conf != null ? cam.min_conf : "";
-      mcInp.placeholder = `기본 ${siteMinConf()}`;
-      $("minConfWrap").style.display = "";
-      $("minConfSep").style.display = "";
-    }
+    // min_conf는 카메라 목록 행에서 인라인 편집(renderList) — 여기선 매핑만.
     // 기존 매핑 복원
     cctvPts = cam.mapping ? cam.mapping.cctv_pts.map((p) => p.slice()) : [];
     mapPts = cam.mapping ? cam.mapping.map_pts.map((p) => p.slice()) : [];
@@ -261,29 +301,6 @@ Views.cams = (() => {
     } catch (e) { hint("저장 실패: " + e.message, true); }
   }
 
-  // min_conf 저장 — 값 있으면 오버라이드, 비우면 null(사이트값 상속). 0~1 검증.
-  async function saveMinConf() {
-    if (!sel) return;
-    const raw = $("camMinConf").value.trim();
-    let val = null;
-    if (raw !== "") {
-      val = Number(raw);
-      if (!isFinite(val) || val < 0 || val > 1) {
-        hint("검출 신뢰도는 0~1 사이 값이거나 비워야 합니다 (비우면 사이트 기본값 상속).", true);
-        return;
-      }
-    }
-    try {
-      hint("검출 신뢰도 저장 중…");
-      await API.updateCamera(sel, { min_conf: val });
-      await App.reloadCameras();
-      renderList();
-      hint(val == null
-        ? `검출 신뢰도: 사이트 기본값(${siteMinConf()}) 상속으로 설정됨.`
-        : `검출 신뢰도 오버라이드 저장됨 — ${val}.`);
-    } catch (e) { hint("검출 신뢰도 저장 실패: " + e.message, true); }
-  }
-
   // ------------------------------------------------------------ overlays
   function drawCrosshair(g, px, py, col, label) {
     const { ctx, TX, TY } = g;
@@ -381,8 +398,7 @@ Views.cams = (() => {
     $("pairUndo").onclick = undo;
     $("pairClear").onclick = clearAll;
     $("mappingSave").onclick = saveMapping;
-    $("camMinConfSave").onclick = saveMinConf;
-    $("camMinConf").addEventListener("keydown", (e) => { if (e.key === "Enter") saveMinConf(); });
+    // min_conf는 카메라 목록 행 인라인 편집(renderList의 applyMinConf)으로 이동.
     $("hullRoi").onclick = () => {
       if (cctvPts.length < 3) { hint("대응점 3개 이상 필요합니다.", true); return; }
       roi = convexHull(cctvPts);
