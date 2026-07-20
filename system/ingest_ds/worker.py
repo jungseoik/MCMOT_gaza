@@ -27,6 +27,7 @@ import argparse
 import ctypes
 import json
 import logging
+import os
 import queue
 import signal
 import sys
@@ -34,6 +35,15 @@ import threading
 import time
 import types
 from dataclasses import dataclass
+
+# BLAS 스레드 고정 — numpy import 전에 설정해야 효력이 있다.
+# 트래킹 연관(assoc)의 행렬은 작아 BLAS 병렬 이득이 없고, 미설정 시 컨테이너가
+# nproc(128)개 스핀 스레드 풀을 만들어 워커 분할(P8) 시 프로세스 간 CPU 경합으로
+# 연관 단계가 배치당 수 초까지 붕괴하는 것이 실측됐다(py-spy로 확인).
+# 컨테이너 환경변수로 넘기면 그 값이 우선한다(setdefault).
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
 
 import numpy as np
 
@@ -78,6 +88,8 @@ logger = logging.getLogger("ingest_ds.worker")
 MUX_W, MUX_H = 1920, 1080            # nvstreammux 출력 (모든 소스 스케일 통일)
 INPUT_H, INPUT_W = 896, 1600         # YOLOX 입력 (기존 경로와 동일)
 TRACK_BUFFER_SEC = 2.0               # max_age 시간 환산 (analyzer.py와 동일)
+MAX_TRACKERS_PER_CAM = 500           # 트래커 폭증 회로차단 임계 (_track_one 참조)
+MAX_DETS_PER_FRAME = 1000            # 쓰레기 프레임 판정 임계 (_track_one 참조)
 STATS_INTERVAL_SEC = 5
 
 _PyCapsule_GetPointer = ctypes.pythonapi.PyCapsule_GetPointer
@@ -205,6 +217,7 @@ class DsWorker:
         if self.use_reid:
             self._trt_reid = TRTReID(args.reid_engine)
             self._embedder = DsGpuEmbeddingComputer(self._trt_reid, crop_size=(128, 384))
+        self._warmup_engines()
 
         # --- 트래커 전역 설정 (system/tracking/analyzer.py와 동일) ---
         GeneralSettings.values["dataset"] = "mot20"
@@ -227,6 +240,7 @@ class DsWorker:
         self._st_infer_ms = 0.0
         self._st_zmq_drops = 0
         self._st_gpu_map_fail = 0
+        self._st_max_dets = 0                     # 윈도 내 프레임 최대 검출 수
         self._st_prev: dict | None = None
 
         self._gates: list[_CamGate] = [
@@ -468,6 +482,44 @@ class DsWorker:
             targets=targets_np,                 # 트래커 원출력 (mux px, [x1,y1,x2,y2,id,conf])
             out_xyxy=out_xyxy, out_ids=out_ids, out_conf=out_conf)  # 원본 px 계약 출력
 
+    # ------------------------------------------------------- 엔진 워밍업
+    def _warmup_engines(self) -> None:
+        """실배치 투입 전 더미 추론으로 CUDA JIT·메모리풀·커널 선택을 선점한다.
+
+        같은 GPU에 워커를 여러 개 띄우면(P8 WORKERS_PER_GPU) 콜드 스타트
+        구간(첫 배치들이 수 초씩 걸리는 과도기)이 프로세스 간 경합으로 수 분까지
+        늘어나는 것이 실측됐다 — 파이프라인 기동 전에 배치 시간이 안정될 때까지
+        더미로 돌려 과도기를 여기서 소진한다. (배치 시간 2회 연속 임계 이하면
+        조기 종료 — 정상 환경에서는 수 초면 끝난다.)
+        """
+        t0 = time.perf_counter()
+        stable_ms, stable_need, max_iter = 500.0, 2, 30
+        with torch.no_grad():
+            dummy = torch.zeros((self.batch_size, 3, INPUT_H, INPUT_W),
+                                device="cuda")
+            ok = 0
+            for i in range(max_iter):
+                t = time.perf_counter()
+                self.detector.detect(dummy)
+                ms = (time.perf_counter() - t) * 1000.0
+                ok = ok + 1 if ms < stable_ms else 0
+                if ok >= stable_need:
+                    break
+            del dummy
+            if self.use_reid:
+                crops = torch.zeros((32, 3, 384, 128), device="cuda")
+                for _ in range(3):
+                    self._trt_reid(crops)
+                del crops
+            # 콜백 경로(GPU letterbox)의 보간 커널도 미리 컴파일
+            frame = torch.zeros((1, 3, MUX_H, MUX_W), device="cuda")
+            F.interpolate(frame, size=(INPUT_H, INPUT_W), mode="bilinear",
+                          align_corners=False)
+            del frame
+        torch.cuda.synchronize()
+        logger.info("엔진 워밍업 완료 — %.1fs (마지막 배치 %.0fms, %d회)",
+                    time.perf_counter() - t0, ms, i + 1)
+
     # ------------------------------------------------------- 추론 스레드
     def _infer_loop(self) -> None:
         logger.info("추론 스레드 시작 (batch<=%d, gather=%.0fms)",
@@ -497,10 +549,12 @@ class DsWorker:
                 logger.exception("배치 추론 실패 (%d프레임)", len(items))
                 continue
             infer_ms = (time.perf_counter() - t0) * 1000.0
+            max_dets = max((0 if p is None else int(p.shape[0])) for p in preds)
             with self._st_lock:
                 self._st_batches += 1
                 self._st_batch_frames += len(items)
                 self._st_infer_ms += infer_ms
+                self._st_max_dets = max(self._st_max_dets, max_dets)
         logger.info("추론 스레드 종료")
 
     def _tracker_for(self, cam_id: str) -> BoostTrack:
@@ -532,7 +586,29 @@ class DsWorker:
         return tracker
 
     def _track_one(self, item: _Item, pred) -> None:
+        # 쓰레기 프레임 가드 — RTSP 힉업/디코드 깨짐 프레임은 저신뢰 오검출을
+        # 수천 개(정상 씬 ~수십 개 대비 detmax 5,800~7,600 실측) 쏟아내고,
+        # 신뢰도 부스트가 이를 트랙으로 승격시켜 트래커 폭증(실측 14,394개)
+        # → 연관 O(det×trk) 폭주의 방아쇠가 된다. 물리적으로 불가능한 검출
+        # 수면 트래커를 오염시키지 않고 프레임을 버린다(트래커 상태 불변).
+        if pred is not None and int(pred.shape[0]) > MAX_DETS_PER_FRAME:
+            logger.warning("[%s] 검출 %d개 — 깨진 프레임 판정, 트래킹 생략",
+                           item.cam_id, int(pred.shape[0]))
+            return
+
         tracker = self._tracker_for(item.cam_id)
+
+        # 회로차단기 — 과부하로 프레임 간격이 벌어지면 매칭 실패 → 검출마다 새
+        # 트랙 생성 → 트래커 폭증 → 연관 수식 O(det×trk)이 배치당 수 초 →
+        # 더 큰 드랍 … 의 자기유지 나선에 빠질 수 있다(2워커 실측, py-spy 확인).
+        # 정상 범위(혼잡 씬 수백)를 크게 넘으면 해당 캠 트래커만 리셋해 끊는다.
+        n_trk = len(tracker.trackers)
+        if n_trk > MAX_TRACKERS_PER_CAM:
+            logger.warning("[%s] 트래커 %d개 폭증 — 연관 비용 폭주 차단 위해 "
+                           "트래커 리셋 (로컬 ID 재시작)", item.cam_id, n_trk)
+            self._trackers.pop(item.cam_id, None)
+            tracker = self._tracker_for(item.cam_id)
+
         if self._embedder is not None:
             self._embedder.set_frame(item.rgb)
 
@@ -615,7 +691,9 @@ class DsWorker:
                 "batch_frames": self._st_batch_frames,
                 "infer_ms": self._st_infer_ms,
                 "zmq_drops": self._st_zmq_drops,
+                "max_dets": self._st_max_dets,
             }
+            self._st_max_dets = 0                 # 윈도 단위로 리셋
         prev = self._st_prev or {"analyzed": {}, "selected": {},
                                  "batches": 0, "batch_frames": 0,
                                  "infer_ms": 0.0, "zmq_drops": 0}
@@ -626,14 +704,17 @@ class DsWorker:
         d_ms = cur["infer_ms"] - prev["infer_ms"]
         fps = {c: (cur["analyzed"].get(c, 0) - prev["analyzed"].get(c, 0))
                / STATS_INTERVAL_SEC for c in self._cam_fps}
+        # 트래커 수 합계 — 폭증(죽음의 나선) 관찰용. len()만 읽으므로 락 불필요.
+        n_trk = sum(len(t.trackers) for t in self._trackers.values())
         logger.info(
             "STATS fps=%s | batch_avg=%.2f infer_avg=%.1fms | q=%d qdrop=%d "
-            "zmqdrop=%d gpumap=%s",
+            "zmqdrop=%d gpumap=%s | trk=%d detmax=%d",
             {k: round(v, 2) for k, v in fps.items()},
             (d_frames / d_batches) if d_batches else 0.0,
             (d_ms / d_batches) if d_batches else 0.0,
             self.queue.q.qsize(), self.queue.dropped,
-            cur["zmq_drops"], "on" if self._use_gpu_map else "OFF(copy)")
+            cur["zmq_drops"], "on" if self._use_gpu_map else "OFF(copy)",
+            n_trk, cur["max_dets"])
         return True   # GLib timeout 유지
 
     def run(self, duration: float = 0.0) -> None:

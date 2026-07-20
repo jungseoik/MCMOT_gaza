@@ -119,9 +119,12 @@ def scan_errors(log: str) -> dict:
     }
 
 
+SETTLE_INFER_MS = 1000.0     # 이 값 미만이면 콜드 스타트 과도기 종료로 판정
+
+
 def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
              warmup: float, connect_timeout: float,
-             workers_per_gpu: int = 1) -> dict:
+             workers_per_gpu: int = 1, settle_timeout: float = 240.0) -> dict:
     cams = [{"cam_id": f"cam{i + 1:02d}", "rtsp": urls[i % len(urls)],
              "analyze_fps": fps} for i in range(n_ch)]
 
@@ -194,7 +197,32 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
                         "connect_sec": round(connect_sec, 1)}
 
         if err is None or n_seen > 0:      # 부분 연결이어도 저하 곡선은 측정
-            # 워밍업 2: 정착 대기 후 측정 구간 개시
+            # 워밍업 2: 콜드 스타트 과도기 소진 대기 — 전 워커의 최근 STATS가
+            # infer_avg < SETTLE_INFER_MS 로 2회 연속 관측될 때까지 (상한
+            # settle_timeout). 과도기(첫 배치 수 초씩)가 측정 창을 오염시키는
+            # 것을 막는다 — 진짜 포화면 타임아웃 후 settled=False로 기록.
+            t_s = time.monotonic()
+            ok_polls = 0
+            while time.monotonic() - t_s < settle_timeout:
+                vals = []
+                for w in workers:
+                    if not w.cams:
+                        continue
+                    rows = STATS_RE.findall(w.logs(tail=6))
+                    if rows and float(rows[-1][0]) > 0:   # batch_avg>0 필수
+                        vals.append(float(rows[-1][1]))
+                    else:
+                        vals.append(float("inf"))
+                ok_polls = ok_polls + 1 if (
+                    vals and all(v < SETTLE_INFER_MS for v in vals)) else 0
+                if ok_polls >= 2:
+                    break
+                time.sleep(5.0)
+            settled = ok_polls >= 2
+            result["settle_sec"] = round(time.monotonic() - t_s, 1)
+            result["settled"] = settled
+
+            # 워밍업 3: 정착 대기 후 측정 구간 개시
             time.sleep(warmup)
             sampler = GpuSampler(gpu)
             sampler.start()
@@ -285,6 +313,8 @@ def main() -> None:
     ap.add_argument("--warmup", type=float, default=30.0)
     ap.add_argument("--connect-timeout", type=float, default=180.0,
                     help="엔진 로드+전 채널 첫 수신 대기 상한")
+    ap.add_argument("--settle-timeout", type=float, default=240.0,
+                    help="콜드 스타트 과도기(STATS infer_avg 안정화) 대기 상한")
     ap.add_argument("--fps", type=float, default=5.0)
     ap.add_argument("--streams", default=DEFAULT_STREAMS)
     ap.add_argument("--base", default="rtsp://127.0.0.1:8554")
@@ -300,9 +330,12 @@ def main() -> None:
               f"target {args.fps:g}fps, {args.secs:g}s 측정) =====", flush=True)
         r = run_step(urls, n, args.gpu, args.secs, args.fps,
                      args.warmup, args.connect_timeout,
-                     workers_per_gpu=args.workers_per_gpu)
+                     workers_per_gpu=args.workers_per_gpu,
+                     settle_timeout=args.settle_timeout)
         results.append(r)
         if "fps_mean" in r:
+            print(f"  settle {r.get('settle_sec', 0):.0f}s "
+                  f"(settled={r.get('settled')})", flush=True)
             print(f"  → min/med/mean fps = {r['fps_min']:.2f}/{r['fps_median']:.2f}/"
                   f"{r['fps_mean']:.2f} | 합계 {r['total_throughput_fps']:.1f}fps | "
                   f"batch {r['batch_avg']:.1f} | infer {r['infer_ms_avg']:.1f}ms | "
