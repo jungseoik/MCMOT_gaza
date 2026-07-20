@@ -213,6 +213,13 @@ class DsWorker:
 
         # --- 공유 TRT 엔진 (프로세스 1회 로드, 추론 스레드가 직렬 사용) ---
         self.detector = BatchDetector(args.det_engine)
+        # 배치 상한은 하드코딩(16) 대신 엔진 프로파일에서 읽는다 —
+        # b16/b32 등 어느 엔진을 꽂아도 --batch-size가 자동으로 안전 범위가 된다.
+        engine_max = self.detector.max_batch
+        if engine_max > 0 and self.batch_size > engine_max:
+            logger.info("batch-size %d → 엔진 프로파일 max %d로 클램프 (%s)",
+                        self.batch_size, engine_max, args.det_engine)
+            self.batch_size = engine_max
         self._embedder: DsGpuEmbeddingComputer | None = None
         if self.use_reid:
             self._trt_reid = TRTReID(args.reid_engine)
@@ -752,7 +759,7 @@ def main() -> None:
     ap.add_argument("--gpu", type=int, default=0,
                     help="컨테이너 내 GPU 순번 (--gpus device=N으로 격리 시 0)")
     ap.add_argument("--batch-size", type=int, default=8,
-                    help="추론 배치 상한 (엔진 max 16)")
+                    help="추론 배치 상한 (엔진 프로파일 max로 자동 클램프)")
     ap.add_argument("--zmq-bind", default="tcp://*:5701")
     ap.add_argument("--det-engine",
                     default="external/weights/trt_ds/yolox_mot20_fp16_dyn_b16.engine")

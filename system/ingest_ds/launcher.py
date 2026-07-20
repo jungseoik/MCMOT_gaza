@@ -60,7 +60,9 @@ ZMQ_PORT_BASE = 5701          # 워커 포트 = ZMQ_PORT_BASE + gpu + 100*worker
 WORKER_PORT_STRIDE = 100      # 워커 인덱스당 포트 간격 (gpu id < 100 전제)
 DEFAULT_IMAGE = "macs-deepstream:9.0"
 CONTAINER_PREFIX = "macs-ds-worker"
-ENGINE_MAX_BATCH = 16         # YOLOX dynamic 엔진 max (README '엔진 빌드' 참조)
+ENGINE_MAX_BATCH = 16         # 기본 b16 엔진의 max — DS_ENGINE_MAX_BATCH로 재정의
+                              # (워커도 엔진 프로파일에서 읽어 자체 클램프하므로
+                              #  이 값은 "기본 배치 산정"에만 쓰인다. README '엔진 빌드' 참조)
 STALL_SEC = 10.0              # 이 시간 이상 트랙 미수신이면 reconnecting 판정
 FPS_WINDOW_SEC = 10.0         # fps_in 계산 슬라이딩 윈도
 
@@ -113,6 +115,22 @@ def parse_workers_per_gpu(spec: str | int | None = None) -> int:
     return n
 
 
+def parse_engine_max_batch(spec: str | int | None = None) -> int:
+    """DS_ENGINE_MAX_BATCH 환경변수 파싱 — 기본 16(b16 엔진).
+
+    b32 엔진(`yolox_mot20_fp16_dyn_b32.engine`)을 쓸 때 32로 올리면
+    슬롯 기본 배치 산정(min(max_batch, 채널 수))의 상한이 따라 커진다.
+    실제 안전장치는 워커가 엔진 프로파일에서 읽는 자체 클램프 —
+    이 값이 엔진 max보다 커도 워커가 줄여서 동작한다.
+    """
+    raw = spec if spec is not None else os.environ.get(
+        "DS_ENGINE_MAX_BATCH", str(ENGINE_MAX_BATCH))
+    n = int(raw)
+    if n < 1:
+        raise ValueError(f"DS_ENGINE_MAX_BATCH는 1 이상이어야 함: {raw!r}")
+    return n
+
+
 def worker_port(gpu: int, worker: int = 0) -> int:
     """슬롯의 ZMQ 포트 — worker=0이면 기존 단일 워커 포트(5701+K)와 동일."""
     return ZMQ_PORT_BASE + gpu + WORKER_PORT_STRIDE * worker
@@ -133,12 +151,15 @@ class WorkerContainer:
                  image: str = DEFAULT_IMAGE,
                  prefix: str = CONTAINER_PREFIX,
                  repo_root: Path = REPO_ROOT,
-                 runtime_dir: Path = RUNTIME_DIR) -> None:
+                 runtime_dir: Path = RUNTIME_DIR,
+                 max_batch: int | None = None) -> None:
         if not (0 <= worker < n_workers):
             raise ValueError(f"worker 인덱스 범위 밖: {worker} / n_workers={n_workers}")
         self.gpu = gpu
         self.worker = worker
         self.image = image
+        self.max_batch = (max_batch if max_batch is not None
+                          else parse_engine_max_batch())
         self.name = (f"{prefix}-gpu{gpu}" if n_workers == 1
                      else f"{prefix}-gpu{gpu}-w{worker}")
         self.port = worker_port(gpu, worker)
@@ -175,8 +196,10 @@ class WorkerContainer:
         self.cams_path.write_text(
             json.dumps(cams, indent=2, ensure_ascii=False) + "\n")
         if batch_size is None:
-            # 슬롯 담당 채널 수 기준 (분할 시 워커별 배치가 자연히 작아진다)
-            batch_size = min(ENGINE_MAX_BATCH, max(1, len(cams)))
+            # 슬롯 담당 채널 수 기준 (분할 시 워커별 배치가 자연히 작아진다).
+            # 상한은 하드코딩 대신 max_batch(기본 16, DS_ENGINE_MAX_BATCH로 재정의) —
+            # 워커가 엔진 프로파일로 재클램프하므로 과대 지정해도 안전하다.
+            batch_size = min(self.max_batch, max(1, len(cams)))
         rel_cams = self.cams_path.relative_to(self.repo_root)
         cmd = [
             "docker", "run", "-d", "--rm", "--name", self.name,
@@ -239,6 +262,7 @@ class DsIngestManager:
                  workers_per_gpu: int | None = None,
                  image: str = DEFAULT_IMAGE,
                  batch_size: int | None = None,
+                 max_batch: int | None = None,
                  worker_args: list[str] | None = None) -> None:
         self.gpus = gpu_devices or parse_gpu_devices()
         self.workers_per_gpu = (workers_per_gpu if workers_per_gpu is not None
@@ -247,10 +271,18 @@ class DsIngestManager:
                                   for j in range(self.workers_per_gpu)]
         self._on_tracks = on_tracks
         self._batch_size = batch_size
+        self._max_batch = (max_batch if max_batch is not None
+                           else parse_engine_max_batch())
         self._worker_args = list(worker_args or [])
+        # DS_DET_ENGINE: server.py 수정 없이 검출 엔진 교체 (예: b32 엔진).
+        # 명시 worker_args에 --det-engine이 이미 있으면 그것이 우선한다.
+        det_engine = os.environ.get("DS_DET_ENGINE")
+        if det_engine and "--det-engine" not in self._worker_args:
+            self._worker_args += ["--det-engine", det_engine]
         self.workers: dict[Slot, WorkerContainer] = {
             (g, j): WorkerContainer(g, worker=j,
-                                    n_workers=self.workers_per_gpu, image=image)
+                                    n_workers=self.workers_per_gpu, image=image,
+                                    max_batch=self._max_batch)
             for (g, j) in self.slots}
         self.bridge: TrackBridge | None = None
 

@@ -124,7 +124,8 @@ SETTLE_INFER_MS = 1000.0     # 이 값 미만이면 콜드 스타트 과도기 �
 
 def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
              warmup: float, connect_timeout: float,
-             workers_per_gpu: int = 1, settle_timeout: float = 240.0) -> dict:
+             workers_per_gpu: int = 1, settle_timeout: float = 240.0,
+             engine: str | None = None, max_batch: int = 16) -> dict:
     cams = [{"cam_id": f"cam{i + 1:02d}", "rtsp": urls[i % len(urls)],
              "analyze_fps": fps} for i in range(n_ch)]
 
@@ -163,13 +164,15 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
         workers.append(wc)
         slot_cams[wc.name] = [c["cam_id"] for c in wc_cams]
     bridge = TrackBridge(on_tracks, connect=[w.endpoint for w in workers])
-    batch_sizes = {w.name: min(16, max(1, len(assign[(gpu, w.worker)])))
+    batch_sizes = {w.name: min(max_batch, max(1, len(assign[(gpu, w.worker)])))
                    for w in workers}
+    extra_args = ["--det-engine", engine] if engine else None
     err: str | None = None
     try:
         for w in workers:
             w.start(assign[(gpu, w.worker)],
-                    batch_size=batch_sizes[w.name] or None)
+                    batch_size=batch_sizes[w.name] or None,
+                    extra_args=extra_args)
         bridge.start()
 
         # 워밍업 1: 엔진 로드+RTSP 연결 — 전 채널 첫 수신까지 대기
@@ -192,6 +195,7 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
 
         result: dict = {"channels": n_ch, "target_fps": fps,
                         "workers_per_gpu": workers_per_gpu,
+                        "engine": engine or "(worker default b16)",
                         "batch_sizes": batch_sizes, "measure_secs": secs,
                         "cams_connected": n_seen,
                         "connect_sec": round(connect_sec, 1)}
@@ -308,6 +312,12 @@ def main() -> None:
     ap.add_argument("--gpu", type=int, default=1)
     ap.add_argument("--workers-per-gpu", type=int, default=1,
                     help="같은 GPU의 워커 프로세스 수 (GIL 분리 — 기본 1)")
+    ap.add_argument("--engine", default=None,
+                    help="YOLOX 검출 엔진 경로 재정의 (레포 상대 경로 — 컨테이너에 "
+                         "그대로 전달, 예: external/weights/trt_ds/"
+                         "yolox_mot20_fp16_dyn_b32.engine). 미지정 시 워커 기본(b16)")
+    ap.add_argument("--max-batch", type=int, default=16,
+                    help="배치 상한 (엔진 프로파일 max와 일치시킬 것 — b32 엔진이면 32)")
     ap.add_argument("--channels", default="12,16,24,32,48,64")
     ap.add_argument("--secs", type=float, default=60.0)
     ap.add_argument("--warmup", type=float, default=30.0)
@@ -331,7 +341,8 @@ def main() -> None:
         r = run_step(urls, n, args.gpu, args.secs, args.fps,
                      args.warmup, args.connect_timeout,
                      workers_per_gpu=args.workers_per_gpu,
-                     settle_timeout=args.settle_timeout)
+                     settle_timeout=args.settle_timeout,
+                     engine=args.engine, max_batch=args.max_batch)
         results.append(r)
         if "fps_mean" in r:
             print(f"  settle {r.get('settle_sec', 0):.0f}s "
@@ -357,7 +368,9 @@ def main() -> None:
     out = OUT.with_name(OUT.name.format(tag=args.tag))
     out.write_text(json.dumps({
         "tag": args.tag, "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "gpu": args.gpu, "target_fps": args.fps, "results": results,
+        "gpu": args.gpu, "target_fps": args.fps,
+        "engine": args.engine or "(worker default b16)",
+        "max_batch": args.max_batch, "results": results,
     }, indent=2, ensure_ascii=False))
     print(f"\n저장: {out}")
 

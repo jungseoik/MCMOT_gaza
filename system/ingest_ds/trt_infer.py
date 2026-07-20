@@ -27,6 +27,7 @@ class TRTEngine:
         self.output_names = []
         self.output_shapes = {}
         self.dynamic_batch = False
+        self.max_batch = 0            # dynamic 엔진의 프로파일 max 배치 (정적이면 고정 배치)
 
         for i in range(self.engine.num_io_tensors):
             name = self.engine.get_tensor_name(i)
@@ -36,6 +37,12 @@ class TRTEngine:
                 self.input_names.append(name)
                 if shape[0] == -1:
                     self.dynamic_batch = True
+                    # 최적화 프로파일 0의 (min, opt, max) 중 max의 배치 차원 —
+                    # 엔진마다 다른 상한(b16/b32 등)을 하드코딩 없이 읽는다.
+                    _mn, _opt, _mx = self.engine.get_tensor_profile_shape(name, 0)
+                    self.max_batch = int(_mx[0])
+                else:
+                    self.max_batch = int(shape[0])
             else:
                 self.output_names.append(name)
                 self.output_shapes[name] = tuple(shape)
@@ -68,6 +75,11 @@ class BatchDetector:
         self.num_classes = num_classes
         self.conf_thresh = conf_thresh
         self.nms_thresh = nms_thresh
+
+    @property
+    def max_batch(self) -> int:
+        """엔진 프로파일의 배치 상한 — worker가 --batch-size를 이 값으로 클램프."""
+        return self.engine.max_batch
 
     def detect(self, batch: torch.Tensor) -> list:
         """입력 (B, 3, 896, 1600) CUDA 텐서 → 이미지별 (N, 5) [x1,y1,x2,y2,conf]
