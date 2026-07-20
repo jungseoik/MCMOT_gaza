@@ -209,3 +209,5 @@ cad/17F_Egress Review(Sample).dwg
 cad/CAD_API_Based_Optimal_Evacuation_Route_Algorithm/*.dxf
 # 멀티카메라 시스템 런타임 사이트 데이터(데모/운영) — 의도적 커밋만 허용
 data/sites/
+# 런타임 설정 백업(운영 스냅샷) — 저장소 밖 로컬 보관
+data/backups/

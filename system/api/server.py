@@ -30,6 +30,7 @@ import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from system.config.schema import CameraConfig, CameraMapping, MapSpec, SiteConfig
 from system.config.store import SiteStore
@@ -232,9 +233,12 @@ def list_cameras():
 @app.post("/api/cameras")
 async def add_camera(request: Request):
     body = await request.json()
-    cfg = CameraConfig(cam_id=rt.next_cam_id(), name=body.get("name", ""),
-                       rtsp=body["rtsp"], analyze_fps=body.get("analyze_fps", 5.0),
-                       min_conf=body.get("min_conf"))  # None이면 사이트값 상속
+    try:
+        cfg = CameraConfig(cam_id=rt.next_cam_id(), name=body.get("name", ""),
+                           rtsp=body["rtsp"], analyze_fps=body.get("analyze_fps", 5.0),
+                           min_conf=body.get("min_conf"))  # None이면 사이트값 상속
+    except (ValidationError, KeyError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
     rt.store.save_camera(SITE_ID, cfg)
     rt.ingest.add_camera(cfg)
     if rt.analyzer is not None:
@@ -248,7 +252,10 @@ async def update_camera(cam_id: str, request: Request):
     old = _cam_or_404(cam_id)
     patch = await request.json()
     patch.pop("cam_id", None)
-    cfg = CameraConfig.model_validate({**old.model_dump(), **patch})
+    try:
+        cfg = CameraConfig.model_validate({**old.model_dump(), **patch})
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     rt.store.save_camera(SITE_ID, cfg)
     rt.ingest.update_camera(cfg)
     if rt.analyzer is not None:
