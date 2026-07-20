@@ -2,16 +2,17 @@
 
 GPU 1장/2장/N장 환경에서 같은 코드·설정으로 동작하는 것이 목표다:
   GPU_DEVICES="0,1"  (환경변수 또는 인자)
-  WORKERS_PER_GPU=2  (기본 1 — 기존 단일 워커 동작 그대로, DS 권장 2)
+  WORKERS_PER_GPU=2  (기본 1 권장 — 기존 단일 워커 동작 그대로)
   → 카메라를 부하 균등(채널의 analyze_fps 합 기준 greedy)으로
     (GPU, 워커) 슬롯 전체에 분할
   → 슬롯별 docker 워커 컨테이너 기동 (--gpus device=K, --network host)
   → TrackBridge 1개가 모든 워커 엔드포인트를 PULL로 통합 수신.
 
-워커 분할의 목적: 한계 스윕 실측(docs/reports/DeepStream-한계처리량-실측.md)
-결과 1GPU 병목은 GPU(SM/NVDEC)가 아니라 워커 프로세스 1개의 파이썬 직렬화
-(GIL — appsink 콜백과 추론 스레드 경합)였다. 같은 GPU에 워커 프로세스를
-2개로 쪼개 카메라를 나누면 GIL이 분리되어 처리량이 늘어난다.
+워커 분할의 효과(실측 — docs/reports/DeepStream-한계처리량-실측.md §7):
+5fps 유지 최대 채널 수는 분할과 무관하게 16ch로 동일하다(상한은 GPU 커널
+시간). 분할의 총량 이득은 5fps가 깨진 과부하 영역에서만 +25~36%이고 워커당
+엔진 메모리 ~5-7GB가 추가된다 — 기본 1을 권장하며, "저하를 허용하고 많은
+채널의 총 처리량"이 목표일 때만 2~3분할을 쓴다.
 
 컨테이너명·ZMQ 포트 체계 (하위호환):
   WORKERS_PER_GPU=1 → 이름 macs-ds-worker-gpuK, 포트 5701+K   (기존과 동일)
@@ -104,7 +105,7 @@ def parse_gpu_devices(spec: str | None = None) -> list[int]:
 
 
 def parse_workers_per_gpu(spec: str | int | None = None) -> int:
-    """WORKERS_PER_GPU 환경변수 파싱 — 기본 1(기존 동작), DS 경로 권장 2."""
+    """WORKERS_PER_GPU 환경변수 파싱 — 기본 1(권장). ≥2는 총량 우선 모드."""
     raw = spec if spec is not None else os.environ.get("WORKERS_PER_GPU", "1")
     n = int(raw)
     if n < 1:

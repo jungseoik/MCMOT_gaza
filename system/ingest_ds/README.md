@@ -78,12 +78,13 @@ GPU_DEVICES=1 WORKERS_PER_GPU=2 conda run -n boosttrack python -m \
 conda run -n boosttrack python -m system.ingest_ds.launcher --stop
 ```
 
-- **`WORKERS_PER_GPU`** (기본 `1` — 기존 단일 워커 동작 그대로, **DS 권장 2**):
-  같은 GPU에 워커 프로세스를 N개 띄워 카메라를 나눈다. 1GPU 한계 실측
-  (`docs/reports/DeepStream-한계처리량-실측.md`)에서 병목이 GPU가 아니라
-  워커 프로세스 1개의 파이썬 직렬화(GIL — appsink 콜백 vs 추론 스레드
-  경합)로 판정되어, 프로세스 분할로 GIL을 분리하는 옵션이다.
-  워커당 엔진 메모리(~5GB)가 워커 수만큼 늘어난다.
+- **`WORKERS_PER_GPU`** (기본 `1` **권장** — 기존 단일 워커 동작 그대로):
+  같은 GPU에 워커 프로세스를 N개 띄워 카메라를 나눈다. 재스윕 실측
+  (`docs/reports/DeepStream-한계처리량-실측.md` §7) 결과 **5fps 유지 최대
+  채널 수는 분할과 무관하게 16ch로 동일**(상한은 GPU 커널 시간) — 분할의
+  총량 이득은 5fps가 깨진 과부하 영역에서만 +25~36%다. "저하를 허용하고
+  많은 채널의 총 처리량"이 목표일 때만 2~3으로 올린다. 워커당 엔진 메모리
+  (~5~7GB)가 워커 수만큼 늘어난다.
 - **분할**: 채널의 `analyze_fps` 합 기준 greedy 부하 균등 — (GPU, 워커)
   슬롯 전체에 적용. 입력이 같으면 결과도 같다(결정적) — 재시작해도 배정이
   흔들리지 않는다.
@@ -155,6 +156,14 @@ docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace macs-deepstre
   컨테이너 프로세스 전용이라 호스트 단일영상 PoC와 충돌하지 않는다.
 - **analyze_fps 게이트**: 디코드는 풀레이트로 돌고 추론만 게이트한다.
   게이트는 wall-clock 기준 등간격(기본 5fps)이다.
+- **트래킹 폭주 가드 (P8 안정화)**: ① 프레임당 검출 >1,000이면 깨진
+  프레임(RTSP 힉업 → 디코드 깨짐 → 오검출 폭풍, 실측 5,800~7,600개)으로
+  판정하고 그 프레임의 트래킹을 생략, ② 캠 트래커 >500이면 해당 캠 트래커만
+  리셋(로컬 ID 재시작). 미가드 시 트래커 폭증(실측 14,394개) → 연관
+  O(det×trk) 배치당 수 초 → 드랍 가속의 자기유지 나선에 빠진다.
+  STATS 로그의 `trk=`(트래커 합계)·`detmax=`(윈도 내 프레임 최대 검출 수)로
+  관찰. 또한 기동 시 엔진 워밍업(더미 배치)과 BLAS 스레드 1 고정
+  (`OMP/OPENBLAS/MKL_NUM_THREADS`, 컨테이너 env로 재정의 가능)을 수행한다.
 - **재접속**: RTSP 끊김은 nvurisrcbin 내장 `rtsp-reconnect-interval=10`(무한
   재시도)로 복구한다. 별도 워치독 없음 — 통계 로그의 카메라별 fps로 관찰.
 - **좌표계**: nvstreammux가 모든 소스를 1920×1080으로 스케일(비율 무시 stretch)
