@@ -12,6 +12,7 @@ git으로 diff/버전 추적 가능한 순수 JSON.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from .schema import CameraConfig, SiteConfig
@@ -39,6 +40,23 @@ class SiteStore:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, **_JSON_KW), encoding="utf-8")
         tmp.rename(path)
+
+    # ------------------------------------------------------------ 부트스트랩
+    def bootstrap_from_seed(self, site_id: str,
+                            seed_root: str | Path = "data/seed") -> bool:
+        """site.json이 없으면 seed에서 디폴트 세팅 복사 (클론 후 첫 기동용).
+
+        seed는 git에 커밋되는 디폴트 UI 세팅(맵·카메라·매핑·요소) —
+        tools/seed_snapshot.sh 로 라이브 세팅에서 갱신한다.
+        이미 site.json이 있으면 아무것도 하지 않는다(운영 세팅 보호).
+        """
+        if self._site_json(site_id).is_file():
+            return False
+        seed = Path(seed_root) / site_id
+        if not (seed / "site.json").is_file():
+            return False
+        shutil.copytree(seed, self.site_dir(site_id), dirs_exist_ok=True)
+        return True
 
     # ------------------------------------------------------------ 사이트
     def list_sites(self) -> list[str]:

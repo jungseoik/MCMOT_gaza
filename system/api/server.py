@@ -55,6 +55,8 @@ class Runtime:
 
     def __init__(self) -> None:
         self.store = SiteStore(SITE_ROOT)
+        if self.store.bootstrap_from_seed(SITE_ID):
+            logger.info("seed에서 디폴트 사이트 세팅 복사됨: %s", SITE_ID)
         self.queue = FrameQueue(maxsize=64)
         if INGEST_BACKEND == "deepstream":
             # 지연 import — ffmpeg 모드에서는 pyzmq/docker 의존이 전혀 없어야 한다

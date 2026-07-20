@@ -29,6 +29,11 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
   `GPU_DEVICES`(ffmpeg 모드 기본 0,1 — NVDEC 분산 / deepstream 모드 기본 1) ·
   `INGEST_BACKEND`(기본 **ffmpeg** — 아래 '인제스트 백엔드' 참조)
 - 설정은 `data/sites/<site_id>/`(site.json·cameras/*.json·map.png)에 영속화 — 재시작 시 자동 복원
+- **디폴트 세팅(seed)**: `data/seed/default/`가 git에 커밋돼 있어 **클론 후 첫 기동 시
+  자동 복사**됨(맵·카메라 3ch·매핑·경로/구역/출입구 전부 포함) — 바로 운영 뷰 확인 가능.
+  카메라는 `rtsp://127.0.0.1:8554/{1,2,3}_v1`을 바라보므로 같은 컨벤션의 mediamtx 송출
+  (`rtsp-stream` 스킬/pm2 `1_v1`~`3_v1`)이 떠 있어야 라이브가 붙는다(없으면 재접속 대기만 함).
+  현재 라이브 세팅을 seed로 갱신: `bash tools/seed_snapshot.sh` (sessions 제외)
 - 평가 세션: 운영 뷰 🔔 경보 시작(맵 클릭) → 4대 지표 카드 → 종료 시 결과 산출,
   `sessions/<id>.json` 영속화 + `GET /api/sessions` 이력 (계약 v1.3)
 - **기존 webui PoC(webui/server.py)와 같은 프로세스 동시 구동 금지** (전역 GeneralSettings 충돌, CONTRACT v1.1 §5). 별도 포트로 각각 실행 — 기존 UI 좌측 레일의 맵 아이콘이 :8900을 연다.
