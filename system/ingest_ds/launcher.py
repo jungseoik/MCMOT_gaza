@@ -1,26 +1,37 @@
-"""멀티 GPU DeepStream 워커 런처 — GPU당 컨테이너 1개 + 호스트 중앙 수신.
+"""멀티 GPU DeepStream 워커 런처 — GPU당 워커 컨테이너 N개 + 호스트 중앙 수신.
 
 GPU 1장/2장/N장 환경에서 같은 코드·설정으로 동작하는 것이 목표다:
   GPU_DEVICES="0,1"  (환경변수 또는 인자)
-  → 카메라를 부하 균등(채널의 analyze_fps 합 기준 greedy)으로 GPU별 분할
-  → GPU별 docker 워커 컨테이너 기동 (--gpus device=K, --network host,
-     ZMQ 포트 = 5701 + K)
+  WORKERS_PER_GPU=2  (기본 1 — 기존 단일 워커 동작 그대로, DS 권장 2)
+  → 카메라를 부하 균등(채널의 analyze_fps 합 기준 greedy)으로
+    (GPU, 워커) 슬롯 전체에 분할
+  → 슬롯별 docker 워커 컨테이너 기동 (--gpus device=K, --network host)
   → TrackBridge 1개가 모든 워커 엔드포인트를 PULL로 통합 수신.
+
+워커 분할의 목적: 한계 스윕 실측(docs/reports/DeepStream-한계처리량-실측.md)
+결과 1GPU 병목은 GPU(SM/NVDEC)가 아니라 워커 프로세스 1개의 파이썬 직렬화
+(GIL — appsink 콜백과 추론 스레드 경합)였다. 같은 GPU에 워커 프로세스를
+2개로 쪼개 카메라를 나누면 GIL이 분리되어 처리량이 늘어난다.
+
+컨테이너명·ZMQ 포트 체계 (하위호환):
+  WORKERS_PER_GPU=1 → 이름 macs-ds-worker-gpuK, 포트 5701+K   (기존과 동일)
+  WORKERS_PER_GPU≥2 → 이름 macs-ds-worker-gpuK-wj, 포트 5701 + K + 100*j
+  j=0 워커의 포트는 항상 기존 단일 워커 포트(5701+K)와 같다 — 기존 문서의
+  `bridge --connect tcp://127.0.0.1:570(1+K)` 예시가 그대로 유효하다.
 
 `DsIngestManager`는 기존 IngestManager(system/ingest/manager.py) +
 AnalyzerThread(system/tracking/analyzer.py) 조합과 동일한 외부 인터페이스
 (start(cams)/stop()/states()/add·remove·update_camera/on_tracks 콜백)를
-제공한다 — 이후 server.py에서 INGEST_BACKEND=deepstream 스위치로 갈아끼우는
-것을 전제로 한다 (server.py 수정은 이 모듈 범위 아님).
+제공한다 — server.py의 INGEST_BACKEND=deepstream 스위치가 이 클래스를 쓴다.
 
-카메라 hot add/remove(최소 구현): 해당 카메라가 배정된 GPU 워커만
-cams JSON 갱신 후 컨테이너 재시작 — 다른 GPU 워커는 무영향.
+카메라 hot add/remove(최소 구현): 해당 카메라가 배정된 슬롯의 워커만
+cams JSON 갱신 후 컨테이너 재시작 — 다른 슬롯 워커는 무영향.
 (DS 파이프라인 동적 소스 add/remove는 다음 단계.)
 
 단독 실행(검증용 — Ctrl-C 종료):
-  GPU_DEVICES=0,1 conda run -n boosttrack python -m system.ingest_ds.launcher \
-      --cams system/ingest_ds/configs/cams_12ch.json [--duration 60]
-컨테이너 정리만:
+  GPU_DEVICES=1 WORKERS_PER_GPU=2 conda run -n boosttrack python -m \
+      system.ingest_ds.launcher --cams system/ingest_ds/configs/cams_12ch.json
+컨테이너 정리만 (워커 수 무관 이름 프리픽스로 전부 정리):
   conda run -n boosttrack python -m system.ingest_ds.launcher --stop
 """
 from __future__ import annotations
@@ -33,6 +44,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from collections.abc import Hashable, Sequence
 from pathlib import Path
 
 from system.contracts import CameraState
@@ -43,34 +55,42 @@ logger = logging.getLogger("ingest_ds.launcher")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_DIR = Path(__file__).resolve().parent / "configs" / "runtime"
 
-ZMQ_PORT_BASE = 5701          # 워커 포트 = ZMQ_PORT_BASE + gpu_id
+ZMQ_PORT_BASE = 5701          # 워커 포트 = ZMQ_PORT_BASE + gpu + 100*worker
+WORKER_PORT_STRIDE = 100      # 워커 인덱스당 포트 간격 (gpu id < 100 전제)
 DEFAULT_IMAGE = "macs-deepstream:9.0"
 CONTAINER_PREFIX = "macs-ds-worker"
 ENGINE_MAX_BATCH = 16         # YOLOX dynamic 엔진 max (README '엔진 빌드' 참조)
 STALL_SEC = 10.0              # 이 시간 이상 트랙 미수신이면 reconnecting 판정
 FPS_WINDOW_SEC = 10.0         # fps_in 계산 슬라이딩 윈도
 
+# 슬롯 = (gpu_id, worker_idx). WORKERS_PER_GPU=1이면 (K, 0) 하나뿐이라
+# 기존 "GPU당 1워커" 동작과 완전히 같다.
+Slot = tuple[int, int]
+
 
 # ------------------------------------------------------------ 부하 균등 분할
 
 
-def partition_cams(cams: list[dict], gpus: list[int]) -> dict[int, list[dict]]:
-    """카메라를 GPU별로 부하 균등 분할 (부하 = 채널의 analyze_fps 합, greedy).
+def partition_cams(cams: list[dict], gpus: Sequence[Hashable]) -> dict:
+    """카메라를 슬롯별로 부하 균등 분할 (부하 = 채널의 analyze_fps 합, greedy).
 
-    analyze_fps 내림차순으로 정렬 후 매번 누적 부하가 가장 작은 GPU에 배정.
+    `gpus`는 GPU id 목록(기존 호출)이든 (gpu, worker) 슬롯 목록이든 아무
+    해시 가능 키 시퀀스나 받는다 — 분할 로직은 키에 무관하다.
+    analyze_fps 내림차순으로 정렬 후 매번 누적 부하가 가장 작은 키에 배정.
     입력 순서가 같으면 결과도 같다(결정적) — 재시작 시 배정이 흔들리지 않는다.
     """
-    assign: dict[int, list[dict]] = {g: [] for g in gpus}
-    load: dict[int, float] = {g: 0.0 for g in gpus}
+    keys = list(gpus)
+    assign: dict = {k: [] for k in keys}
+    load: dict = {k: 0.0 for k in keys}
     order = sorted(cams, key=lambda c: (-float(c.get("analyze_fps", 5.0)),
                                         str(c.get("cam_id", ""))))
     for cam in order:
-        g = min(gpus, key=lambda k: (load[k], gpus.index(k)))
-        assign[g].append(cam)
-        load[g] += float(cam.get("analyze_fps", 5.0))
+        k = min(keys, key=lambda x: (load[x], keys.index(x)))
+        assign[k].append(cam)
+        load[k] += float(cam.get("analyze_fps", 5.0))
     # 워커 파이프라인의 pad 순서 안정화를 위해 cam_id 순 정렬
-    for g in gpus:
-        assign[g].sort(key=lambda c: str(c.get("cam_id", "")))
+    for k in keys:
+        assign[k].sort(key=lambda c: str(c.get("cam_id", "")))
     return assign
 
 
@@ -83,20 +103,44 @@ def parse_gpu_devices(spec: str | None = None) -> list[int]:
     return gpus
 
 
+def parse_workers_per_gpu(spec: str | int | None = None) -> int:
+    """WORKERS_PER_GPU 환경변수 파싱 — 기본 1(기존 동작), DS 경로 권장 2."""
+    raw = spec if spec is not None else os.environ.get("WORKERS_PER_GPU", "1")
+    n = int(raw)
+    if n < 1:
+        raise ValueError(f"WORKERS_PER_GPU는 1 이상이어야 함: {raw!r}")
+    return n
+
+
+def worker_port(gpu: int, worker: int = 0) -> int:
+    """슬롯의 ZMQ 포트 — worker=0이면 기존 단일 워커 포트(5701+K)와 동일."""
+    return ZMQ_PORT_BASE + gpu + WORKER_PORT_STRIDE * worker
+
+
 # ------------------------------------------------------------ 컨테이너 1개
 
 
 class WorkerContainer:
-    """GPU 1장에 대응하는 DS 워커 컨테이너의 수명주기 관리 (docker CLI 래퍼)."""
+    """(GPU, 워커) 슬롯 1개에 대응하는 DS 워커 컨테이너 수명주기 (docker CLI 래퍼).
 
-    def __init__(self, gpu: int, *, image: str = DEFAULT_IMAGE,
+    n_workers=1(기본)이면 이름·포트가 기존 단일 워커와 완전히 같다:
+      이름 {prefix}-gpu{K}, 포트 5701+K.
+    n_workers≥2면 이름에 -w{j} 접미사, 포트는 5701 + K + 100*j.
+    """
+
+    def __init__(self, gpu: int, *, worker: int = 0, n_workers: int = 1,
+                 image: str = DEFAULT_IMAGE,
                  prefix: str = CONTAINER_PREFIX,
                  repo_root: Path = REPO_ROOT,
                  runtime_dir: Path = RUNTIME_DIR) -> None:
+        if not (0 <= worker < n_workers):
+            raise ValueError(f"worker 인덱스 범위 밖: {worker} / n_workers={n_workers}")
         self.gpu = gpu
+        self.worker = worker
         self.image = image
-        self.name = f"{prefix}-gpu{gpu}"
-        self.port = ZMQ_PORT_BASE + gpu
+        self.name = (f"{prefix}-gpu{gpu}" if n_workers == 1
+                     else f"{prefix}-gpu{gpu}-w{worker}")
+        self.port = worker_port(gpu, worker)
         self.endpoint = f"tcp://127.0.0.1:{self.port}"
         self.repo_root = repo_root
         self.cams_path = runtime_dir / f"cams_{self.name}.json"
@@ -120,7 +164,7 @@ class WorkerContainer:
     # -- 수명주기 ----------------------------------------------------------
     def start(self, cams: list[dict], *, batch_size: int | None = None,
               extra_args: list[str] | None = None) -> None:
-        """cams JSON을 쓰고 컨테이너를 (재)기동. 다른 GPU 워커는 건드리지 않는다."""
+        """cams JSON을 쓰고 컨테이너를 (재)기동. 다른 슬롯 워커는 건드리지 않는다."""
         self.stop()
         self.cams = list(cams)
         if not cams:
@@ -130,6 +174,7 @@ class WorkerContainer:
         self.cams_path.write_text(
             json.dumps(cams, indent=2, ensure_ascii=False) + "\n")
         if batch_size is None:
+            # 슬롯 담당 채널 수 기준 (분할 시 워커별 배치가 자연히 작아진다)
             batch_size = min(ENGINE_MAX_BATCH, max(1, len(cams)))
         rel_cams = self.cams_path.relative_to(self.repo_root)
         cmd = [
@@ -146,8 +191,9 @@ class WorkerContainer:
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"[{self.name}] docker run 실패: {r.stderr.strip()}")
-        logger.info("[%s] 기동 — GPU%d, %d채널, batch<=%d, %s",
-                    self.name, self.gpu, len(cams), batch_size, self.endpoint)
+        logger.info("[%s] 기동 — GPU%d/w%d, %d채널, batch<=%d, %s",
+                    self.name, self.gpu, self.worker, len(cams), batch_size,
+                    self.endpoint)
 
     def stop(self) -> None:
         if self.running():
@@ -155,6 +201,19 @@ class WorkerContainer:
             logger.info("[%s] 중지", self.name)
         else:  # --rm 이전에 죽은 잔여물 정리
             self._docker("rm", "-f", self.name, check=False)
+
+
+def stop_all_workers(prefix: str = CONTAINER_PREFIX) -> list[str]:
+    """이름이 prefix로 시작하는 워커 컨테이너 전부 정리 — 워커 수 설정 무관."""
+    r = subprocess.run(["docker", "ps", "-a", "--filter", f"name=^{prefix}",
+                        "--format", "{{.Names}}"],
+                       capture_output=True, text=True, check=False)
+    names = [n for n in (r.stdout or "").split() if n]
+    for n in names:
+        subprocess.run(["docker", "rm", "-f", n], capture_output=True,
+                       text=True, check=False)
+        logger.info("[%s] 강제 정리", n)
+    return names
 
 
 # ------------------------------------------------------------ 통합 매니저
@@ -168,24 +227,35 @@ class DsIngestManager:
       set_enabled / get_snapshot — on_tracks(cam_id, ts, tracks) 콜백 수신.
     cameras는 CameraConfig(pydantic) 또는 {cam_id, rtsp, analyze_fps, enabled}
     dict 어느 쪽이든 받는다.
+
+    workers_per_gpu(기본 1 — 환경변수 WORKERS_PER_GPU)로 GPU당 워커 수를
+    늘릴 수 있다. 카메라 분할·hot add/remove·상태 판정은 전부 (GPU, 워커)
+    슬롯 단위로 동작하며, 1이면 기존 "GPU당 1워커"와 완전히 같다.
     """
 
     def __init__(self, on_tracks: OnTracks, *,
                  gpu_devices: list[int] | None = None,
+                 workers_per_gpu: int | None = None,
                  image: str = DEFAULT_IMAGE,
                  batch_size: int | None = None,
                  worker_args: list[str] | None = None) -> None:
         self.gpus = gpu_devices or parse_gpu_devices()
+        self.workers_per_gpu = (workers_per_gpu if workers_per_gpu is not None
+                                else parse_workers_per_gpu())
+        self.slots: list[Slot] = [(g, j) for g in self.gpus
+                                  for j in range(self.workers_per_gpu)]
         self._on_tracks = on_tracks
         self._batch_size = batch_size
         self._worker_args = list(worker_args or [])
-        self.workers: dict[int, WorkerContainer] = {
-            g: WorkerContainer(g, image=image) for g in self.gpus}
+        self.workers: dict[Slot, WorkerContainer] = {
+            (g, j): WorkerContainer(g, worker=j,
+                                    n_workers=self.workers_per_gpu, image=image)
+            for (g, j) in self.slots}
         self.bridge: TrackBridge | None = None
 
         self._lock = threading.Lock()
         self._cfgs: dict[str, dict] = {}          # cam_id → 정규화된 설정 dict
-        self._cam_gpu: dict[str, int] = {}        # cam_id → 배정 GPU
+        self._cam_slot: dict[str, Slot] = {}      # cam_id → 배정 (GPU, 워커)
         self._recv_ts: dict[str, deque[float]] = {}   # fps_in 슬라이딩 윈도
         self._last_frame_ts: dict[str, float] = {}
         self._started = False
@@ -210,6 +280,10 @@ class DsIngestManager:
         return {"cam_id": d["cam_id"], "rtsp": d["rtsp"],
                 "analyze_fps": d["analyze_fps"]}
 
+    @staticmethod
+    def _slot_name(slot: Slot) -> str:
+        return f"gpu{slot[0]}-w{slot[1]}"
+
     # -- 수신 계측 래퍼 ----------------------------------------------------
     def _on_tracks_wrapped(self, cam_id: str, ts: float, tracks) -> None:
         now = time.monotonic()
@@ -230,19 +304,21 @@ class DsIngestManager:
                 self._cfgs[d["cam_id"]] = d
             enabled = [self._worker_cam(d) for d in self._cfgs.values()
                        if d["enabled"]]
-            assign = partition_cams(enabled, self.gpus)
-            self._cam_gpu = {c["cam_id"]: g
-                             for g, cams in assign.items() for c in cams}
+            assign = partition_cams(enabled, self.slots)
+            self._cam_slot = {c["cam_id"]: s
+                              for s, cams in assign.items() for c in cams}
             self._started = True
-        for g, cams in assign.items():
-            self.workers[g].start(cams, batch_size=self._batch_size,
+        for s, cams in assign.items():
+            self.workers[s].start(cams, batch_size=self._batch_size,
                                   extra_args=self._worker_args)
         self.bridge = TrackBridge(
             self._on_tracks_wrapped,
             connect=[w.endpoint for w in self.workers.values()])
         self.bridge.start()
-        logger.info("DsIngestManager 기동 — GPU=%s, 분할=%s", self.gpus,
-                    {g: [c["cam_id"] for c in cams] for g, cams in assign.items()})
+        logger.info("DsIngestManager 기동 — GPU=%s ×%d워커, 분할=%s",
+                    self.gpus, self.workers_per_gpu,
+                    {self._slot_name(s): [c["cam_id"] for c in cams]
+                     for s, cams in assign.items()})
 
     def stop(self) -> None:
         for w in self.workers.values():
@@ -255,55 +331,56 @@ class DsIngestManager:
             self._started = False
         logger.info("DsIngestManager 중지 (%d workers)", len(self.workers))
 
-    # -- 카메라 CRUD (hot add/remove — 해당 GPU 워커만 재시작) --------------
-    def _restart_gpu(self, gpu: int) -> None:
+    # -- 카메라 CRUD (hot add/remove — 해당 슬롯 워커만 재시작) --------------
+    def _restart_slot(self, slot: Slot) -> None:
         cams = [self._worker_cam(self._cfgs[cid])
-                for cid, g in sorted(self._cam_gpu.items()) if g == gpu]
-        self.workers[gpu].start(cams, batch_size=self._batch_size,
-                                extra_args=self._worker_args)
+                for cid, s in sorted(self._cam_slot.items()) if s == slot]
+        self.workers[slot].start(cams, batch_size=self._batch_size,
+                                 extra_args=self._worker_args)
 
     def add_camera(self, cfg) -> None:
         d = self._norm(cfg)
         with self._lock:
-            if d["cam_id"] in self._cam_gpu:
+            if d["cam_id"] in self._cam_slot:
                 raise ValueError(f"이미 실행 중인 카메라: {d['cam_id']}")
             self._cfgs[d["cam_id"]] = d
             if not d["enabled"]:
                 return
-            # 현재 배정 기준 누적 부하가 가장 작은 GPU에 추가
-            load = {g: 0.0 for g in self.gpus}
-            for cid, g in self._cam_gpu.items():
-                load[g] += self._cfgs[cid]["analyze_fps"]
-            gpu = min(self.gpus, key=lambda k: (load[k], self.gpus.index(k)))
-            self._cam_gpu[d["cam_id"]] = gpu
-        self._restart_gpu(gpu)
+            # 현재 배정 기준 누적 부하가 가장 작은 슬롯에 추가
+            load: dict[Slot, float] = {s: 0.0 for s in self.slots}
+            for cid, s in self._cam_slot.items():
+                load[s] += self._cfgs[cid]["analyze_fps"]
+            slot = min(self.slots,
+                       key=lambda s: (load[s], self.slots.index(s)))
+            self._cam_slot[d["cam_id"]] = slot
+        self._restart_slot(slot)
 
     def remove_camera(self, cam_id: str) -> None:
         with self._lock:
             self._cfgs.pop(cam_id, None)
-            gpu = self._cam_gpu.pop(cam_id, None)
+            slot = self._cam_slot.pop(cam_id, None)
             self._recv_ts.pop(cam_id, None)
             self._last_frame_ts.pop(cam_id, None)
-        if gpu is not None:
-            self._restart_gpu(gpu)
+        if slot is not None:
+            self._restart_slot(slot)
 
     def update_camera(self, cfg) -> None:
-        """rtsp/analyze_fps/enabled 변경 반영 — 배정 GPU 유지, 그 워커만 재시작."""
+        """rtsp/analyze_fps/enabled 변경 반영 — 배정 슬롯 유지, 그 워커만 재시작."""
         d = self._norm(cfg)
         with self._lock:
             self._cfgs[d["cam_id"]] = d
-            gpu = self._cam_gpu.get(d["cam_id"])
-            if gpu is None and d["enabled"]:
+            slot = self._cam_slot.get(d["cam_id"])
+            if slot is None and d["enabled"]:
                 pass                       # 아래 add 경로로
-            elif gpu is not None and not d["enabled"]:
-                self._cam_gpu.pop(d["cam_id"])
-        if gpu is None and d["enabled"]:
+            elif slot is not None and not d["enabled"]:
+                self._cam_slot.pop(d["cam_id"])
+        if slot is None and d["enabled"]:
             with self._lock:
                 self._cfgs.pop(d["cam_id"])   # add_camera가 다시 넣는다
             self.add_camera(d)
             return
-        if gpu is not None:
-            self._restart_gpu(gpu)
+        if slot is not None:
+            self._restart_slot(slot)
 
     def set_enabled(self, cam_id: str, enabled: bool) -> None:
         with self._lock:
@@ -320,14 +397,14 @@ class DsIngestManager:
         out: list[CameraState] = []
         with self._lock:
             cfgs = dict(self._cfgs)
-            cam_gpu = dict(self._cam_gpu)
+            cam_slot = dict(self._cam_slot)
             recv = {c: list(dq) for c, dq in self._recv_ts.items()}
             last_ts = dict(self._last_frame_ts)
-        running_gpu = {g: w.running() for g, w in self.workers.items()}
+        running_slot = {s: w.running() for s, w in self.workers.items()}
         for cam_id in sorted(cfgs):
             d = cfgs[cam_id]
-            gpu = cam_gpu.get(cam_id)
-            if not d["enabled"] or gpu is None:
+            slot = cam_slot.get(cam_id)
+            if not d["enabled"] or slot is None:
                 out.append(CameraState(cam_id=cam_id, status="disabled"))
                 continue
             ticks = [t for t in recv.get(cam_id, []) if now - t <= FPS_WINDOW_SEC]
@@ -335,7 +412,7 @@ class DsIngestManager:
             fresh = bool(ticks) and (now - ticks[-1]) < STALL_SEC
             if fresh:
                 status = "running"
-            elif running_gpu.get(gpu):
+            elif running_slot.get(slot):
                 status = "reconnecting"    # 컨테이너는 살아있으나 트랙 미수신
             else:
                 status = "disconnected"
@@ -366,24 +443,26 @@ def _main() -> None:
     ap.add_argument("--cams", help="카메라 JSON — [{cam_id, rtsp, analyze_fps}, ...]")
     ap.add_argument("--gpus", default=None,
                     help="GPU 목록 (예 '0,1') — 미지정 시 GPU_DEVICES 환경변수")
+    ap.add_argument("--workers-per-gpu", type=int, default=None,
+                    help="GPU당 워커 수 — 미지정 시 WORKERS_PER_GPU 환경변수(기본 1)")
     ap.add_argument("--batch-size", type=int, default=None)
     ap.add_argument("--duration", type=float, default=0.0, help="N초 후 종료 (0=무한)")
-    ap.add_argument("--stop", action="store_true", help="컨테이너 정리만 하고 종료")
+    ap.add_argument("--stop", action="store_true",
+                    help="이름 프리픽스 기준 워커 컨테이너 전부 정리 후 종료")
     ap.add_argument("--worker-args", default="",
                     help="워커에 그대로 전달할 추가 인자 (공백 구분)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    gpus = parse_gpu_devices(args.gpus)
 
     if args.stop:
-        for g in gpus:
-            WorkerContainer(g).stop()
+        stop_all_workers()
         return
     if not args.cams:
         ap.error("--cams 필요 (--stop 제외)")
 
+    gpus = parse_gpu_devices(args.gpus)
     with open(args.cams) as f:
         cams = json.load(f)
 
@@ -393,6 +472,8 @@ def _main() -> None:
         latest[cam_id] = len(tracks)
 
     mgr = DsIngestManager(on_tracks, gpu_devices=gpus,
+                          workers_per_gpu=parse_workers_per_gpu(
+                              args.workers_per_gpu),
                           batch_size=args.batch_size,
                           worker_args=args.worker_args.split() or None)
     mgr.start(cams)

@@ -1,0 +1,75 @@
+{
+  "tag": "spot_w2",
+  "ts": "2026-07-20 02:08:31",
+  "gpu": 1,
+  "target_fps": 5.0,
+  "results": [
+    {
+      "channels": 2,
+      "target_fps": 5.0,
+      "workers_per_gpu": 2,
+      "batch_sizes": {
+        "macs-ds-bench-gpu1-w0": 1,
+        "macs-ds-bench-gpu1-w1": 1
+      },
+      "measure_secs": 60.0,
+      "cams_connected": 2,
+      "connect_sec": 9.6,
+      "per_cam_fps": {
+        "cam02": 5.0038790960258925,
+        "cam01": 4.999755901773717
+      },
+      "per_cam_tracks_mean": {
+        "cam02": 55.403333333333336,
+        "cam01": 55.39666666666667
+      },
+      "fps_min": 4.999755901773717,
+      "fps_median": 5.0038790960258925,
+      "fps_mean": 5.001817498899805,
+      "total_throughput_fps": 10.0,
+      "analyzed_frames": 600,
+      "lag_p50_s": 0.03530573844909668,
+      "lag_p95_s": 0.04958701133728027,
+      "lag_max_s": 0.06555938720703125,
+      "worker_alive_after": true,
+      "per_worker": {
+        "macs-ds-bench-gpu1-w0": {
+          "cams": 1,
+          "alive": true,
+          "fps_mean": 4.999755901773717,
+          "batch_avg": 1.0,
+          "infer_ms_avg": 32.074999999999996,
+          "queue_dropped": 0,
+          "zmq_drops": 0,
+          "gpumap": "on"
+        },
+        "macs-ds-bench-gpu1-w1": {
+          "cams": 1,
+          "alive": true,
+          "fps_mean": 5.0038790960258925,
+          "batch_avg": 1.0,
+          "infer_ms_avg": 32.35,
+          "queue_dropped": 0,
+          "zmq_drops": 0,
+          "gpumap": "on"
+        }
+      },
+      "gpu_util_avg": 15.1,
+      "gpu_util_max": 22.0,
+      "nvdec_util_avg": 0.03333333333333333,
+      "nvdec_util_max": 1.0,
+      "gpu_mem_max_mib": 9432.0,
+      "batch_avg": 1.0,
+      "infer_ms_avg": 32.2125,
+      "queue_dropped": 0,
+      "zmq_drops": 0,
+      "gpumap": "on",
+      "errors": {
+        "gst_errors": 0,
+        "cuda_oom": 0,
+        "decode_errors": 0,
+        "infer_fail": 0
+      }
+    }
+  ]
+}

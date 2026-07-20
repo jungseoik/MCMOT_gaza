@@ -10,6 +10,11 @@ mediamtx 스트림 12개를 채널이 중복 구독(urls[i % len(urls)])해 부�
   conda run -n boosttrack python docs/reports/bench/bench_ds_limit.py \
       --tag gpu1 --gpu 1 --channels 12,16,24,32,48,64 --secs 60 --warmup 30
 
+워커 분할 스윕 (같은 GPU에 워커 프로세스 N개 — GIL 분리, launcher P8):
+  conda run -n boosttrack python docs/reports/bench/bench_ds_limit.py \
+      --tag gpu1_w2 --gpu 1 --workers-per-gpu 2 \
+      --channels 16,24,32,40,48 --secs 60 --warmup 30
+
 측정 지표: 채널당 실효 fps(min/med/mean) · 총 처리량 · 지연(수신 ts→트랙 출력,
 호스트 수신 시점 기준) · GPU util/mem/NVDEC util(nvidia-smi 폴링) ·
 워커 STATS 로그의 batch 평균/infer ms/큐 드랍/zmq 드랍.
@@ -35,7 +40,10 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
 from system.ingest_ds.bridge import TrackBridge            # noqa: E402
-from system.ingest_ds.launcher import WorkerContainer      # noqa: E402
+from system.ingest_ds.launcher import (                    # noqa: E402
+    WorkerContainer,
+    partition_cams,
+)
 
 DEFAULT_STREAMS = ("sample1,zara01,zara02,eth,hotel,students03,arxiepiskopi,"
                    "in_out_counting,inout_sample2,1_v1,2_v1,3_v1")
@@ -112,7 +120,8 @@ def scan_errors(log: str) -> dict:
 
 
 def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
-             warmup: float, connect_timeout: float) -> dict:
+             warmup: float, connect_timeout: float,
+             workers_per_gpu: int = 1) -> dict:
     cams = [{"cam_id": f"cam{i + 1:02d}", "rtsp": urls[i % len(urls)],
              "analyze_fps": fps} for i in range(n_ch)]
 
@@ -121,6 +130,7 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
     t_first: dict[str, float] = {}
     t_last: dict[str, float] = {}
     counts: dict[str, int] = defaultdict(int)
+    tracks_sum: dict[str, int] = defaultdict(int)   # 유사도 스팟체크용 트랙 수
     seen: set[str] = set()
     lags: list[float] = []
     measure_from = [float("inf")]
@@ -134,15 +144,29 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
                 return
             t_first.setdefault(cam_id, now)
             counts[cam_id] += 1
+            tracks_sum[cam_id] += len(tracks)
             t_last[cam_id] = now
             lags.append(wall - ts)      # appsink 수신 ts → 호스트 트랙 수신
 
-    wc = WorkerContainer(gpu, prefix="macs-ds-bench")
-    bridge = TrackBridge(on_tracks, connect=wc.endpoint)
-    batch_size = min(16, n_ch)
+    # (GPU, 워커) 슬롯 분할 — launcher와 동일한 greedy 부하 균등
+    slots = [(gpu, j) for j in range(workers_per_gpu)]
+    assign = partition_cams(cams, slots)
+    workers: list[WorkerContainer] = []
+    slot_cams: dict[str, list[str]] = {}
+    for (g, j) in slots:
+        wc = WorkerContainer(g, worker=j, n_workers=workers_per_gpu,
+                             prefix="macs-ds-bench")
+        wc_cams = assign[(g, j)]
+        workers.append(wc)
+        slot_cams[wc.name] = [c["cam_id"] for c in wc_cams]
+    bridge = TrackBridge(on_tracks, connect=[w.endpoint for w in workers])
+    batch_sizes = {w.name: min(16, max(1, len(assign[(gpu, w.worker)])))
+                   for w in workers}
     err: str | None = None
     try:
-        wc.start(cams, batch_size=batch_size)
+        for w in workers:
+            w.start(assign[(gpu, w.worker)],
+                    batch_size=batch_sizes[w.name] or None)
         bridge.start()
 
         # 워밍업 1: 엔진 로드+RTSP 연결 — 전 채널 첫 수신까지 대기
@@ -152,8 +176,9 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
                 n_seen = len(seen)
             if n_seen >= n_ch:
                 break
-            if not wc.running():
-                err = "워커 조기 종료 (OOM/에러 — 로그 참조)"
+            dead = [w.name for w in workers if w.cams and not w.running()]
+            if dead:
+                err = f"워커 조기 종료 {dead} (OOM/에러 — 로그 참조)"
                 break
             time.sleep(1.0)
         with lock:
@@ -163,7 +188,8 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
             err = f"연결 타임아웃 — {n_seen}/{n_ch} 채널만 수신"
 
         result: dict = {"channels": n_ch, "target_fps": fps,
-                        "batch_size": batch_size, "measure_secs": secs,
+                        "workers_per_gpu": workers_per_gpu,
+                        "batch_sizes": batch_sizes, "measure_secs": secs,
                         "cams_connected": n_seen,
                         "connect_sec": round(connect_sec, 1)}
 
@@ -179,16 +205,50 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
 
             with lock:
                 per_cam_fps = {}
+                per_cam_tracks = {}
                 for cid in counts:
                     span = t_last[cid] - t_first[cid]
                     per_cam_fps[cid] = ((counts[cid] - 1) / span
                                         if span > 0 and counts[cid] > 1 else 0.0)
+                    per_cam_tracks[cid] = tracks_sum[cid] / max(1, counts[cid])
                 total = sum(counts.values())
                 lag_sorted = sorted(lags)
             fps_vals = sorted(per_cam_fps.values())
-            log = wc.logs(tail=400)
+
+            # 워커별 STATS·생존·담당 채널 fps 분포
+            per_worker: dict[str, dict] = {}
+            agg = {"batch_avg": 0.0, "infer_ms_avg": 0.0,
+                   "queue_dropped": 0, "zmq_drops": 0, "gpumap": "?"}
+            n_active = 0
+            errors = {k: 0 for k in ("gst_errors", "cuda_oom",
+                                     "decode_errors", "infer_fail")}
+            for w in workers:
+                if not w.cams:
+                    continue
+                log = w.logs(tail=400)
+                st = parse_worker_stats(log, int(secs // 5))
+                w_fps = [per_cam_fps.get(c, 0.0) for c in slot_cams[w.name]]
+                per_worker[w.name] = {
+                    "cams": len(slot_cams[w.name]),
+                    "alive": w.running(),
+                    "fps_mean": (sum(w_fps) / len(w_fps)) if w_fps else 0.0,
+                    **st,
+                }
+                for k in ("batch_avg", "infer_ms_avg"):
+                    agg[k] += st[k]
+                for k in ("queue_dropped", "zmq_drops"):
+                    agg[k] += st[k]
+                agg["gpumap"] = st["gpumap"]
+                for k, v in scan_errors(log).items():
+                    errors[k] += v
+                n_active += 1
+            if n_active:
+                agg["batch_avg"] /= n_active
+                agg["infer_ms_avg"] /= n_active
+
             result.update({
                 "per_cam_fps": per_cam_fps,
+                "per_cam_tracks_mean": per_cam_tracks,
                 "fps_min": fps_vals[0] if fps_vals else 0.0,
                 "fps_median": fps_vals[len(fps_vals) // 2] if fps_vals else 0.0,
                 "fps_mean": (sum(fps_vals) / len(fps_vals)) if fps_vals else 0.0,
@@ -198,17 +258,19 @@ def run_step(urls: list[str], n_ch: int, gpu: int, secs: float, fps: float,
                 "lag_p95_s": (lag_sorted[int(len(lag_sorted) * 0.95)]
                               if lag_sorted else 0.0),
                 "lag_max_s": lag_sorted[-1] if lag_sorted else 0.0,
-                "worker_alive_after": wc.running(),
+                "worker_alive_after": all(w.running() for w in workers if w.cams),
+                "per_worker": per_worker,
                 **gpu_stats,
-                **parse_worker_stats(log, int(secs // 5)),
-                "errors": scan_errors(log),
+                **agg,
+                "errors": errors,
             })
         if err:
             result["error"] = err
         return result
     finally:
         bridge.stop()
-        wc.stop()
+        for w in workers:
+            w.stop()
         bridge.join(timeout=2.0)
 
 
@@ -216,6 +278,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="DS 경로 한계 처리량 스윕")
     ap.add_argument("--tag", required=True, help="결과 파일 태그 (예: gpu1)")
     ap.add_argument("--gpu", type=int, default=1)
+    ap.add_argument("--workers-per-gpu", type=int, default=1,
+                    help="같은 GPU의 워커 프로세스 수 (GIL 분리 — 기본 1)")
     ap.add_argument("--channels", default="12,16,24,32,48,64")
     ap.add_argument("--secs", type=float, default=60.0)
     ap.add_argument("--warmup", type=float, default=30.0)
@@ -232,10 +296,11 @@ def main() -> None:
 
     results = []
     for n in steps:
-        print(f"\n===== {n}채널 (GPU{args.gpu}, target {args.fps:g}fps, "
-              f"{args.secs:g}s 측정) =====", flush=True)
+        print(f"\n===== {n}채널 (GPU{args.gpu} ×{args.workers_per_gpu}워커, "
+              f"target {args.fps:g}fps, {args.secs:g}s 측정) =====", flush=True)
         r = run_step(urls, n, args.gpu, args.secs, args.fps,
-                     args.warmup, args.connect_timeout)
+                     args.warmup, args.connect_timeout,
+                     workers_per_gpu=args.workers_per_gpu)
         results.append(r)
         if "fps_mean" in r:
             print(f"  → min/med/mean fps = {r['fps_min']:.2f}/{r['fps_median']:.2f}/"
@@ -244,6 +309,11 @@ def main() -> None:
                   f"lag p50/p95 {r['lag_p50_s']:.2f}/{r['lag_p95_s']:.2f}s | "
                   f"SM {r['gpu_util_avg']:.0f}% NVDEC {r['nvdec_util_avg']:.0f}% | "
                   f"mem {r['gpu_mem_max_mib']:.0f}MiB", flush=True)
+            for wname, pw in r.get("per_worker", {}).items():
+                print(f"     {wname}: {pw['cams']}ch fps {pw['fps_mean']:.2f} | "
+                      f"batch {pw['batch_avg']:.1f} | infer {pw['infer_ms_avg']:.1f}ms"
+                      f" | qdrop {pw['queue_dropped']} | alive={pw['alive']}",
+                      flush=True)
         if r.get("error"):
             print(f"  !! {r['error']}", flush=True)
             if not r.get("worker_alive_after", True) and r.get("errors", {}).get("cuda_oom"):

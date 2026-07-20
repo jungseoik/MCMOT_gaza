@@ -65,40 +65,53 @@ worker.py 주요 인자: `--batch-size`(추론 배치 상한, 엔진 max 16) ·
 `docs/reports/bench/verify_ds_similarity.py` ·
 `docs/reports/DeepStream-전환-유사도-검증.md` 참조.
 
-## 멀티 GPU 스케일 (launcher.py)
+## 멀티 GPU·멀티 워커 스케일 (launcher.py)
 
-GPU 1장/2장/N장 환경에서 **같은 코드·설정**으로 동작한다 — GPU당 워커
-컨테이너 1개 + 호스트 중앙 수신(bridge) 구조.
+GPU 1장/2장/N장 환경에서 **같은 코드·설정**으로 동작한다 — (GPU, 워커)
+슬롯별 워커 컨테이너 + 호스트 중앙 수신(bridge) 구조.
 
 ```bash
-# 단독 실행(검증) — GPU_DEVICES에 따라 카메라가 자동 분할된다
-GPU_DEVICES=0,1 conda run -n boosttrack python -m system.ingest_ds.launcher \
-    --cams system/ingest_ds/configs/cams_12ch.json
-# 잔여 컨테이너 정리
+# 단독 실행(검증) — GPU_DEVICES × WORKERS_PER_GPU 슬롯에 카메라 자동 분할
+GPU_DEVICES=1 WORKERS_PER_GPU=2 conda run -n boosttrack python -m \
+    system.ingest_ds.launcher --cams system/ingest_ds/configs/cams_12ch.json
+# 잔여 컨테이너 정리 (이름 프리픽스 기준 전부 — 워커 수 설정 무관)
 conda run -n boosttrack python -m system.ingest_ds.launcher --stop
 ```
 
-- **분할**: 채널의 `analyze_fps` 합 기준 greedy 부하 균등. 입력이 같으면
-  결과도 같다(결정적) — 재시작해도 배정이 흔들리지 않는다.
-- **포트 컨벤션**: GPU `K`의 워커는 `tcp://*:{5701+K}`에 PUSH,
-  bridge PULL 소켓 1개가 전 엔드포인트를 fair-queuing으로 통합 수신.
-- **컨테이너**: `macs-ds-worker-gpu{K}` (`docker run -d --rm --gpus device=K
-  --network host`). GPU별 cams JSON은 `configs/runtime/`에 자동 생성.
+- **`WORKERS_PER_GPU`** (기본 `1` — 기존 단일 워커 동작 그대로, **DS 권장 2**):
+  같은 GPU에 워커 프로세스를 N개 띄워 카메라를 나눈다. 1GPU 한계 실측
+  (`docs/reports/DeepStream-한계처리량-실측.md`)에서 병목이 GPU가 아니라
+  워커 프로세스 1개의 파이썬 직렬화(GIL — appsink 콜백 vs 추론 스레드
+  경합)로 판정되어, 프로세스 분할로 GIL을 분리하는 옵션이다.
+  워커당 엔진 메모리(~5GB)가 워커 수만큼 늘어난다.
+- **분할**: 채널의 `analyze_fps` 합 기준 greedy 부하 균등 — (GPU, 워커)
+  슬롯 전체에 적용. 입력이 같으면 결과도 같다(결정적) — 재시작해도 배정이
+  흔들리지 않는다.
+- **포트 컨벤션 (하위호환)**: 슬롯 (K, j)의 워커는
+  `tcp://*:{5701 + K + 100*j}`에 PUSH, bridge PULL 소켓 1개가 전 엔드포인트를
+  fair-queuing으로 통합 수신. **j=0 포트는 기존 단일 워커 포트(5701+K)와
+  항상 같다** — 기존 문서·스크립트의 `--connect tcp://127.0.0.1:570(1+K)`가
+  그대로 유효. (예: GPU1 2분할 → w0=5702, w1=5802)
+- **컨테이너**: `WORKERS_PER_GPU=1`이면 기존과 동일한 `macs-ds-worker-gpu{K}`,
+  ≥2면 `macs-ds-worker-gpu{K}-w{j}` (`docker run -d --rm --gpus device=K
+  --network host`). 슬롯별 cams JSON은 `configs/runtime/`에 자동 생성.
+- **batch-size**: 미지정 시 슬롯 담당 채널 수 기준 `min(16, N_slot)` —
+  분할하면 워커별 배치가 자연히 작아진다.
 - **`DsIngestManager`**: 기존 `IngestManager`+`AnalyzerThread` 조합과 동일한
   외부 인터페이스(`start(cams)/stop()/states()/add·remove·update_camera/
   set_enabled` + `on_tracks(cam_id, ts, tracks)` 콜백) — server.py에서
   `INGEST_BACKEND=deepstream` 스위치로 교체하는 것을 전제로 한다.
   `cams`는 `CameraConfig`(pydantic)든 dict든 받는다.
-- **hot add/remove(최소 구현)**: 해당 카메라가 배정된 GPU 워커만 cams JSON
-  갱신 후 컨테이너 재시작 — **다른 GPU 워커는 무영향**(docker StartedAt
-  불변 + 수신 fps 유지로 검증). 워커 재시작 비용은 엔진 로드 포함 ~50초.
-  DS 파이프라인 동적 소스 add/remove는 다음 단계.
+- **hot add/remove(최소 구현)**: 해당 카메라가 배정된 **슬롯의 워커만**
+  cams JSON 갱신 후 컨테이너 재시작 — **다른 슬롯 워커는 무영향**(docker
+  StartedAt 불변 + 수신 fps 유지로 검증). 워커 재시작 비용은 엔진 로드 포함
+  ~50초. DS 파이프라인 동적 소스 add/remove는 다음 단계.
 - **`get_snapshot()`은 None**: 프레임 픽셀이 컨테이너 밖으로 나오지 않는
   구조라 스냅샷 미지원 — 셋업 UI가 필요하면 ffmpeg 단발 캡처를 따로 쓴다.
 - **states()**: 수신 슬라이딩 윈도(10초) 기반 `fps_in`,
   `running`(최근 수신) / `reconnecting`(컨테이너 생존·수신 없음) /
   `disconnected`(컨테이너 사망) / `disabled`. 워커 내부 큐 드랍은 컨테이너
-  로그(`docker logs macs-ds-worker-gpuK`)의 STATS로 관찰.
+  로그(`docker logs macs-ds-worker-gpuK[-wj]`)의 STATS로 관찰.
 
 ## 엔진 빌드 (컨테이너 안에서 — TRT 버전 일치 필수)
 
