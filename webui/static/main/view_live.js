@@ -93,12 +93,26 @@ Views.live = (() => {
     return lo.concat(hi);
   }
 
+  // H(9원소 row-major, 카메라px→맵px) 적용
+  function applyH(H9, x, y) {
+    const w = H9[6]*x + H9[7]*y + H9[8];
+    if (Math.abs(w) < 1e-10) return null;
+    return [(H9[0]*x + H9[1]*y + H9[2])/w, (H9[3]*x + H9[4]*y + H9[5])/w];
+  }
+
   function drawCameraHulls(g) {
     const { ctx, TX, TY } = g;
     App.cameras.forEach((cam) => {
       const m = cam.mapping;
       if (!m || !m.map_pts || m.map_pts.length < 4) return;
-      const hull = convexHull(m.map_pts);
+      // 실제 탐지 영역을 백엔드 규칙과 동일하게: valid_roi 지정 시 그 다각형을
+      // H로 맵에 투영(점 순서 그대로), 없으면 대응점 볼록껍질.
+      let hull = null;
+      if (cam.valid_roi && cam.valid_roi.length >= 3 && m.H) {
+        hull = cam.valid_roi.map(([u, v]) => applyH(m.H, u, v)).filter(Boolean);
+        if (hull.length < 3) hull = null;
+      }
+      if (!hull) hull = convexHull(m.map_pts);
       if (hull.length < 3) return;
       const col = camColor(cam.cam_id, App.cameras);
       ctx.save();

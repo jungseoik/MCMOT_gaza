@@ -323,25 +323,18 @@ Views.cams = (() => {
 
   function camOverlay(g) {
     const { ctx, TX, TY } = g;
-    // cctv_pts 컨벡스 헐 — 호모그래피 커버리지 (보간 보장 구역)
-    if (cctvPts.length >= 3) {
-      const hull = convexHull(cctvPts);
-      ctx.save();
-      ctx.beginPath();
-      hull.forEach(([x, y], i) => i === 0 ? ctx.moveTo(TX(x), TY(y)) : ctx.lineTo(TX(x), TY(y)));
-      ctx.closePath();
-      ctx.fillStyle = "rgba(255,200,0,.07)"; ctx.fill();
-      ctx.strokeStyle = "rgba(255,200,0,.6)"; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
-      ctx.stroke(); ctx.setLineDash([]);
-      ctx.restore();
-    }
-    // valid_roi는 "유효 ROI" 모드에서만 표시 — 대응점 모드에선 매핑 점만 보이게.
-    if (mode === "roi" && roi.length) {
-      mcPath(g, roi, true);
-      ctx.fillStyle = "rgba(48,220,251,.12)"; ctx.fill();
-      ctx.strokeStyle = MC_COLORS.roi; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
-      ctx.stroke(); ctx.setLineDash([]);
-      mcNumbered(g, roi, MC_COLORS.roi);
+    // 실제 탐지 영역을 백엔드 projector 규칙과 동일하게 하나만 표시:
+    //   valid_roi 지정 시 그 다각형(점 순서 그대로, 오목 가능),
+    //   미지정 시 대응점 볼록껍질(그게 실제 탐지 영역이므로).
+    // ROI 편집 모드에선 편집 중인 roi에 꼭짓점 번호도 함께 표시.
+    const area = roi.length >= 3 ? roi
+               : (mode !== "roi" && cctvPts.length >= 3 ? convexHull(cctvPts) : null);
+    if (area) {
+      mcPath(g, area, true);
+      ctx.fillStyle = "rgba(48,220,251,.11)"; ctx.fill();
+      ctx.strokeStyle = MC_COLORS.roi; ctx.lineWidth = mode === "roi" ? 2 : 1.5;
+      ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+      if (mode === "roi") mcNumbered(g, roi, MC_COLORS.roi);
     }
     mcNumbered(g, cctvPts, null, pairColor);
     // hover crosshair: 맵에서 마우스 올렸을 때 역투영 위치 표시
