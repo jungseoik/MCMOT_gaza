@@ -12,5 +12,16 @@
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 export SITE_ID="${SITE_ID:-default}"
-exec conda run --no-capture-output -n boosttrack \
-  uvicorn system.api.server:app --host 0.0.0.0 --port 8900
+
+CMD="conda run --no-capture-output -n boosttrack \
+  uvicorn system.api.server:app --host 0.0.0.0 --port 8900"
+
+# deepstream 모드는 docker.sock 접근이 필요한데, pm2 데몬이 docker 그룹 없이
+# 떠 있으면 자식도 그룹을 못 받아 "permission denied … docker.sock"로 죽는다.
+# /etc/group 멤버십이 있으면 sg로 docker 그룹을 보충해 실행한다 (환경변수 유지).
+if [ "${INGEST_BACKEND:-ffmpeg}" = "deepstream" ] \
+   && ! id -nG | grep -qw docker \
+   && getent group docker | grep -qw "$(id -un)"; then
+  exec sg docker -c "$CMD"
+fi
+exec $CMD
