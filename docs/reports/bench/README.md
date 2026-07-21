@@ -89,5 +89,5 @@ echo quit | CUDA_MPS_PIPE_DIRECTORY=/tmp/mps_gpu1 nvidia-cuda-mps-control
 - 다채널(2GPU 병렬, 현재 코드): 15채널 = **채널당 ~7fps / 총 106fps**.
 - per-GPU 천장(실측): MPS off ~54fps, MPS on ~65~70fps (이론 ~100엔 CPU 오버헤드로 미달).
 - MPS 효과: 8채널에서 +27%(51→65fps). 해상도↓: ×1.2~1.5. 둘 다 완만 — 병목은 추적.
-- 150채널 → 채널당 ~1~1.3fps(2GPU). 유용 fps엔 추적 경량화 + GPU 증설 필요.
+- 최종 목표 50~60채널(2026-07-4주차 하향, 구 150ch) → **5fps엔 GPU 3~4장**(1GPU 16ch@5fps 실측 기반). 경량화 없이도 도달 가능하나, GPU 절감·여유 확보용으로 추적 경량화는 선택지.
 - 상세는 `results_resolution.json` / `results_mps_*.json` 및 두 보고서 참조.

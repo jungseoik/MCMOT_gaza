@@ -29,8 +29,9 @@ WBS(`C-lab_PoC_WBS_vN.xlsx`)는 **바이너리(xlsx)라 git diff가 안 되므�
   - `4.7.2` 15채널 동시 처리 확장 **예정 → 완료**: DS 배치 추론(직렬 락 해제)+카메라별 BoostTrack
     분리로 1GPU 16ch@5fps 실측(`docs/reports/DeepStream-한계처리량-실측.md §2`,
     `system/ingest_ds/launcher.py` `DsIngestManager`) — 15ch 목표 초과.
-  - `4.7.3` 150채널 스케일 달성 **예정 → 진행중**: `WORKERS_PER_GPU` 워커 분할 + 부하 균등
-    (`launcher.py:77-105` `partition_cams`) 확보. 150ch 실달성·추적 경량화 미완.
+  - `4.7.3` 50~60채널 스케일 달성(구 150ch, 2026-07-4주차 목표 하향) **예정 → 진행중**:
+    `WORKERS_PER_GPU` 워커 분할 + 부하 균등 (`launcher.py:77-105` `partition_cams`) 확보.
+    50~60ch 실달성(GPU 3~4장 전제) 미완.
   - `4.7.4` 스케일 성능 검증 **예정 → 진행중**: 채널당 fps·총 throughput·VRAM·지연 스윕
     12~64ch 실측(`한계처리량-실측 §2·§7·§9`). 24h 연속 안정성(6.2.4) 미측정.
   - `6.3.2` 성능 튜닝(TensorRT·Batch Size) **예정 → 진행중**: DS 배치 추론·dynamic TRT 엔진
