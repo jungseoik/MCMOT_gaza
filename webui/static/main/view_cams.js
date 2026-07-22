@@ -25,7 +25,7 @@ Views.cams = (() => {
   // 사이트 전역 min_conf (카메라가 오버라이드 안 하면 이 값 상속). 기본 0.5.
   function siteMinConf() {
     const t = App.site && App.site.thresholds;
-    return (t && t.min_conf != null) ? t.min_conf : 0.5;
+    return (t && t.min_conf != null) ? t.min_conf : 0.35;  // 스키마 기본과 통일
   }
 
   // H 행렬 적용 (9원소 row-major, 카메라→맵)

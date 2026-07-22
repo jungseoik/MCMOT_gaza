@@ -217,6 +217,11 @@ async def put_site(request: Request):
     prev = rt.store.load_site(SITE_ID)
     if prev is not None and "map" not in body:
         body["map"] = prev.map.model_dump() if prev.map else None
+    # floors 방어: body에 floors가 없으면 기존 층 구성을 보존한다. 없으면
+    # 검증기가 top-level만 default 층 1개로 재승격해 **다층 사이트가 붕괴**한다
+    # (map 보존과 동일한 비대칭 방지 — 부분 PUT·외부 스크립트 안전).
+    if prev is not None and "floors" not in body and prev.floors:
+        body["floors"] = [fl.model_dump() for fl in prev.floors]
     cfg = SiteConfig.model_validate(body)
     cfg = rt.store.save_site(cfg)
     rt.reload_engine()
