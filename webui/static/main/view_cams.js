@@ -13,6 +13,12 @@ Views.cams = (() => {
   let mode = "pair";                    // pair | roi | pan
   const frames = {};                    // cam_id -> {img, w, h}
   let cctvPts = [], mapPts = [], roi = [];
+  let selFloor = "default";             // 선택 카메라가 매핑될 층 id
+  const mapImages = {};                 // floor_id -> Image (층별 맵 캐시)
+
+  const multiFloor = () => ((App.site && App.site.floors) || []).length > 1;
+  const selFloorObj = () => ((App.site && App.site.floors) || [])
+    .find((f) => f.id === selFloor) || (App.site && App.floor) || null;
 
   const pairColor = (i) => `hsl(${(i * 47) % 360},80%,60%)`;
 
@@ -66,6 +72,39 @@ Views.cams = (() => {
     return lo.concat(hi);
   }
 
+  // ------------------------------------------------------------ 층(floor)
+  function floorOptions(selected) {
+    return ((App.site && App.site.floors) || []).map((f) =>
+      `<option value="${f.id}"${f.id === selected ? " selected" : ""}>${f.name || f.id}</option>`
+    ).join("");
+  }
+
+  function renderFloorDropdowns() {
+    const multi = multiFloor();
+    const nc = $("newCamFloor"), ncl = $("newCamFloorLab");
+    if (nc) { nc.innerHTML = floorOptions(nc.value || App.currentFloor); }
+    if (ncl) ncl.classList.toggle("hidden", !multi);
+    const mf = $("mapFloorSel"), mfl = $("mapFloorLab");
+    if (mf) mf.innerHTML = floorOptions(selFloor);
+    if (mfl) mfl.classList.toggle("hidden", !(multi && sel));
+  }
+
+  // 선택 카메라가 매핑될 층의 맵 이미지를 mapMc에 로드 (층별 캐시)
+  async function loadSelFloorMap() {
+    const fl = selFloorObj();
+    if (!fl || !fl.map) { mapMc.setImage(null, 1000, 600); return; }
+    if (selFloor === App.currentFloor && App.mapImg) {
+      mapMc.setImage(App.mapImg, fl.map.w, fl.map.h); return;
+    }
+    if (mapImages[selFloor]) { mapMc.setImage(mapImages[selFloor], fl.map.w, fl.map.h); return; }
+    try {
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = API.mapImageUrl(selFloor); });
+      mapImages[selFloor] = img;
+      mapMc.setImage(img, fl.map.w, fl.map.h);
+    } catch (e) { mapMc.setImage(null, fl.map.w || 1000, fl.map.h || 600); }
+  }
+
   // ------------------------------------------------------------ 목록
   function badge(cls, txt) { return `<span class="badge ${cls}">${txt}</span>`; }
 
@@ -84,11 +123,14 @@ Views.cams = (() => {
       div.className = "camrow" + (c.cam_id === sel ? " sel" : "");
       const overridden = c.min_conf != null;
       const effVal = overridden ? c.min_conf : def;   // 입력창에 실효값을 채워둠(A안)
+      const floorBadge = multiFloor()
+        ? badge("fl", "층 " + App.floorName(c.floor_id || "default")) : "";
       div.innerHTML = `
         <div class="r1"><span class="dotc" style="background:${camColor(c.cam_id, App.cameras)}"></span>
           <span class="nm">${c.name || c.cam_id}</span>
           ${c.mapping ? badge("ok", "매핑 ✓") : badge("warn", "매핑 필요")}
           ${c.enabled ? badge("cy", "활성") : badge("", "비활성")}
+          ${floorBadge}
           <button class="del" title="삭제">🗑</button></div>
         <div class="r2"><span>${c.cam_id}</span><span class="rtsp">${c.rtsp}</span>
           <label style="cursor:pointer"><input type="checkbox" class="en" ${c.enabled ? "checked" : ""} /> 활성</label></div>
@@ -162,6 +204,9 @@ Views.cams = (() => {
     $("camAddMsg").textContent = "등록 중…";
     try {
       const cam = await API.addCamera({ name, rtsp });
+      // 선택한 매핑 층 반영 (POST는 floor_id 미지원 → PUT으로 지정)
+      const fl = ($("newCamFloor") && $("newCamFloor").value) || "default";
+      if (fl && fl !== "default") await API.updateCamera(cam.cam_id, { floor_id: fl });
       $("newCamName").value = ""; $("newCamRtsp").value = "";
       await App.reloadCameras();
       $("camAddMsg").textContent = `${cam.cam_id} 등록됨 — 연결 테스트 중…`;
@@ -187,6 +232,9 @@ Views.cams = (() => {
     renderList();
     if (!cam) { renderSel(); return; }
     $("selCamLabel").textContent = `${cam.name || cam.cam_id} (${cam.cam_id})`;
+    // 이 카메라가 매핑될 층 (map_pts는 이 층의 맵 px 기준)
+    selFloor = cam.floor_id || "default";
+    renderFloorDropdowns();
     // min_conf는 카메라 목록 행에서 인라인 편집(renderList) — 여기선 매핑만.
     // 기존 매핑 복원
     cctvPts = cam.mapping ? cam.mapping.cctv_pts.map((p) => p.slice()) : [];
@@ -199,15 +247,15 @@ Views.cams = (() => {
       camMc.setImage(f.img, f.w, f.h);
       hint();
     } catch (e) { hint("연결 테스트 실패: " + e.message, true); camMc.setImage(null, 640, 360); }
-    if (App.mapImg && App.site.map) mapMc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
-    else mapMc.setImage(null, 1000, 600);
+    await loadSelFloorMap();                           // 선택 카메라 층의 맵 표시
     renderSel();
   }
 
   function renderSel() { if (camMc) camMc.render(); if (mapMc) mapMc.render(); }
 
   function mPerPx() {
-    const m = App.site && App.site.map;
+    const fl = selFloorObj();
+    const m = fl && fl.map;
     if (!m) return null;
     if (m.m_per_px != null) return m.m_per_px;
     if (m.scale) {
@@ -282,7 +330,8 @@ Views.cams = (() => {
     try {
       hint("매핑 저장 중…");
       const saved = await API.putMapping(sel, { cctv_pts: cctvPts, map_pts: mapPts,
-                                                valid_roi: roi.length >= 3 ? roi : null });
+                                                valid_roi: roi.length >= 3 ? roi : null,
+                                                floor_id: selFloor });
       await App.reloadCameras();
       renderList();
       // 대응점별 재투영 오차(m) 품질 표시 — 큰 점은 바닥 아님/오지정 의심 (v1.5)
@@ -357,7 +406,7 @@ Views.cams = (() => {
   }
 
   function mapOverlay(g) {
-    drawSiteElements(g, App.site, { faint: true });
+    drawSiteElements(g, selFloorObj() || App.site, { faint: true });
     mcNumbered(g, mapPts, null, pairColor);
     // hover crosshair: 카메라에서 마우스 올렸을 때 순방향 투영 위치 표시
     if (hoverCam) {
@@ -395,6 +444,18 @@ Views.cams = (() => {
     document.querySelectorAll("#camTools .tag-btn").forEach((b) =>
       b.onclick = () => setMode(b.dataset.mode));
     $("camAdd").onclick = addCamera;
+    // 매핑 층 변경 — 선택 카메라를 다른 층에 매핑 (map_pts 좌표계가 바뀌므로 초기화)
+    $("mapFloorSel").onchange = async () => {
+      selFloor = $("mapFloorSel").value;
+      if (mapPts.length) {
+        mapPts = [];
+        hint(`매핑 층 변경: ${App.floorName(selFloor)} — 맵 대응점을 다시 지정하세요 (좌표계 변경).`, true);
+      } else {
+        hint(`매핑 층: ${App.floorName(selFloor)}.`);
+      }
+      await loadSelFloorMap();
+      renderSel();
+    };
     $("pairUndo").onclick = undo;
     $("pairClear").onclick = clearAll;
     $("mappingSave").onclick = saveMapping;
@@ -419,11 +480,13 @@ Views.cams = (() => {
 
   function enter() {
     init();
+    if (!sel) selFloor = App.currentFloor;             // 미선택 시 현재 층 기준
+    renderFloorDropdowns();
     renderList();
     if (sel) select(sel);
     else {
       $("selCamLabel").textContent = "카메라를 선택하세요";
-      if (App.mapImg && App.site.map) mapMc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
+      loadSelFloorMap();
       hint();
     }
   }

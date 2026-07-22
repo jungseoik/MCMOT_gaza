@@ -295,7 +295,66 @@ Views.map = (() => {
     $("thQd").value = t.q_design != null ? t.q_design : 60;
   }
 
-  function refresh() { refreshLists(); if (mc) mc.render(); }
+  function refresh() { refreshLists(); renderFloorPanel(); if (mc) mc.render(); }
+
+  // ------------------------------------------------------------ 도면(층) 관리
+  function floorMsg(msg, warn) {
+    const el = $("floorMsg");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.classList.toggle("warn", !!warn);
+    if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 4000);
+  }
+
+  function renderFloorPanel() {
+    const floors = (App.site && App.site.floors) || [];
+    $("cntFloors").textContent = floors.length;
+    const sel = $("floorEditSel");
+    sel.innerHTML = floors.map((f) =>
+      `<option value="${f.id}"${f.id === App.currentFloor ? " selected" : ""}>${f.name || f.id}</option>`
+    ).join("");
+    $("floorNameInp").value = (App.floor && App.floor.name) || "";
+    $("floorDelBtn").disabled = (App.currentFloor === "default" || floors.length <= 1);
+  }
+
+  async function addFloor() {
+    try {
+      App.syncFloor();
+      const n = ((App.site && App.site.floors) || []).length + 1;
+      const summary = await API.addFloor(`${n}층`);
+      await App.reloadSite();
+      await App.setFloor(summary.id);              // 새 층으로 전환 → 뷰 재진입
+      floorMsg(`새 층 추가됨: ${summary.name || summary.id}`);
+    } catch (e) { floorMsg("층 추가 실패: " + e.message, true); }
+  }
+
+  async function delFloor() {
+    const fid = App.currentFloor;
+    if (fid === "default") { floorMsg("기본 층은 삭제할 수 없습니다.", true); return; }
+    if (!confirm(`'${App.floorName(fid)}' 층을 삭제할까요? 소속 카메라는 기본 층으로 재배정됩니다.`)) return;
+    try {
+      await API.deleteFloor(fid);
+      App.currentFloor = "default";
+      await App.reloadCameras();
+      await App.reloadSite();
+      enter();                                     // 기본 층으로 재드로잉
+      floorMsg("층 삭제됨 — 기본 층으로 전환.");
+    } catch (e) { floorMsg("삭제 실패: " + e.message, true); }
+  }
+
+  async function renameFloor() {
+    if (!App.floor) return;
+    App.floor.name = $("floorNameInp").value.trim();
+    try {
+      App.syncFloor();
+      App.site = await API.putSite(App.site);
+      if (!App.site.floors || !App.site.floors.length) App.site.floors = [App.floor];
+      App.applyFloor();
+      App.updateChip(); App.renderFloorSelector();
+      floorMsg("층 이름 저장됨.");
+      refresh();
+    } catch (e) { floorMsg("이름 저장 실패: " + e.message, true); }
+  }
 
   // ------------------------------------------------------------ 저장·업로드
   async function save() {
@@ -324,9 +383,14 @@ Views.map = (() => {
         ex.design_capacity = Math.max(1, Math.round(w_eff_m * qd));
       });
     }
+    // 다중 도면: 별칭된 최상위 공간요소를 현재 층에 반영 후, floors 통째로 저장.
+    // (top-level만 보내면 백엔드 재승격으로 다른 층이 사라짐 — floors 포함 필수)
+    App.syncFloor();
     try {
       App.site = await API.putSite(s);
-      App.updateChip();
+      if (!App.site.floors || !App.site.floors.length) App.site.floors = [App.floor];
+      App.applyFloor();                              // 저장 후 현재 층 별칭 재설정
+      App.updateChip(); App.renderFloorSelector();
       $("mapSaveMsg").textContent = `저장됨 · v${App.site.version}`;
       setTimeout(() => { $("mapSaveMsg").textContent = ""; }, 4000);
       refresh();
@@ -348,7 +412,7 @@ Views.map = (() => {
         meta = JSON.parse(await metaFile.text());
         if (meta.m_per_px == null) { hint("메타 JSON에 m_per_px가 없습니다.", true); return; }
       }
-      await API.uploadMap(img, meta);
+      await API.uploadMap(img, meta, App.currentFloor);  // 현재 층에 업로드
       await App.reloadSite();                        // MapSpec 반영 + 이미지 로드
       mc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
       hint(meta ? `맵 업로드 완료 — 축척 자동 설정 (${meta.m_per_px} m/px, CAD 메타).`
@@ -383,6 +447,12 @@ Views.map = (() => {
     };
     $("msTabSet").onclick = () => msTab(false);
     $("msTabHelp").onclick = () => msTab(true);
+    // 도면(층) 관리 — 셀렉터/추가/삭제/이름
+    $("floorEditSel").onchange = () => App.setFloor($("floorEditSel").value);
+    $("floorAddBtn").onclick = addFloor;
+    $("floorDelBtn").onclick = delFloor;
+    $("floorRenameBtn").onclick = renameFloor;
+    $("floorNameInp").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); renameFloor(); } };
     $("siteSave").onclick = save;
     $("mapUpload").onchange = (e) => { if (e.target.files.length) upload(e.target.files); };
     // CAD 도면 편집기(:8910, 별도 서비스) — 새 창에서 터치업·Exit 지정 후 [저장 & 적용]하면

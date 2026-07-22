@@ -24,17 +24,27 @@ const API = {
       headers: { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body) });
   },
+  // 현재 층 id — 인자로 명시하지 않으면 App.currentFloor(없으면 default).
+  _floor: (floor) =>
+    floor || (typeof App !== "undefined" && App.currentFloor) || "default",
+  _fq: (floor) => "floor=" + encodeURIComponent(API._floor(floor)),
 
   // ---- site
   getSite: () => API._j("/api/site"),
   putSite: (cfg) => API._put("/api/site", cfg),
-  uploadMap(file, meta) {
+  uploadMap(file, meta, floor) {
     const fd = new FormData();
     fd.append("image", file);
     if (meta) fd.append("meta", JSON.stringify(meta));
-    return API._j("/api/site/map", { method: "POST", body: fd });
+    return API._j("/api/site/map?" + API._fq(floor), { method: "POST", body: fd });
   },
-  mapImageUrl: () => "/api/site/map?ts=" + Date.now(),
+  mapImageUrl: (floor) => "/api/site/map?ts=" + Date.now() + "&" + API._fq(floor),
+
+  // ---- floors (다중 도면 v1.7)
+  getFloors: () => API._j("/api/floors"),
+  addFloor: (name, id) => API._post("/api/floors",
+    { ...(id ? { id } : {}), name: name || "" }),
+  deleteFloor: (id) => API._j(`/api/floors/${id}`, { method: "DELETE" }),
 
   // ---- cameras
   getCameras: () => API._j("/api/cameras"),
@@ -45,23 +55,24 @@ const API = {
   snapshotUrl: (id) => `/api/cameras/${id}/snapshot?ts=` + Date.now(),
   putMapping: (id, body) => API._put(`/api/cameras/${id}/mapping`, body),
 
-  // ---- 평가 세션 (CONTRACT v1.2)
-  startSession: (origin, { origins, t_alarm } = {}) => {
+  // ---- 평가 세션 (CONTRACT v1.2) — 세션은 층별. floor 미지정 시 현재 층.
+  startSession: (origin, { origins, t_alarm } = {}, floor) => {
     const body = {};
     if (origins && origins.length) body.origins = origins;
     else if (origin) body.origin = origin;
     if (t_alarm != null) body.t_alarm = t_alarm;
-    return API._post("/api/session/start", body);
+    return API._post("/api/session/start?" + API._fq(floor), body);
   },
-  stopSession: () => API._post("/api/session/stop"),
-  getSession: () => API._j("/api/session"),
-  getSessionResult: () => API._j("/api/session/result"),
-  getSessionTimeline: () => API._j("/api/session/timeline"),
-  getPersonSeries: () => API._j("/api/session/person_series"),
-  exportUrl: (format) => `/api/session/export?format=${format || "json"}`,
+  stopSession: (floor) => API._post("/api/session/stop?" + API._fq(floor)),
+  getSession: (floor) => API._j("/api/session?" + API._fq(floor)),
+  getSessionResult: (floor) => API._j("/api/session/result?" + API._fq(floor)),
+  getSessionTimeline: (floor) => API._j("/api/session/timeline?" + API._fq(floor)),
+  getPersonSeries: (floor) => API._j("/api/session/person_series?" + API._fq(floor)),
+  exportUrl: (format, floor) =>
+    `/api/session/export?format=${format || "json"}&` + API._fq(floor),
 
-  // ---- map state
-  getMapState: () => API._j("/api/map/state"),
-  streamUrl: () => "/api/map/stream",
+  // ---- map state (층별)
+  getMapState: (floor) => API._j("/api/map/state?" + API._fq(floor)),
+  streamUrl: (floor) => "/api/map/stream?" + API._fq(floor),
   getStatus: () => API._j("/api/status"),
 };

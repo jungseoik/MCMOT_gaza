@@ -20,6 +20,10 @@
       <button class="vbtn" data-view="live">③ 운영 뷰</button>
     </nav>
     <span class="sp"></span>
+    <span class="floorsel hidden" id="floorSelWrap" title="운영 도면(층) 전환">
+      <span class="floorsel-lab">층</span>
+      <select id="floorSel"></select>
+    </span>
     <span class="chip" id="siteChip">site: — · v0</span>
     <span class="clock t-num" id="clock">--:--:--</span>
   </header>
@@ -65,6 +69,19 @@
         </div>
         <div class="sidebody">
           <div id="mapSetPanel">
+          <div class="group">
+            <div class="gtitle">도면(층) <span class="cnt" id="cntFloors">1</span></div>
+            <div class="floor-edit">
+              <select id="floorEditSel" title="편집할 층 선택"></select>
+              <input id="floorNameInp" type="text" placeholder="층 이름" title="현재 층 이름 (Enter로 저장)" />
+            </div>
+            <div class="floor-btns">
+              <button class="btn sm" id="floorAddBtn" title="새 도면(층) 추가">+ 층 추가</button>
+              <button class="tag-btn" id="floorRenameBtn" title="현재 층 이름 저장">이름 저장</button>
+              <button class="tag-btn danger" id="floorDelBtn" title="현재 층 삭제 (소속 카메라는 기본 층으로 재배정)">현재 층 삭제</button>
+            </div>
+            <div class="grow" id="floorMsg"></div>
+          </div>
           <div class="group">
             <div class="gtitle">맵 · 축척</div>
             <div class="grow" id="mapMeta">맵 없음</div>
@@ -223,6 +240,8 @@
             <div class="gtitle">카메라 추가</div>
             <input id="newCamName" type="text" placeholder="이름 (예: 1층 로비)" />
             <input id="newCamRtsp" type="text" placeholder="rtsp://..." />
+            <label class="camfloor-lab" id="newCamFloorLab">매핑 층
+              <select id="newCamFloor" title="이 카메라를 매핑할 도면(층)"></select></label>
             <button class="btn primary sm" id="camAdd" style="width:100%">+ 추가 후 연결 테스트</button>
             <div class="grow" id="camAddMsg"></div>
           </div>
@@ -232,6 +251,8 @@
       <div class="canvaswrap">
         <div class="toolbar" id="mapToolbar2">
           <span class="fieldlab" id="selCamLabel">카메라를 선택하세요</span>
+          <span class="fieldlab hidden" id="mapFloorLab">매핑 층
+            <select id="mapFloorSel" title="이 카메라가 매핑될 도면(층)"></select></span>
           <span class="vsep"></span>
           <div class="seg" id="camTools">
             <button class="tag-btn on" data-mode="pair">대응점 (4+쌍)</button>

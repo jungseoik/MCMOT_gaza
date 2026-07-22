@@ -374,7 +374,7 @@ Views.live = (() => {
     });
     if (window.Session) {
       Session.init({ onMapRender: () => { if (mc) mc.render(); } });
-      Session.bootstrap();
+      // bootstrap은 enter()에서 매 진입(층 전환 포함)마다 현재 층 기준으로 호출
     }
     $("graphToggle").onclick = () => {
       showGraph = !showGraph;
@@ -398,11 +398,24 @@ Views.live = (() => {
     $("snapModal").onclick = (e) => { if (e.target === $("snapModal")) $("snapModal").classList.add("hidden"); };
   }
 
+  function clearPanels() {
+    $("mObjects").textContent = "0";
+    $("objCnt").textContent = "0";
+    $("objList").innerHTML = "";
+    $("liveCamList").innerHTML = `<div class="grow">불러오는 중…</div>`;
+    ["mZones", "mBottlenecks", "mExits"].forEach((id) => { $(id).innerHTML = ""; });
+  }
+
   function enter() {
     init();
     active = true;
+    // 층 전환 대비 — 이전 층의 객체·상태·보간 캐시 리셋
+    state = null; prevObjects = {}; currObjects = {}; selGid = null;
+    lastMsg = 0; lastSseTime = 0;
+    clearPanels();
     if (App.mapImg && App.site.map) mc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
     else mc.setImage(null, 1000, 600);
+    if (window.Session && Session.bootstrap) Session.bootstrap();  // 현재 층 세션 반영
     connect();
     startRenderLoop();
   }
