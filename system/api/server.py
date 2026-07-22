@@ -32,7 +32,14 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
-from system.config.schema import CameraConfig, CameraMapping, MapSpec, SiteConfig
+from system.config.schema import (
+    DEFAULT_FLOOR_ID,
+    CameraConfig,
+    CameraMapping,
+    Floor,
+    MapSpec,
+    SiteConfig,
+)
 from system.config.store import SiteStore
 from system.contracts import MapState
 from system.ingest.frame_queue import FrameQueue
@@ -68,14 +75,32 @@ class Runtime:
                                           gpu_devices=parse_gpu_devices())
         else:
             self.ingest = IngestManager(self.queue, gpu_devices=GPU_DEVICES or None)
-        self.engine: MetricsEngine | None = None
+        # 층(floor)마다 엔진 1개 — 층=독립 좌표계 (v1.7). floor_id → MetricsEngine.
+        self.engines: dict[str, MetricsEngine] = {}
+        self._cam_floor: dict[str, str] = {}   # cam_id → floor_id (라우팅 캐시)
         self.analyzer = None  # AnalyzerThread | None — TRT 로드 실패 시 None
         self._lock = threading.Lock()
 
     def _dispatch_tracks(self, cam_id: str, ts: float, tracks) -> None:
-        """DS 브리지 → 엔진 어댑터 (엔진은 startup에서 생성되므로 지연 위임)."""
-        if self.engine is not None:
-            self.engine.on_tracks(cam_id, ts, tracks)
+        """트래킹 → 엔진 라우터. cam_id 소속 층 엔진으로 위임 (엔진은
+        startup에서 생성되므로 지연 위임). DS 브리지·AnalyzerThread 공용."""
+        eng = self.engines.get(self._cam_floor.get(cam_id, DEFAULT_FLOOR_ID))
+        if eng is not None:
+            eng.on_tracks(cam_id, ts, tracks)
+
+    # --------------------------------------------------- 층(floor) 해석
+    def resolve_floor(self, floor_id: str | None = None) -> str:
+        """요청 floor_id를 실재 층 id로 해석 (없으면 default, default도 없으면
+        첫 엔진). engines는 site.floors와 동기 유지된다."""
+        fid = floor_id or DEFAULT_FLOOR_ID
+        if fid in self.engines:
+            return fid
+        if DEFAULT_FLOOR_ID in self.engines:
+            return DEFAULT_FLOOR_ID
+        return next(iter(self.engines), DEFAULT_FLOOR_ID)
+
+    def engine_for(self, floor_id: str | None = None) -> MetricsEngine | None:
+        return self.engines.get(self.resolve_floor(floor_id))
 
     # ------------------------------------------------------------ 설정 접근
     def site(self) -> SiteConfig:
@@ -88,14 +113,28 @@ class Runtime:
         return self.store.list_cameras(SITE_ID)
 
     def reload_engine(self) -> None:
+        """층 목록·카메라 매핑 변경을 엔진에 반영 — 층마다 엔진을 유지/생성/삭제.
+        기존 엔진은 reload()로 통과선 카운트·진행 세션을 보존한다."""
         with self._lock:
-            if self.engine is not None:
-                self.engine.reload(self.site(), self.cameras())
+            site, cams = self.site(), self.cameras()
+            self._cam_floor = {c.cam_id: site.floor_id_of_camera(c) for c in cams}
+            floor_ids = {fl.id for fl in site.floors}
+            for fid in list(self.engines):          # 삭제된 층 엔진 정리
+                if fid not in floor_ids:
+                    del self.engines[fid]
+            for fl in site.floors:
+                view = site.as_floor_view(fl.id)
+                floor_cams = [c for c in cams if self._cam_floor[c.cam_id] == fl.id]
+                eng = self.engines.get(fl.id)
+                if eng is None:
+                    self.engines[fl.id] = MetricsEngine(view, floor_cams)
+                else:
+                    eng.reload(view, floor_cams)
 
     # ------------------------------------------------------------ 수명주기
     def startup(self) -> None:
-        site, cams = self.site(), self.cameras()
-        self.engine = MetricsEngine(site, cams)
+        self.reload_engine()          # 층별 엔진 생성 + cam→floor 캐시 구성
+        cams = self.cameras()
         self.ingest.start(cams)
 
         if INGEST_BACKEND == "deepstream":
@@ -107,7 +146,7 @@ class Runtime:
             from system.tracking.analyzer import AnalyzerThread
             self.analyzer = AnalyzerThread(
                 self.queue,
-                on_tracks=self.engine.on_tracks,
+                on_tracks=self._dispatch_tracks,   # 층 라우터 경유
                 camera_fps={c.cam_id: c.analyze_fps for c in cams},
             )
             self.analyzer.start()
@@ -185,14 +224,16 @@ async def put_site(request: Request):
 
 
 @app.post("/api/site/map")
-async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(None)):
+async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(None),
+                        floor: str = DEFAULT_FLOOR_ID):
     data = await image.read()
     arr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if arr is None:
         raise HTTPException(422, "이미지 디코드 실패")
-    site_dir = rt.store.site_dir(SITE_ID)
-    site_dir.mkdir(parents=True, exist_ok=True)
-    (site_dir / "map.png").write_bytes(data)
+    fid = rt.resolve_floor(floor)
+    path = rt.store.map_path(SITE_ID, fid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
 
     m_per_px = None
     if meta:  # cad-convert 메타 JSON — m_per_px 자동 (계약 A-6)
@@ -202,17 +243,21 @@ async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(N
             raise HTTPException(422, "meta JSON에서 m_per_px를 읽지 못함")
 
     cfg = rt.site()
-    prev_scale = cfg.map.scale if cfg.map else None  # 재업로드 시 기존 축척 유지
-    cfg.map = MapSpec(image="map.png", w=arr.shape[1], h=arr.shape[0],
-                      scale=prev_scale, m_per_px=m_per_px)
+    fl = cfg.get_floor(fid)
+    prev_scale = fl.map.scale if fl.map else None    # 재업로드 시 기존 축척 유지
+    spec = MapSpec(image=path.name, w=arr.shape[1], h=arr.shape[0],
+                   scale=prev_scale, m_per_px=m_per_px)
+    fl.map = spec
+    if fid == DEFAULT_FLOOR_ID:
+        cfg.map = spec                               # top-level 동기화(재승격 대비)
     rt.store.save_site(cfg)
     rt.reload_engine()
-    return cfg.map
+    return spec
 
 
 @app.get("/api/site/map")
-def get_site_map():
-    p = rt.store.site_dir(SITE_ID) / "map.png"
+def get_site_map(floor: str = DEFAULT_FLOOR_ID):
+    p = rt.store.map_path(SITE_ID, rt.resolve_floor(floor))
     if not p.is_file():
         raise HTTPException(404, "맵 이미지 없음")
     return FileResponse(p, media_type="image/png")
@@ -320,110 +365,187 @@ async def set_mapping(cam_id: str, request: Request):
     # valid_roi는 요청 값으로 전체 교체 — null/3점 미만 = ROI 제거 (계약 v1.3)
     roi = body.get("valid_roi")
     cfg.valid_roi = roi if (roi and len(roi) >= 3) else None
+    if "floor_id" in body:            # 층 매핑 (v1.7) — map_pts는 해당 층 맵 px
+        cfg.floor_id = body["floor_id"]
     rt.store.save_camera(SITE_ID, cfg)
     rt.reload_engine()
     return cfg
 
 
+# ================================================================ 층(floor) — 다중 도면 (v1.7)
+def _floor_summary(cfg: SiteConfig, fl: Floor) -> dict:
+    n_cams = sum(1 for c in rt.cameras() if cfg.floor_id_of_camera(c) == fl.id)
+    return {"id": fl.id, "name": fl.name,
+            "has_map": fl.map is not None,
+            "map": fl.map.model_dump() if fl.map else None,
+            "camera_count": n_cams}
+
+
+@app.get("/api/floors")
+def list_floors():
+    """층 목록(요약) — 운영뷰 층 전환 탭용."""
+    cfg = rt.site()
+    return [_floor_summary(cfg, fl) for fl in cfg.floors]
+
+
+@app.post("/api/floors")
+async def add_floor(request: Request):
+    """층 추가 — body {id?, name?}. id 생략 시 서버 발급(floor2..).
+    id 중복은 409."""
+    body = await request.json()
+    cfg = rt.site()
+    ids = {fl.id for fl in cfg.floors}
+    fid = (body.get("id") or "").strip()
+    if fid and fid in ids:
+        raise HTTPException(409, f"이미 존재하는 층 id: {fid}")
+    if not fid:
+        n = 2
+        while f"floor{n}" in ids:
+            n += 1
+        fid = f"floor{n}"
+    cfg.floors.append(Floor(id=fid, name=body.get("name", "")))
+    rt.store.save_site(cfg)
+    rt.reload_engine()
+    return _floor_summary(rt.site(), cfg.get_floor(fid))
+
+
+@app.delete("/api/floors/{floor_id}")
+def delete_floor(floor_id: str):
+    """층 삭제 — default 삭제 불가, 최소 1개 층 보장. 소속 카메라는
+    default 층으로 재배정(floor_id=None)."""
+    if floor_id == DEFAULT_FLOOR_ID:
+        raise HTTPException(422, "default 층은 삭제할 수 없습니다")
+    cfg = rt.site()
+    ids = {fl.id for fl in cfg.floors}
+    if floor_id not in ids:
+        raise HTTPException(404, f"층 없음: {floor_id}")
+    if len(cfg.floors) <= 1:
+        raise HTTPException(422, "최소 1개 층이 필요합니다")
+    cfg.floors = [fl for fl in cfg.floors if fl.id != floor_id]
+    rt.store.save_site(cfg)
+    # 해당 층 소속 카메라 → default 재배정 (고아 방지)
+    for cam in rt.cameras():
+        if cam.floor_id == floor_id:
+            cam.floor_id = None
+            rt.store.save_camera(SITE_ID, cam)
+    rt.reload_engine()
+    return {"ok": True}
+
+
 # ================================================================ 평가 세션 (계약 v1.2)
 @app.post("/api/session/start")
-async def session_start(request: Request):
-    if rt.engine is None:
+async def session_start(request: Request, floor: str = DEFAULT_FLOOR_ID):
+    eng = rt.engine_for(floor)
+    if eng is None:
         raise HTTPException(503, "엔진 미기동")
     body = await request.json()
-    if rt.engine.session_live() is not None:
+    if eng.session_live() is not None:
         raise HTTPException(409, "세션 진행 중 — 먼저 종료하세요")
     # origins 우선, 없으면 단일 origin (하위 호환)
     origins = body.get("origins")
     origin_xy = tuple(body["origin"]) if "origin" in body else None
-    return rt.engine.start_session(
+    return eng.start_session(
         origin_xy=origin_xy,
         t_alarm=body.get("t_alarm"),
         alarm_origins=[tuple(o) for o in origins] if origins else None,
     )
 
 
-def _sessions_dir() -> Path:
-    d = rt.store.site_dir(SITE_ID) / "sessions"
+def _sessions_dir(floor_id: str = DEFAULT_FLOOR_ID) -> Path:
+    """세션 저장 디렉토리 — default 층은 기존 sessions/ 유지(하위호환),
+    그 외 층은 sessions/<floor_id>/."""
+    base = rt.store.site_dir(SITE_ID) / "sessions"
+    d = base if floor_id == DEFAULT_FLOOR_ID else base / floor_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _save_session(result, timeline, person_series=None) -> None:
+def _save_session(result, timeline, person_series=None,
+                  floor_id: str = DEFAULT_FLOOR_ID) -> None:
     """세션 결과+타임라인+객체별 d_i(t) 시계열 영속화 (FR-09·v1.4)."""
     payload = {"result": result.model_dump(),
                "timeline": [t.model_dump() for t in timeline],
                "person_series": person_series or {}}
-    p = _sessions_dir() / f"{result.session_id}.json"
+    p = _sessions_dir(floor_id) / f"{result.session_id}.json"
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     tmp.rename(p)
 
 
-def _load_saved(session_id: str) -> dict | None:
-    p = _sessions_dir() / f"{session_id}.json"
+def _load_saved(session_id: str, floor_id: str = DEFAULT_FLOOR_ID) -> dict | None:
+    p = _sessions_dir(floor_id) / f"{session_id}.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
 
 
-def _latest_saved() -> dict | None:
-    files = sorted(_sessions_dir().glob("*.json"),
+def _latest_saved(floor_id: str = DEFAULT_FLOOR_ID) -> dict | None:
+    # sessions/ 최상위만 스캔(하위 층 디렉토리 제외) — glob("*.json")로 충분
+    files = sorted(_sessions_dir(floor_id).glob("*.json"),
                    key=lambda p: p.stat().st_mtime)
     return json.loads(files[-1].read_text(encoding="utf-8")) if files else None
 
 
 @app.post("/api/session/stop")
-def session_stop():
-    if rt.engine is None or rt.engine.session_live() is None:
+def session_stop(floor: str = DEFAULT_FLOOR_ID):
+    fid = rt.resolve_floor(floor)
+    eng = rt.engine_for(fid)
+    if eng is None or eng.session_live() is None:
         raise HTTPException(404, "진행 중 세션 없음")
-    result = rt.engine.stop_session()
-    _save_session(result, rt.engine.session_timeline(),
-                  rt.engine.session_person_series())
+    result = eng.stop_session()
+    _save_session(result, eng.session_timeline(),
+                  eng.session_person_series(), floor_id=fid)
     return result
 
 
 @app.get("/api/session")
-def session_get():
-    live = rt.engine.session_live() if rt.engine else None
+def session_get(floor: str = DEFAULT_FLOOR_ID):
+    eng = rt.engine_for(floor)
+    live = eng.session_live() if eng else None
     if live is None:
         raise HTTPException(404, "진행 중 세션 없음")
     return live
 
 
 @app.get("/api/session/result")
-def session_result():
-    res = rt.engine.session_result() if rt.engine else None
+def session_result(floor: str = DEFAULT_FLOOR_ID):
+    fid = rt.resolve_floor(floor)
+    eng = rt.engine_for(fid)
+    res = eng.session_result() if eng else None
     if res is not None:
         return res
-    saved = _latest_saved()                     # 재시작 후에도 마지막 결과 유지
+    saved = _latest_saved(fid)                  # 재시작 후에도 마지막 결과 유지
     if saved is not None:
         return saved["result"]
     raise HTTPException(404, "산출된 세션 결과 없음")
 
 
 @app.get("/api/session/timeline")
-def session_timeline():
-    tl = rt.engine.session_timeline() if rt.engine else []
+def session_timeline(floor: str = DEFAULT_FLOOR_ID):
+    fid = rt.resolve_floor(floor)
+    eng = rt.engine_for(fid)
+    tl = eng.session_timeline() if eng else []
     if tl:
         return tl
-    saved = _latest_saved()
+    saved = _latest_saved(fid)
     return saved["timeline"] if saved else []
 
 
 @app.get("/api/session/person_series")
-def session_person_series():
+def session_person_series(floor: str = DEFAULT_FLOOR_ID):
     """객체별 d_i(t) 시계열 — 진행 중이면 현재까지, 종료 후엔 마지막/저장본 (v1.4)."""
-    ps = rt.engine.session_person_series() if rt.engine else {}
+    fid = rt.resolve_floor(floor)
+    eng = rt.engine_for(fid)
+    ps = eng.session_person_series() if eng else {}
     if ps:
         return ps
-    saved = _latest_saved()
+    saved = _latest_saved(fid)
     return saved.get("person_series", {}) if saved else {}
 
 
 @app.get("/api/sessions")
-def sessions_list():
+def sessions_list(floor: str = DEFAULT_FLOOR_ID):
     """세션 이력 목록 (요약) — 저장 파일 기반, 최신순 (계약 v1.3)."""
     out = []
-    for p in sorted(_sessions_dir().glob("*.json"),
+    for p in sorted(_sessions_dir(rt.resolve_floor(floor)).glob("*.json"),
                     key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             r = json.loads(p.read_text(encoding="utf-8"))["result"]
@@ -435,19 +557,21 @@ def sessions_list():
 
 
 @app.get("/api/sessions/{session_id}")
-def sessions_get(session_id: str):
-    saved = _load_saved(session_id)
+def sessions_get(session_id: str, floor: str = DEFAULT_FLOOR_ID):
+    saved = _load_saved(session_id, rt.resolve_floor(floor))
     if saved is None:
         raise HTTPException(404, f"세션 없음: {session_id}")
     return saved
 
 
 @app.get("/api/session/export")
-def session_export(format: str = "json"):
+def session_export(format: str = "json", floor: str = DEFAULT_FLOOR_ID):
     from system.contracts import EvaluationResult
-    res = rt.engine.session_result() if rt.engine else None
+    fid = rt.resolve_floor(floor)
+    eng = rt.engine_for(fid)
+    res = eng.session_result() if eng else None
     if res is None:                              # 재시작 후엔 저장본으로
-        saved = _latest_saved()
+        saved = _latest_saved(fid)
         if saved is None:
             raise HTTPException(404, "산출된 세션 결과 없음")
         res = EvaluationResult.model_validate(saved["result"])
@@ -483,22 +607,26 @@ def session_export(format: str = "json"):
 
 
 # ================================================================ 맵 상태
-def _map_state() -> MapState:
-    ms = rt.engine.snapshot() if rt.engine is not None else MapState(ts=0.0)
-    ms.cameras = rt.ingest.states()
+def _map_state(floor_id: str = DEFAULT_FLOOR_ID) -> MapState:
+    """해당 층 엔진 스냅샷 + 그 층 소속 카메라 상태만 병합 (v1.7)."""
+    fid = rt.resolve_floor(floor_id)
+    eng = rt.engines.get(fid)
+    ms = eng.snapshot() if eng is not None else MapState(ts=0.0)
+    ms.cameras = [s for s in rt.ingest.states()
+                  if rt._cam_floor.get(s.cam_id, DEFAULT_FLOOR_ID) == fid]
     return ms
 
 
 @app.get("/api/map/state")
-def map_state():
-    return _map_state()
+def map_state(floor: str = DEFAULT_FLOOR_ID):
+    return _map_state(floor)
 
 
 @app.get("/api/map/stream")
-async def map_stream():
+async def map_stream(floor: str = DEFAULT_FLOOR_ID):
     async def gen():
         while True:
-            payload = _map_state().model_dump_json()
+            payload = _map_state(floor).model_dump_json()
             yield f"event: state\ndata: {payload}\n\n"
             await asyncio.sleep(1.0)
     return StreamingResponse(gen(), media_type="text/event-stream",
@@ -506,14 +634,15 @@ async def map_stream():
 
 
 @app.get("/api/debug/tracks")
-def debug_tracks():
+def debug_tracks(floor: str = DEFAULT_FLOOR_ID):
     """트래커 foot_uv 진단 — 좌표가 카메라 원본 해상도 범위 안인지 확인."""
-    if rt.engine is None:
+    eng = rt.engine_for(floor)
+    if eng is None:
         return {"error": "엔진 없음"}
     import numpy as np, cv2
     cams = {c.cam_id: c for c in rt.cameras()}
     workers = getattr(rt.ingest, "_workers", {})
-    foot_dbg = rt.engine._debug_foot   # gid -> {foot_u/v, map_x/y}
+    foot_dbg = eng._debug_foot   # gid -> {foot_u/v, map_x/y}
     result = []
     for gid, d in foot_dbg.items():
         cam_id = gid.rsplit(":", 1)[0]

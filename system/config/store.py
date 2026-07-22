@@ -15,7 +15,7 @@ import json
 import shutil
 from pathlib import Path
 
-from .schema import CameraConfig, SiteConfig
+from .schema import DEFAULT_FLOOR_ID, CameraConfig, SiteConfig
 
 _JSON_KW = dict(ensure_ascii=False, indent=2)
 
@@ -33,6 +33,13 @@ class SiteStore:
 
     def _cam_json(self, site_id: str, cam_id: str) -> Path:
         return self.site_dir(site_id) / "cameras" / f"{cam_id}.json"
+
+    def map_path(self, site_id: str, floor_id: str = DEFAULT_FLOOR_ID) -> Path:
+        """층별 맵 이미지 경로 (v1.7). default 층은 기존 map.png 유지(하위호환),
+        그 외 층은 map_<floor_id>.png."""
+        name = ("map.png" if floor_id == DEFAULT_FLOOR_ID
+                else f"map_{floor_id}.png")
+        return self.site_dir(site_id) / name
 
     @staticmethod
     def _atomic_write(path: Path, data: dict) -> None:

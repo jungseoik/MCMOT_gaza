@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field, model_validator
 
 Point = tuple[float, float]
 
+DEFAULT_FLOOR_ID = "default"   # 층 미지정·기존 단일도면 사이트의 기본 층 id (하위호환)
+
 
 class MapScale(BaseModel):
     """맵 위 2점 + 실거리(m) → m/px 축척."""
@@ -119,8 +121,35 @@ class Thresholds(BaseModel):
                             # BYTE 저신뢰 연관으로 연명한 트랙 관측을 지표 층에서 차단
 
 
+class Floor(BaseModel):
+    """도면(층) 1개 — 독립 좌표계의 공간요소 묶음 (다중 도면 지원 v1.7).
+
+    한 사이트는 N개 층을 가진다. 층마다 자기 맵·경로·구역·병목·출입구·
+    그래프·경보원·격자를 갖고, 층간 좌표계·Re-ID는 서로 독립이다.
+    판정 임계값(Thresholds)은 사이트 공용 — Floor에 두지 않는다.
+    필드 타입·기본값은 SiteConfig의 동명 필드와 동일(하위호환).
+    """
+    id: str
+    name: str = ""
+    map: MapSpec | None = None
+    routes: list[Route] = []
+    zones: list[Zone] = []
+    bottlenecks: list[Bottleneck] = []
+    exits: list[ExitLine] = []
+    graph: SpatialGraph = SpatialGraph()
+    alarm_origins: list[AlarmOrigin] = []
+    grid: GridConfig = GridConfig()
+
+
 class SiteConfig(BaseModel):
-    """사이트 설정 루트 — data/sites/<site_id>/site.json."""
+    """사이트 설정 루트 — data/sites/<site_id>/site.json.
+
+    다중 도면(v1.7): 공간요소는 `floors`가 정본이다. 기존 단일도면 사이트는
+    top-level map/routes/... 필드를 그대로 두고(하위호환), 로드 후 검증기가
+    이를 `floors=[Floor(id="default", ...)]` 하나로 승격한다 → 로드 뒤에는
+    언제나 floors≥1이 보장된다. 엔진/세션은 층 개념 없이 `as_floor_view()`가
+    돌려주는 SiteConfig(한 층의 공간요소를 top-level에 실은 뷰)를 소비한다.
+    """
     site_id: str
     version: int = 1
     map: MapSpec | None = None
@@ -131,7 +160,58 @@ class SiteConfig(BaseModel):
     graph: SpatialGraph = SpatialGraph()            # IDR용 수동 그래프 (v1.2)
     alarm_origins: list[AlarmOrigin] = []           # 경보 발생원 N개 (v1.6)
     grid: GridConfig = GridConfig()                 # IDR 격자 BFS 설정 (v1.6)
+    floors: list[Floor] = []                        # 도면(층) 목록 (v1.7) — 정본
     thresholds: Thresholds = Thresholds()
+
+    @model_validator(mode="after")
+    def _ensure_floors(self):
+        """floors 미지정(기존 단일도면 사이트) → top-level 공간요소를 'default'
+        층 하나로 승격. 이미 floors가 있으면 그대로 둔다."""
+        if not self.floors:
+            self.floors = [Floor(
+                id=DEFAULT_FLOOR_ID, name="기본",
+                map=self.map, routes=self.routes, zones=self.zones,
+                bottlenecks=self.bottlenecks, exits=self.exits,
+                graph=self.graph, alarm_origins=self.alarm_origins,
+                grid=self.grid,
+            )]
+        return self
+
+    def get_floor(self, floor_id: str | None = None) -> Floor:
+        """floor_id에 해당하는 층. None이면 'default', 없으면 첫 층.
+        (검증기가 floors≥1을 보장하므로 항상 값을 돌려준다.)"""
+        fid = floor_id or DEFAULT_FLOOR_ID
+        for fl in self.floors:
+            if fl.id == fid:
+                return fl
+        return self.floors[0]
+
+    def floor_id_of_camera(self, cam: "CameraConfig") -> str:
+        """카메라 소속 층 id — floor_id None이면 'default', 존재하지 않는
+        층을 가리키면 첫 층으로 해석(고아 카메라 방지)."""
+        fid = cam.floor_id or DEFAULT_FLOOR_ID
+        ids = {fl.id for fl in self.floors}
+        return fid if fid in ids else self.floors[0].id
+
+    def as_floor_view(self, floor_id: str | None = None) -> "SiteConfig":
+        """한 층의 공간요소를 top-level에 실은 SiteConfig 뷰.
+
+        엔진/세션은 이 뷰를 받아 층 개념 없이 기존 로직 그대로 동작한다
+        (내부 로직 무변경). thresholds·version·site_id는 사이트 공용값 유지."""
+        fl = self.get_floor(floor_id)
+        return SiteConfig(
+            site_id=self.site_id,
+            version=self.version,
+            map=fl.map,
+            routes=fl.routes,
+            zones=fl.zones,
+            bottlenecks=fl.bottlenecks,
+            exits=fl.exits,
+            graph=fl.graph,
+            alarm_origins=fl.alarm_origins,
+            grid=fl.grid,
+            thresholds=self.thresholds,
+        )
 
 
 class CameraMapping(BaseModel):
@@ -160,6 +240,8 @@ class CameraConfig(BaseModel):
     rtsp: str
     enabled: bool = True
     analyze_fps: float = Field(default=5.0, gt=0, le=30)
+    floor_id: str | None = None            # 소속 층 id (v1.7). None이면 "default"
+                                           # 층으로 해석 (하위호환 기본 None).
     mapping: CameraMapping | None = None   # 없으면 맵 투영 불가 → 처리 제외
     valid_roi: list[Point] | None = None   # 카메라 px 유효영역 (없으면 전체)
     min_conf: float | None = Field(default=None, ge=0, le=1)  # 카메라별 최소 검출

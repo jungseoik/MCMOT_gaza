@@ -1,4 +1,11 @@
-# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.4)
+# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.7)
+
+> **v1.7 개정 (2026-07-22 — 다중 도면(N개 층) 지원, D-11)**
+> 하위호환 원칙: 층 미지정·기존 단일도면 사이트는 "default" 층 1개로 그대로 동작.
+> - 스키마(`schema.py`): `Floor(BaseModel)` 신설 — `id·name·map·routes·zones·bottlenecks·exits·graph·alarm_origins·grid`(공간요소, 타입은 SiteConfig 동명 필드와 동일). `SiteConfig.floors: list[Floor]=[]` 추가(정본). **기존 top-level map/routes/... 필드는 유지**하되, `@model_validator`가 floors 비었을 때 top-level을 `Floor(id="default", name="기본")` 하나로 승격 → 로드 후 항상 floors≥1. `CameraConfig.floor_id: str|None=None`(None=default 층). 헬퍼: `get_floor()·floor_id_of_camera()·as_floor_view()`(한 층의 공간요소를 top-level에 실은 SiteConfig 뷰 — 엔진/세션 내부 로직 무변경으로 소비).
+> - store(`store.py`): `map_path(site_id, floor_id="default")` — default=`map.png`(기존 경로 유지), 그 외=`map_<floor_id>.png`.
+> - API: 아래 엔드포인트에 **`?floor=` 쿼리(기본 "default")** 추가 — `GET/POST /api/site/map`, `GET /api/map/state`, `GET /api/map/stream`, `POST /api/session/start`, `POST /api/session/stop`, `GET /api/session[/result|/timeline|/person_series]`, `GET /api/sessions[/{id}]`, `GET /api/session/export`, `GET /api/debug/tracks`. 층마다 `MapState`를 하나씩 반환(계약 `contracts.py`는 **무개정** — MapState에 floor_id 미도입). `PUT /api/cameras/{id}/mapping` body에 **`floor_id`** 추가(그 층 맵 px 기준 H 산출·소속 지정). **층 CRUD**: `GET /api/floors`·`POST /api/floors`·`DELETE /api/floors/{id}`.
+> - 서버 런타임: `Runtime.engine`(단일) → `Runtime.engines: dict[floor_id→MetricsEngine]`. 층마다 그 층 카메라만 받는 엔진 1개. 세션 저장 디렉토리 `sessions/<floor_id>/`(default는 `sessions/` 유지).
 
 > **v1.4 개정 (2026-07-14 — EPFI 근거 시계열·설정 스냅샷 표시)**
 > - `SessionLive.config_version` 추가 — 세션이 고정한 설정 버전(사이트 버전과 다르면 UI가 "다음 세션부터 적용" 경고)
@@ -64,7 +71,10 @@
 | `DELETE /api/cameras/{id}` | — | `{"ok": true}` |
 | `POST /api/cameras/{id}/test` | — | `{ok, width, height, snapshot_b64}` (첫 프레임. **snapshot_b64는 `data:image/jpeg;base64,…` data URL 형식** — v1.1 명문화) |
 | `GET /api/cameras/{id}/snapshot` | — | image/jpeg 1장 (온디맨드, 스트림 아님) |
-| `PUT /api/cameras/{id}/mapping` | `{cctv_pts: [[u,v]×4+], map_pts: [[x,y]×4+], valid_roi: [[u,v]...] \| null}` | `CameraConfig` — **H는 서버가 cv2.findHomography로 산출·저장**. valid_roi는 **요청 값으로 전체 교체**(null/3점 미만=제거 — v1.3 명확화) |
+| `PUT /api/cameras/{id}/mapping` | `{cctv_pts: [[u,v]×4+], map_pts: [[x,y]×4+], valid_roi: [[u,v]...] \| null, floor_id?: str}` | `CameraConfig` — **H는 서버가 cv2.findHomography로 산출·저장**. valid_roi는 **요청 값으로 전체 교체**(null/3점 미만=제거 — v1.3). `floor_id` 지정 시 카메라 소속 층 저장(v1.7, map_pts는 그 층 맵 px) |
+| `GET /api/floors` | — | 층 목록 요약 `[{id, name, has_map, map, camera_count}]` (v1.7) |
+| `POST /api/floors` | `{id?: str, name?: str}` | 추가된 층 요약. id 생략 시 서버 발급(`floor2..`), id 중복 409 (v1.7) |
+| `DELETE /api/floors/{id}` | — | `{"ok": true}`. `default` 삭제 422, 최소 1개 층 보장. 소속 카메라는 default로 재배정 (v1.7) |
 | `POST /api/session/start` | `{origin: [x,y], t_alarm?: float}` (t_alarm 생략 시 now) | `SessionLive`. 시작 시 카운터·debounce reset. 진행 중이면 409 |
 | `POST /api/session/stop` | — | `EvaluationResult` (최종 산출·보존) |
 | `GET /api/session` | — | `SessionLive` (없으면 404) |
