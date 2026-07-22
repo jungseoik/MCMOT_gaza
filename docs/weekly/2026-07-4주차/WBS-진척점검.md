@@ -3,12 +3,14 @@
 - **점검일**: 2026-07-20
 - **기준 WBS**: [`C-lab_PoC_WBS_v8.xlsx`](C-lab_PoC_WBS_v8.xlsx) (2026-07-20 갱신: 07-4주차 점검 반영)
 - **직전 버전(diff 기준)**: [`../2026-07-1주차/C-lab_PoC_WBS_v7.xlsx`](../2026-07-1주차/C-lab_PoC_WBS_v7.xlsx)
-- **레포 기준**: `feature/deepstream-ingest`, HEAD `30a0a09`
+- **레포 기준**: `feature/deepstream-ingest`, HEAD `d2ed8ed`
 - 변경이력: [`docs/wbs/WBS-변경이력.md`](../../wbs/WBS-변경이력.md)
 
-> 이번 주 최대 성과 = **DeepStream zero-copy 다채널 인제스트 전환**(P0~P11, 커밋 `236aa2b`~`30a0a09`).
-> 기존 ffmpeg 경로(4ch@5fps 한계)를 zero-copy 디코드 + 배치 추론으로 교체해 **1GPU 16ch@5fps(총 78.7fps)**
-> 실측. 항목 증감은 없고 **상태 변경 6건**(완료 3 / 진행중 3)만 반영.
+> 이번 주 성과 = **① DeepStream zero-copy 다채널 인제스트 전환**(P0~P11, 커밋 `236aa2b`~`30a0a09`) +
+> **② 다중 도면(N개 층) 지원 신규 구현·라이브 검증 완료**(D-11, 커밋 `11a4bdc`~`d2ed8ed`).
+> ①: 기존 ffmpeg 경로(4ch@5fps 한계)를 zero-copy 디코드+배치 추론으로 교체해 **1GPU 16ch@5fps(총 78.7fps)** 실측.
+> ②: 한 사이트에 N개 도면 등록·카메라 층별 매핑·운영뷰 층 전환. **17F/18F 라이브 검증에서 층별 객체 완전 분리·
+> 4대 지표 층별 산출 확인**(§2-0b). 기존 WBS 항목 상태 변경 6건 + 신규 요구사항 1건(다중 도면, 요구→구현→검증 완결) + 목표 재조정 1건(150→50~60ch).
 
 ## 1. 진척 요약 (총 90개 작업)
 
@@ -55,9 +57,18 @@
   운영 뷰에서 **층 전환**으로 층별 실시간 맵·지표 표시. 현재는 도면 1장(단일 층) 고정 구조.
 - **범위**: 층간 Re-ID(계단·엘리베이터로 층 경계 넘는 동일인 연결)는 **현 단계 제외** —
   각 층 독립 좌표계로 처리. 구역·경로·출구·4대 지표는 층별 산출.
-- **반영 문서**: 요구사항 필수추출정보 §2, 4대지표 **D-11**, requirements README 배너.
-- **상태**: 요구사항 확정·기록 완료. **설계·구현은 차주 착수**(카메라 스케일업과 별개 트랙).
-  검증 계획: 17층 도면 복제=18층으로 2개 층 구성, 3채널을 17층 2개·18층 1개로 분배 테스트.
+- **반영 문서**: 요구사항 필수추출정보 §2, 4대지표 **D-11**, requirements README 배너, CONTRACT.md v1.7.
+- **상태**: ✅ **요구사항 확정 + 설계 + 구현 + 라이브 검증 모두 완료** (같은 주 내 완결).
+  - 백엔드(`11a4bdc`): `Floor` 모델·`SiteConfig.floors`·`CameraConfig.floor_id`(schema.py), 층별
+    `MetricsEngine` 인스턴스(`Runtime.engines` dict)·cam→floor 라우팅·`?floor=` 쿼리·층 CRUD(server.py),
+    `map_path` 층별 파일(store.py). **contracts.py 무개정**(층 스코핑=쿼리). 신규 `tests/system/test_floors.py` 14건.
+  - 프론트(`77208f9`): 상단 층 셀렉터(층 1개면 숨김)·화면1 층 관리·화면2 카메라 층 매핑·화면3 층 전환.
+    `App.site` 별칭으로 기존 렌더러 무변경.
+  - 라이브 검증(`e6ea3d2`·`d2ed8ed`, `docs/reports/img/p3-*.png`): 운영 default를 **17F(cam01·02)+18F(cam03,
+    17F도면 복제)** 2층 구성으로 실 RTSP 검증. **층 전환 시 객체 완전 분리**(17F=cam01·02, 18F=cam03),
+    4대 지표 **층별 독립 산출**(17F SEI 81.6·18F SEI 48.4 등), 새로고침 영속 복원 확인.
+  - **하위호환**: legacy 단일맵 site.json → default 층 1개 자동 승격, 층 1개면 UI 기존과 동일.
+  - **범위 밖**: 층간 Re-ID(향후, D-1 글로벌 병합과 함께). 개선 후보: `POST /api/cameras`에 `floor_id` 미수용(추가 후 PUT 왕복).
 
 ### 2-1. 완료 처리 (3건)
 

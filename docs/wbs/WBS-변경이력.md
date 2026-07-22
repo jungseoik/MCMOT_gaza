@@ -9,7 +9,7 @@ WBS(`C-lab_PoC_WBS_vN.xlsx`)는 **바이너리(xlsx)라 git diff가 안 되므�
 - **점검 절차**: `/wbs-review` 스킬 → 진척 보고서 `docs/weekly/<주차>/WBS-진척점검.md` 생성.
 - 컬럼: `상태`(H열) = 예정 / 진행중 / 완료. `완료 일정`(G열).
 
-> **현재 최신**: **v8** @ `docs/weekly/2026-07-4주차/` (07-4주차, DeepStream 다채널 전환 — **90개**, 완료 20/진행중 11/예정 59)
+> **현재 최신**: **v8** @ `docs/weekly/2026-07-4주차/` (07-4주차 — DeepStream 다채널 전환 + 다중 도면(N층) 지원 신규 + 최종목표 150→50~60ch 하향. **90개**, 완료 20/진행중 11/예정 59)
 
 ---
 
@@ -40,10 +40,18 @@ WBS(`C-lab_PoC_WBS_vN.xlsx`)는 **바이너리(xlsx)라 git diff가 안 되므�
 - 참고: `min_conf`/`valid_roi` 카메라 설정 UI(`925bb38`·`9217348`·`70ca59d`·`d624faf`)는 5.1.4
   전 범위(사용자 관리·시스템 로그) 미달로 **상태 변경 없이 유지**(과대평가 금지). TRT 비블로킹
   스트림 레이스(`9b2ba76`)·워커 죽음의 나선(`02bdc58`) 버그 수정·재검증 완료.
+- **🔻 목표 재조정**: 최종 채널 스케일 **150채널 → 50~60채널** 하향(실증 대상 규모 재산정).
+  요구사항·ADR 01·WBS 02·난이도매트릭스·bench README·xlsx(4.7.3 D·E열) 반영. GPU 산정 ~8장 → 3~4장.
+- **🆕 신규 요구사항·구현 — 다중 도면(N개 층) 지원 (D-11)**: 요구 확정→설계→구현→라이브 검증
+  같은 주 완결. 백엔드(`11a4bdc`: `Floor` 스키마·층별 `MetricsEngine`·`?floor=`·층 CRUD, contracts 무개정),
+  프론트(`77208f9`: 층 셀렉터·3화면), 라이브 17F/18F 검증(`e6ea3d2`·`d2ed8ed`: 층별 객체 분리·지표 층별 산출).
+  신규 `tests/system/test_floors.py` 14건. 하위호환(legacy=default 층 1개 승격). CONTRACT.md v1.7.
+  기존 WBS 항목엔 딱 맞는 번호 없음 → 진척점검 §2-0b에 별도 기록(향후 WBS 항목화 검토).
 - 근거: [WBS 진척 점검](../weekly/2026-07-4주차/WBS-진척점검.md) ·
-  [DeepStream zero-copy 인제스트 전환 ADR](../architecture/04-DeepStream-zero-copy-인제스트-전환.md).
-- ⚠️ v8 xlsx는 openpyxl로 상태(H)·완료일정(G)·색·버전셀(C5)만 in-place 편집. 셀 diff로 6개
-  항목의 G·H·C5만 변경 확인(추가/삭제 0). 간트 색상 등 서식은 Excel 육안 검토 권장.
+  [DeepStream zero-copy 인제스트 전환 ADR](../architecture/04-DeepStream-zero-copy-인제스트-전환.md) ·
+  요구사항 D-11(다중 도면).
+- ⚠️ v8 xlsx는 openpyxl로 상태(H)·완료일정(G)·색·버전셀(C5)·4.7.3 내용(D·E, 목표 하향)만 in-place
+  편집. 셀 diff로 변경분만 확인(행 추가/삭제 0). 간트 색상 등 서식은 Excel 육안 검토 권장.
 
 ## v7 — 2026-07-01 (7월 1주차)
 
