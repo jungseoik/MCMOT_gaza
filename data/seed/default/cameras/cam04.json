@@ -1,0 +1,9 @@
+{
+  "cam_id": "cam04",
+  "name": "샘플1 (sample1)",
+  "rtsp": "rtsp://127.0.0.1:8554/sample1",
+  "enabled": false,
+  "analyze_fps": 5.0,
+  "mapping": null,
+  "valid_roi": null
+}
