@@ -43,6 +43,17 @@ for s in "${STREAMS[@]}"; do
 done
 rm -rf "$STREAM_DIR/.hf_tmp"
 
+# ── 2b) 적합성 체크 → 부적합하면 인코딩 (송출 전 안전장치) ─────────────────
+# HF 데이터셋 영상은 이미 WebRTC 호환이라 보통 전부 스킵되지만, 다른 영상을
+# 넣었거나 원본이 바뀐 경우를 대비해 검사 후 필요한 것만 재인코딩한다.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for s in "${STREAMS[@]}"; do
+  if ! bash "$HERE/check_video.sh" "$STREAM_DIR/$s.mp4" >/dev/null 2>&1; then
+    echo "▶ $s.mp4 부적합 감지 — WebRTC 호환으로 재인코딩"
+    bash "$HERE/encode_video.sh" --inplace "$STREAM_DIR/$s.mp4"
+  fi
+done
+
 # ── 3) mediamtx (도커) 기동 ───────────────────────────────────────────────
 if ! docker ps --format '{{.Names}}' | grep -qx "$MEDIAMTX_NAME"; then
   if docker ps -a --format '{{.Names}}' | grep -qx "$MEDIAMTX_NAME"; then

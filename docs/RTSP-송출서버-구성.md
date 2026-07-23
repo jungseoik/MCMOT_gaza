@@ -11,20 +11,37 @@
 ## 빠른 재현 (권장) — HF 데이터셋에서 받아 자동 송출
 
 이 프로젝트 테스트 3채널 영상은 HuggingFace 데이터셋 **`backseollgi/mot_dataset`**의
-`videos/`에 있다(이미 WebRTC 호환 인코딩 완료). 스크립트 하나로 다운로드+송출까지 재현:
+`videos/`에 있다(**공개** 데이터셋, 이미 WebRTC 호환 인코딩 완료). 스크립트 하나로 다운로드+송출까지 재현:
 
 ```bash
 # hf CLI 필요 (없으면: pip install -U huggingface_hub)
-# 비공개 데이터셋이면 토큰 필요 — 환경변수로만(커밋 금지)
-HF_TOKEN=hf_xxx bash tools/rtsp/setup_rtsp_streams.sh
+# 공개 데이터셋이라 토큰 불필요. (비공개로 바뀌면 HF_TOKEN=hf_xxx 를 앞에 — 커밋 금지)
+bash tools/rtsp/setup_rtsp_streams.sh
 ```
 → `rtsp://<이서버IP>:8554/{1_v1,2_v1,3_v1}` 3채널 송출. MACS 등록 주소로 그대로 사용.
 
-스크립트가 하는 일: HF에서 `videos/*.mp4` 다운로드(`~/rtsp-stream/`) → mediamtx(도커) 기동
-→ 스트림별 pm2 송출 등록. 이미 있는 파일·컨테이너는 건너뛴다(멱등).
+스크립트가 하는 일: HF에서 `videos/*.mp4` 다운로드(`~/rtsp-stream/`) → **적합성 체크
+(부적합하면 자동 재인코딩)** → mediamtx(도커) 기동 → 스트림별 pm2 송출 등록.
+이미 있는 파일·컨테이너는 건너뛴다(멱등). HF 영상은 이미 호환이라 보통 재인코딩은 안 걸린다.
 
-> **채널 추가/변경**: `tools/rtsp/setup_rtsp_streams.sh`의 `STREAMS=(...)` 배열 수정.
-> 새 영상은 아래 "① 인코딩" 후 HF에 업로드(`hf upload backseollgi/mot_dataset new.mp4 videos/new.mp4 --repo-type dataset`).
+## 도구 3종 (tools/rtsp/)
+
+| 스크립트 | 역할 |
+|----------|------|
+| `check_video.sh <mp4...>` | **적합성 검사만**(ffprobe). 코덱·프로파일·pix_fmt 확인. 전부 적합 exit 0, 하나라도 부적합 exit 1. **인코딩 전에 먼저 돌려 재인코딩 불필요한지 판단.** |
+| `encode_video.sh <in> [out]` / `--inplace <mp4...>` | 먼저 check → **이미 적합하면 복사만, 부적합하면** WebRTC 호환으로 인코딩. `--inplace`는 디렉토리 일괄(부적합만 원래 파일명으로 대체). |
+| `setup_rtsp_streams.sh` | HF 다운로드 → check(→필요시 encode) → mediamtx → pm2 송출. **한 방 재현.** |
+
+### 새 영상 추가 워크플로우
+```bash
+# 1) 적합성 먼저 확인 (적합하면 인코딩 스킵)
+bash tools/rtsp/check_video.sh myclip.mp4
+# 2) 부적합하면 인코딩 (적합하면 이 단계가 복사만 함 — 안전)
+bash tools/rtsp/encode_video.sh myclip.mp4 myclip_web.mp4
+# 3) HF 데이터셋에 업로드 (공개 데이터셋)
+hf upload backseollgi/mot_dataset myclip_web.mp4 videos/myclip.mp4 --repo-type dataset
+# 4) setup 스크립트 STREAMS=(...)에 "myclip" 추가 후 재실행
+```
 
 ---
 
