@@ -38,6 +38,7 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 | `docs/guide/` | **사용 가이드 허브(3종)** — 단일영상-분석-MVP(:8000) · 멀티카메라-시스템 4대지표(:8900) · 도면-편집기(:8910). 각 하위폴더 README + img (스크린샷 기반) |
 | `docs/optimization-report.md` | 추론 최적화 보고서 |
 | `docs/이관가이드-다른-GPU-서버로.md` | **다른 GPU 서버 이관 체크리스트** — 현 기준은 전부 Blackwell(sm_120). 다른 아키텍처(RTX 5000 Ada 등)면 TRT 엔진 재빌드·한계 재측정·`GPU_DEVICES` 실인덱스 확인 필수 |
+| `docs/RTSP-송출서버-구성.md` | **RTSP 테스트 송출** — WebRTC 호환 인코딩·mediamtx·pm2 절차 + HF 데이터셋(`backseollgi/mot_dataset`)에서 받아 재현하는 `tools/rtsp/setup_rtsp_streams.sh` |
 | `system/README.md` | 멀티카메라 2D맵 시스템 실행·환경변수·pm2·모듈별 소유 정보 |
 
 ## 작업 규칙

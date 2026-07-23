@@ -106,13 +106,25 @@ CUDA_VISIBLE_DEVICES=<빈GPU> conda run -n boosttrack python \
 ```
 결과로 **대상 서버의 5fps 유지 최대 채널 수**를 확정하고, 50~60채널 목표 대비 필요한 GPU 장수를 산정한다. (원본: 50~60ch = Blackwell GPU 3~4장. Ada는 재측정 결과로 판단 — 더 필요할 수 있음.)
 
+### 2-6b. RTSP 테스트 소스 구성 (MACS 입력 = RTSP)
+MACS는 RTSP 입력으로 동작하므로 테스트하려면 송출 소스가 필요하다. 테스트 3채널 영상은
+HuggingFace 데이터셋(`backseollgi/mot_dataset`)에 있고, 스크립트로 재현한다:
+```bash
+# hf CLI 필요(pip install -U huggingface_hub). 비공개면 토큰 환경변수로만(커밋 금지)
+HF_TOKEN=hf_xxx bash tools/rtsp/setup_rtsp_streams.sh
+# → rtsp://<이서버IP>:8554/{1_v1,2_v1,3_v1} 송출 → MACS 카메라 등록 주소로 사용
+```
+> 인코딩 조건·수동 절차·새 영상 추가는 [RTSP 송출 서버 구성](RTSP-송출서버-구성.md) 참조.
+> **주의**: 시드(`data/seed/default`)의 카메라 RTSP 주소가 **송출 서버 IP**를 가리키는지 확인
+> (다른 IP면 UI에서 카메라 주소 수정). mediamtx가 MACS와 다른 호스트면 IP를 그 호스트로.
+
 ### 2-7. 검증
 ```bash
 conda run -n boosttrack python -m pytest tests/system -q   # GPU 무관 도메인 테스트(85 passed 기대, 기존 실패 1건 제외)
 curl -s localhost:8900/api/status                          # 기동 확인
 ```
 - webui(:8900) 접속 → 카메라 등록·매핑·운영뷰 확인.
-- 다중 도면(N층) 쓰면 도면 등록·층 전환 동작 확인.
+- 다중 도면(N층) 쓰면 도면 등록·층 전환 동작 확인. (시드에 17F/19F 2층·매핑·구역·통과선 포함 — clone 후 자동 복원)
 
 ---
 
