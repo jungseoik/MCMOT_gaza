@@ -33,8 +33,12 @@ from webui.map_render import render_map                 # noqa: E402
 OUT_DIR = ROOT / "results" / "clab_concat"
 MAX_PANEL_W = 960          # downscale wide/4K sources per panel
 
-SAMPLE_DIR = Path("/home/pia/data/nas_200tb/ai-public/tracking_dataset/"
-                  "samsung_clab_sample/sample_example")
+# 기본 샘플 경로(이 서버 전용) — 다른 서버는 CLI 인자로 입력 지정하거나
+# SAMPLE_DIR 환경변수로 오버라이드. (track-viz 헬퍼 — 실행 필수 경로 아님)
+SAMPLE_DIR = Path(os.environ.get(
+    "SAMPLE_DIR",
+    "/home/pia/data/nas_200tb/ai-public/tracking_dataset/"
+    "samsung_clab_sample/sample_example"))
 DEFAULT_INPUTS = [SAMPLE_DIR / "sample.mp4", SAMPLE_DIR / "in_out_counting.mp4"]
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX

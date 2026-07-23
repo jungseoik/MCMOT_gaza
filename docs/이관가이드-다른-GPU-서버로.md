@@ -53,10 +53,16 @@ pip install -r requirements.txt              # ⚠️ CUDA 버전 대상 서버�
 bash install_yolox.sh
 ```
 
-### 2-2. 가중치 (git 미포함 — 별도 반입)
-`.gitignore`로 제외된 대용량 파일. 원본 서버 `external/weights/`에서 복사하거나 원출처에서 재다운로드:
-- `external/weights/bytetrack_x_mot20.tar` (~793MB, YOLOX-MOT20 검출)
-- `external/weights/mot20_sbs_S50.pth` (~337MB, FastReID)
+### 2-2. 가중치 (git 미포함 — **`import assets`가 자동 다운로드**)
+`.gitignore`로 제외되지만 **별도 반입 불필요** — 추론/추적 코드가 `assets`를 import하면
+(`assets/__init__.py`) 아래 파일이 없을 때 **공개 HF 레포에서 자동 다운로드**된다(토큰 불필요):
+- `external/weights/bytetrack_x_mot20.tar` (~793MB) ← `backseollgi/bytetrack_x_mot20.tar` (공개)
+- `external/weights/mot20_sbs_S50.pth` (~337MB) ← `backseollgi/mot20_sbs_S50.pth` (공개)
+
+> ⚠️ `assets/__init__.py`는 다운로드 실패를 조용히 삼킨다. 오프라인/레포 접근 불가면 파일 없이
+> 진행하다 로드에서 깨지니, **첫 실행 후 두 파일이 `external/weights/`에 실제로 있는지 확인.**
+> 수동: `hf download backseollgi/mot20_sbs_S50.pth mot20_sbs_S50.pth --local-dir external/weights`
+> (tar도 동일). `hf` CLI는 `pip install -U huggingface_hub`.
 
 ### 2-3. ONNX 수출 (GPU 무관 — 원본에서 복사 가능)
 `external/weights/trt/*.onnx`는 GPU 아키텍처와 무관하므로 원본 서버에서 그대로 복사해도 된다. 없으면 재생성:

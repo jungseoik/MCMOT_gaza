@@ -30,13 +30,13 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
   `INGEST_BACKEND`(기본 **ffmpeg** — 아래 '인제스트 백엔드' 참조)
 - 설정은 `data/sites/<site_id>/`(site.json·cameras/*.json·map.png)에 영속화 — 재시작 시 자동 복원
 - **디폴트 세팅(seed)**: `data/seed/default/`가 git에 커밋돼 있어 **클론 후 첫 기동 시
-  자동 복사**됨(맵·카메라 3ch·매핑·경로/구역/출입구 전부 포함) — 바로 운영 뷰 확인 가능.
-  카메라는 **`rtsp://10.128.30.235:8554/{1,2,3}_v1`** (사내망 송출 서버의 mediamtx,
-  pm2 `1_v1`~`3_v1` 상시 송출)을 바라보므로 **같은 망의 다른 서버에서 클론해도
-  추가 설정 없이 라이브가 붙는다**. 송출이 죽어 있으면 재접속 대기만 하며 무해.
-  다른 RTSP를 쓰려면 UI ② 카메라 등록·매핑에서 주소만 수정.
-  현재 라이브 세팅을 seed로 갱신: `bash tools/seed_snapshot.sh` (sessions 제외 —
-  단, 라이브가 127.0.0.1이면 seed의 외부 IP가 덮이니 스냅샷 후 rtsp 확인)
+  자동 복사**됨(2개 층 17F/19F 맵·카메라·매핑·valid_roi·경로/구역/출입구 전부 포함) —
+  바로 운영 뷰 확인 가능. 카메라는 **`rtsp://127.0.0.1:8554/{1,2,3}_v1`**(같은 호스트의
+  mediamtx, pm2 `1_v1`~`3_v1` 송출)을 바라본다 → **같은 서버에서 `tools/rtsp/setup_rtsp_streams.sh`로
+  송출을 띄우면 추가 설정 없이 라이브가 붙는다**(RTSP 재현: [`docs/RTSP-송출서버-구성.md`](../docs/RTSP-송출서버-구성.md)).
+  송출 서버가 **다른 호스트**면 UI ② 카메라 등록·매핑에서 주소의 IP만 그 호스트로 수정.
+  송출이 죽어 있으면 재접속 대기만 하며 무해.
+  현재 라이브 세팅을 seed로 갱신: `bash tools/seed_snapshot.sh` (sessions 제외)
 - 평가 세션: 운영 뷰 🔔 경보 시작(맵 클릭) → 4대 지표 카드 → 종료 시 결과 산출,
   `sessions/<id>.json` 영속화 + `GET /api/sessions` 이력 (계약 v1.3)
 - **기존 webui PoC(webui/server.py)와 같은 프로세스 동시 구동 금지** (전역 GeneralSettings 충돌, CONTRACT v1.1 §5). 별도 포트로 각각 실행 — 기존 UI 좌측 레일의 맵 아이콘이 :8900을 연다.
@@ -69,8 +69,9 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 | `api/` | `server.py`(실서버) · `mock_server.py`(개발용) | 메인/C |
 | `contracts.py` | FrameItem → TrackedObject → MapState 인터페이스 | 동결 |
 
-테스트: `conda run -n boosttrack python -m pytest tests/system -q` (72개 —
-spatial 17 · metrics 20 · session 24 · ds_launcher 11)
+테스트: `conda run -n boosttrack python -m pytest tests/system -q` (86개 —
+spatial 17 · metrics 20 · session 24 · ds_launcher 11 · floors 14.
+85 pass + 기존 이슈 1건 `test_graph_empty_straight_line_fallback` fail)
 
 ## 통합 검증 실측 (2026-07-13, M7 · 2026-07-19 DS 갱신)
 

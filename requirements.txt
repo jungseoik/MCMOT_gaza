@@ -25,6 +25,7 @@ tensorrt-cu12<11
 onnxscript
 gdown
 Pillow>=9.0
+pyzmq        # DeepStream 인제스트(INGEST_BACKEND=deepstream) 호스트 브리지용 — system/ingest_ds/bridge.py
 
 # [선택] CAD 변환 (tools/cad_convert.py): pip install ezdxf matplotlib
 # [선택] 합성 데이터 생성 (tools/cctv_gen.py): pip install google-genai + GOOGLE_API_KEY 필요

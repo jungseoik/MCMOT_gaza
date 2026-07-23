@@ -24,15 +24,19 @@ $ bash install_yolox.sh
 > 현재 엔진·성능 기준은 전부 **Blackwell(sm_120)** 에서 나온 것. 다른 아키텍처(예: RTX 5000 Ada)로
 > 옮기면 **TRT 엔진 재빌드 + 한계 처리량 재측정 + `GPU_DEVICES` 실인덱스 확인**이 필수다.
 
-Hugging Face 토큰이 필요합니다 (`huggingface-cli login` 또는 `HUGGING_FACE_HUB_TOKEN` 환경변수).
+**가중치는 `import assets` 시점에 HuggingFace에서 자동 다운로드된다** (`assets/__init__.py`).
+추론/추적 코드가 `assets`를 import하면 아래 파일이 없을 때 `external/weights/`로 내려받는다.
+**두 레포 모두 공개**라 **토큰 불필요**(clone 후 첫 실행에 자동 확보).
 
-| 모델 종류 | 파일명 | 저장 경로 |
+| 모델 종류 | HF repo (공개) | 저장 경로 |
 |-----------|--------------------------|----------------------------|
-| ReID 모델 | `mot20_sbs_S50.pth` | `./external/weights/mot20_sbs_S50.pth` |
-| ByteTrack 탐지 모델 | `bytetrack_x_mot20.tar` | `./external/weights/bytetrack_x_mot20.tar` |
+| ReID 모델 | `backseollgi/mot20_sbs_S50.pth` | `./external/weights/mot20_sbs_S50.pth` |
+| ByteTrack 탐지 모델 | `backseollgi/bytetrack_x_mot20.tar` | `./external/weights/bytetrack_x_mot20.tar` |
 
-모델 파일을 위 경로에 직접 복사하거나, 제공된 `gdown`/`huggingface_hub` 스크립트로 다운로드하세요.
-외부 공개 URL이 없는 경우 프로젝트 관리자에게 문의.
+> ⚠️ `assets/__init__.py`는 다운로드 실패를 조용히 넘긴다(`except` 로 print만). 오프라인·레포
+> 접근 불가 시 파일 없이 진행하다 로드 단계에서 깨지므로, 첫 실행 후 위 두 파일이 실제로
+> `external/weights/`에 있는지 확인. 수동 다운로드: `hf download backseollgi/mot20_sbs_S50.pth
+> mot20_sbs_S50.pth --local-dir external/weights` (tar도 동일).
 
 <br>
 
