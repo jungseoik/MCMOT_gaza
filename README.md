@@ -20,6 +20,10 @@ $ bash install_yolox.sh
 
 ## 모델 가중치 다운로드
 
+> 🚚 **다른 GPU 서버로 이관하나요?** → **[docs/이관가이드-다른-GPU-서버로.md](docs/이관가이드-다른-GPU-서버로.md)**
+> 현재 엔진·성능 기준은 전부 **Blackwell(sm_120)** 에서 나온 것. 다른 아키텍처(예: RTX 5000 Ada)로
+> 옮기면 **TRT 엔진 재빌드 + 한계 처리량 재측정 + `GPU_DEVICES` 실인덱스 확인**이 필수다.
+
 Hugging Face 토큰이 필요합니다 (`huggingface-cli login` 또는 `HUGGING_FACE_HUB_TOKEN` 환경변수).
 
 | 모델 종류 | 파일명 | 저장 경로 |
