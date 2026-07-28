@@ -1,4 +1,13 @@
-# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.7)
+# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.8)
+
+> **v1.8 개정 (2026-07-28 — CAD 최단경로→피난경로 자동 반영, D-2 ①)**
+> - API 신설: **`PUT /api/site/routes?floor=`** — 한 층의 `routes`만 교체하는
+>   부분 반영 엔드포인트(다층 붕괴 위험 없음). CAD 도면 편집기(:8910)의 apply가
+>   worst-N 최단경로를 맵 원본 px polyline으로 변환해 EPFI 기준경로로 반영한다.
+>   자동경로 id 접두 `auto-evac-`; `replace="auto"`(기본)는 자동경로만 교체하고
+>   사용자가 손으로 그린 route는 보존. 맵 mm→px 변환은 편집기 렌더 좌표계와
+>   1:1(선형, y축 뒤집힘) — 방금 올린 맵이라 :8900 층 map.w/h 와 정합.
+> - 스키마·`contracts.py` 무개정(기존 `Route` 재사용).
 
 > **v1.7 개정 (2026-07-22 — 다중 도면(N개 층) 지원, D-11)**
 > 하위호환 원칙: 층 미지정·기존 단일도면 사이트는 "default" 층 1개로 그대로 동작.
@@ -65,6 +74,7 @@
 | `PUT /api/site` | `SiteConfig`(routes/zones/bottlenecks/exits/thresholds 갱신) | 저장된 `SiteConfig`(version+1) |
 | `POST /api/site/map` | multipart: `image`(png), 선택 `meta`(cad-convert JSON) | `MapSpec` (meta 있으면 m_per_px 자동) |
 | `GET /api/site/map` | — | image/png (업로드된 맵 이미지, 없으면 404) |
+| `PUT /api/site/routes?floor=` | `{routes: [{id, name, points:[[px,px]...]}], replace?: "auto"\|"all"}` | `{floor, routes, auto, manual}` — **그 층 routes만 교체**(다층 붕괴 없음). `replace="auto"`(기본): id가 `auto-evac-`로 시작하는 자동경로만 교체·수동경로 보존. `"all"`: 전체 교체. CAD 편집기(:8910)의 worst-N 최단경로를 EPFI 기준경로로 자동 반영 (D-2 ①, v1.8) |
 | `GET /api/cameras` | — | `list[CameraConfig]` + 런타임 상태 병합 `[{...cfg, state: CameraState}]` |
 | `POST /api/cameras` | `{name, rtsp, analyze_fps?, min_conf?}` | `CameraConfig` (cam_id 서버 발급 `cam01..`) |
 | `PUT /api/cameras/{id}` | `CameraConfig` 부분 갱신(enabled·min_conf 등). `min_conf`: 0~1이면 그 카메라 오버라이드, `null`이면 사이트값 상속. 범위 밖은 422 | `CameraConfig` |

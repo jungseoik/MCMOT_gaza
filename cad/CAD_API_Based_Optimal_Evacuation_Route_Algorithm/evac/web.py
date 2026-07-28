@@ -301,7 +301,11 @@ async def apply(payload: dict = None):
     m_per_px = (bounds[2] - bounds[0]) / 1000.0 / w_px
 
     # 2) 거리장 사전계산 (트래킹 좌표 → 실시간 피난거리용)
-    an = core.analyze(obs, exits, bounds, mode="worstn", worst_n=1,
+    #    worst_n을 반영용으로 넉넉히(기본 5) 뽑는다 — dist/grid 는 worst_n과
+    #    무관(멀티소스 다익스트라 거리장)하므로 distfield.npz 는 그대로 유효하고,
+    #    an.paths 만 EPFI 기준경로(routes) 반영에 재사용한다.
+    route_n = int(payload.get("route_n", 5))
+    an = core.analyze(obs, exits, bounds, mode="worstn", worst_n=route_n,
                       cell=FULL_CELL, openings=S.get("openings") or None,
                       opening_width=OPENING_W)
     np.savez_compressed(os.path.join(site_dir, "evac_distfield.npz"),
@@ -318,19 +322,43 @@ async def apply(payload: dict = None):
     with open(os.path.join(site_dir, floor_name), "w") as f:
         json.dump(floor_meta, f, ensure_ascii=False, indent=2)
 
+    # 3.5) 최단경로(worst-N) → 맵 원본 px polyline 으로 변환 (EPFI 기준경로 반영용).
+    #      _render_map_png 는 xlim=[minx,maxx]·ylim=[miny,maxy] 를 축[0,0,1,1]에
+    #      꽉 채우므로 도면 mm → 맵 px 는 선형(이미지 좌표계라 y축 뒤집힘):
+    #        px_x = (wx-minx)/(maxx-minx)*w_px,  px_y = (maxy-wy)/(maxy-miny)*h_px
+    minx, miny, maxx, maxy = bounds
+    def _to_px(wx, wy):
+        return [round((wx - minx) / (maxx - minx) * w_px, 1),
+                round((maxy - wy) / (maxy - miny) * h_px, 1)]
+    routes_px = []
+    for i, p in enumerate(an.paths):
+        pm = p["path_m"]
+        # per-cell 폴리라인은 과밀 — 형태 보존하며 최대 ~60점으로 데시메이트
+        # (첫·끝점 항상 유지). 맵 canvas 표출·계약 min_length(2) 충족.
+        step = max(1, len(pm) // 60)
+        thin = pm[::step]
+        if thin[-1] != pm[-1]:
+            thin = thin + [pm[-1]]
+        pts = [_to_px(x, y) for (x, y) in thin]
+        if len(pts) >= 2:
+            routes_px.append({"id": f"auto-evac-{i}",
+                              "name": f"자동피난경로{i + 1}", "points": pts})
+
     saved_names = (map_name, floor_name, "evac_distfield.npz")
     # 4) 운영 서버(:8900) 반영 — 명시적 opt-in 일 때만. 해당 층(floor)에만 반영.
     applied = False
+    routes_applied = False
     if not bool(payload.get("apply_live", False)):
         return {"site": site, "floor": floor, "map_px": [w_px, h_px],
                 "m_per_px": round(m_per_px, 5),
                 "exits": len(exits), "openings": len(S["openings"]),
-                "deleted": len(S["deleted"]),
+                "deleted": len(S["deleted"]), "routes": len(routes_px),
                 "worst_dist_m": round(max((p["dist_mm"] for p in an.paths), default=0) / 1000, 1),
-                "applied_to_system": False,
+                "applied_to_system": False, "routes_applied": False,
                 "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
+    import urllib.request
+    from urllib.parse import urlencode
     try:
-        import urllib.request
         boundary = "evacfloor"
         with open(map_path, "rb") as f:
             img = f.read()
@@ -340,7 +368,6 @@ async def apply(payload: dict = None):
                 f"name=\"image\"; filename=\"map.png\"\r\nContent-Type: image/png\r\n\r\n"
                 ).encode() + img + f"\r\n--{boundary}--\r\n".encode()
         # ?floor= 로 해당 층에만 반영 (:8900 v1.7). default면 기존과 동일.
-        from urllib.parse import urlencode
         url = f"{SYSTEM_API}/api/site/map?" + urlencode({"floor": floor})
         req = urllib.request.Request(
             url, data=body, method="POST",
@@ -350,12 +377,27 @@ async def apply(payload: dict = None):
     except Exception:
         applied = False
 
+    # 4.5) 맵 반영 성공 시에만 그 층 routes 를 자동 피난경로로 반영.
+    #      PUT /api/site/routes?floor= (그 층 routes만 교체, 수동경로 보존).
+    #      맵을 방금 올렸으므로 :8900 그 층 map.w/h == 여기 w_px/h_px 로 좌표 정합.
+    if applied and routes_px:
+        try:
+            rbody = json.dumps({"routes": routes_px, "replace": "auto"}).encode()
+            rurl = f"{SYSTEM_API}/api/site/routes?" + urlencode({"floor": floor})
+            req2 = urllib.request.Request(
+                rurl, data=rbody, method="PUT",
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req2, timeout=5) as r2:
+                routes_applied = (r2.status == 200)
+        except Exception:
+            routes_applied = False
+
     return {"site": site, "floor": floor, "map_px": [w_px, h_px],
             "m_per_px": round(m_per_px, 5),
             "exits": len(exits), "openings": len(S["openings"]),
-            "deleted": len(S["deleted"]),
+            "deleted": len(S["deleted"]), "routes": len(routes_px),
             "worst_dist_m": round(max((p["dist_mm"] for p in an.paths), default=0) / 1000, 1),
-            "applied_to_system": applied,
+            "applied_to_system": applied, "routes_applied": routes_applied,
             "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
 
 

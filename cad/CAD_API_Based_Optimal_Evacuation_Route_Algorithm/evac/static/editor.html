@@ -447,10 +447,16 @@ $("applyBtn").onclick = async () => {
     const j = await r.json();
     stepDone(5);
     const floorTxt = j.floor && j.floor !== "default" ? ` · 층 <b>${j.floor}</b>` : "";
+    const routeTxt = j.applied_to_system
+      ? (j.routes_applied
+          ? `<br>🧭 피난경로 ${j.routes}개 맵설정 routes 반영 완료`
+          : `<br>⚠️ 맵은 반영됐으나 피난경로 반영 실패`)
+      : (j.routes ? `<br>🧭 피난경로 ${j.routes}개 산출 (운영 반영은 체크박스 선택 시)` : "");
     $("applyMsg").innerHTML =
       `✅ 저장됨 → <b>${j.saved[0]}</b>${floorTxt}<br>축척 ${j.m_per_px} m/px 자동 · worst ${j.worst_dist_m}m` +
       (j.applied_to_system ? "<br>✅ 운영서버(:8900) 반영 완료"
-                           : "<br>💾 파일만 저장됨 (운영 반영은 체크박스 선택 시)");
+                           : "<br>💾 파일만 저장됨 (운영 반영은 체크박스 선택 시)") +
+      routeTxt;
     if (window.opener) window.opener.postMessage(
         { type: "evac-floor-applied", site: j.site, floor: j.floor }, "*");
   } catch (e) { $("applyMsg").textContent = "실패: " + e; }

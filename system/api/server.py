@@ -38,6 +38,7 @@ from system.config.schema import (
     CameraMapping,
     Floor,
     MapSpec,
+    Route,
     SiteConfig,
 )
 from system.config.store import SiteStore
@@ -266,6 +267,48 @@ def get_site_map(floor: str = DEFAULT_FLOOR_ID):
     if not p.is_file():
         raise HTTPException(404, "맵 이미지 없음")
     return FileResponse(p, media_type="image/png")
+
+
+AUTO_ROUTE_PREFIX = "auto-evac-"   # CAD 편집기가 자동 산출한 피난경로 id 접두 (D-2 ①)
+
+
+@app.put("/api/site/routes")
+async def put_site_routes(request: Request, floor: str = DEFAULT_FLOOR_ID):
+    """한 층(floor)의 피난경로(routes)만 교체 — 다층 붕괴 위험 없는 부분 반영.
+
+    CAD 도면 편집기(:8910)의 최단경로(worst-N) 결과를 EPFI 기준경로로
+    자동 반영하는 전용 경로 (요구사항 D-2 ① CAD 자동 산출 분기).
+
+    body:
+      routes  : [{id, name, points:[[px,px]...]}] — 맵 원본 px polyline.
+      replace : "auto"(기본) → id가 'auto-evac-'로 시작하는 자동경로만
+                교체하고 사용자가 손으로 그린 경로는 보존.
+                "all" → 그 층 routes 전체를 교체.
+    PUT /api/site 로 floors 통째 전송하지 않으므로 다른 층은 절대 건드리지
+    않는다. reload_engine 으로 즉시 반영.
+    """
+    body = await request.json()
+    try:
+        new_routes = [Route.model_validate(r) for r in body.get("routes", [])]
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    mode = str(body.get("replace", "auto"))
+    if mode not in ("auto", "all"):
+        raise HTTPException(422, "replace는 'auto'|'all'")
+
+    cfg = rt.site()
+    fid = rt.resolve_floor(floor)
+    fl = cfg.get_floor(fid)
+    kept = ([] if mode == "all"
+            else [r for r in fl.routes if not r.id.startswith(AUTO_ROUTE_PREFIX)])
+    fl.routes = kept + new_routes
+    if fid == DEFAULT_FLOOR_ID:
+        cfg.routes = fl.routes          # top-level 동기화(재승격 대비)
+    rt.store.save_site(cfg)
+    rt.reload_engine()
+    return {"floor": fid, "routes": len(fl.routes),
+            "auto": sum(1 for r in fl.routes if r.id.startswith(AUTO_ROUTE_PREFIX)),
+            "manual": sum(1 for r in fl.routes if not r.id.startswith(AUTO_ROUTE_PREFIX))}
 
 
 # ================================================================ 카메라
