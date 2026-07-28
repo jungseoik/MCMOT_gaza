@@ -458,16 +458,27 @@ Views.map = (() => {
     // CAD 도면 편집기(:8910, 별도 서비스) — 새 창에서 터치업·Exit 지정 후 [저장 & 적용]하면
     // postMessage('evac-floor-applied')로 돌아와 아래 리스너가 맵을 자동 갱신한다.
     $("mapFromCad").onclick = () => {
-      const url = location.protocol + "//" + location.hostname + ":8910/?live=1";
+      // 현재 선택된 층(App.currentFloor)을 편집기에 전달 → 그 층 맵으로 저장·반영
+      const floor = App.currentFloor || "default";
+      const url = location.protocol + "//" + location.hostname
+                + ":8910/?live=1&floor=" + encodeURIComponent(floor);
       const w = window.open(url, "evacFloorEditor", "width=1560,height=980");
       if (!w) { hint("팝업이 차단되었습니다 — 브라우저 팝업 허용 후 다시 시도.", true); return; }
-      hint("도면 편집기(새 창)에서 정리·Exit 지정 후 [저장 & 적용]하면 이 맵에 반영됩니다.");
+      const fname = (App.floor && App.floor.name) || floor;
+      hint(`도면 편집기(새 창)에서 정리·Exit 지정 후 [저장 & 적용]하면 «${fname}» 층 맵에 반영됩니다.`);
     };
     window.addEventListener("message", async (ev) => {
       if (!ev.data || ev.data.type !== "evac-floor-applied") return;
       try {
-        await App.reloadSite();
-        if (App.site.map) mc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
+        // 편집기가 반영한 층으로 전환(다른 층이면) 후 그 층 맵 재로드
+        const applied = ev.data.floor || "default";
+        if (applied !== App.currentFloor
+            && (App.site.floors || []).some((f) => f.id === applied)) {
+          await App.setFloor(applied);
+        } else {
+          await App.reloadSite();
+        }
+        if (App.floor && App.floor.map) mc.setImage(App.mapImg, App.floor.map.w, App.floor.map.h);
         hint("도면 편집기 적용 완료 — 맵·축척(m/px)이 자동 반영되었습니다.");
         refresh();
       } catch (e) { hint("맵 갱신 실패: " + e.message, true); }

@@ -279,6 +279,13 @@ async def apply(payload: dict = None):
     site = str(payload.get("site", "default"))
     if not site.replace("_", "").replace("-", "").isalnum():
         raise HTTPException(422, "site 이름은 영숫자/-/_ 만")
+    # 층(floor) — 다중 도면 지원(:8900 v1.7). default=map.png, 그외=map_<floor>.png
+    # (system/config/store.map_path 규칙과 정합). 파일명은 floor.json도 층별로.
+    floor = str(payload.get("floor", "default")) or "default"
+    if not floor.replace("_", "").replace("-", "").isalnum():
+        raise HTTPException(422, "floor 이름은 영숫자/-/_ 만")
+    map_name = "map.png" if floor == "default" else f"map_{floor}.png"
+    floor_name = "floor.json" if floor == "default" else f"floor_{floor}.json"
     exits = _exit_pts()
     if not exits:
         raise HTTPException(422, "Exit가 없습니다 — 저장 전에 Exit를 지정하세요.")
@@ -288,8 +295,8 @@ async def apply(payload: dict = None):
     site_dir = os.path.join(SITE_ROOT, site)
     os.makedirs(site_dir, exist_ok=True)
 
-    # 1) map.png (터치업 도면)
-    map_path = os.path.join(site_dir, "map.png")
+    # 1) map.png (터치업 도면) — 층별 파일명
+    map_path = os.path.join(site_dir, map_name)
     w_px, h_px = _render_map_png(obs, bounds, map_path)
     m_per_px = (bounds[2] - bounds[0]) / 1000.0 / w_px
 
@@ -301,28 +308,27 @@ async def apply(payload: dict = None):
                         dist=an.dist.astype(np.float32), grid=an.grid,
                         bounds=np.array(bounds), cell=FULL_CELL)
 
-    # 3) floor.json (비파괴 편집내역 + 좌표계)
-    floor = {"source": S["src_name"], "bounds_mm": bounds,
-             "m_per_px": m_per_px, "map_px": [w_px, h_px],
-             "exits_mm": S["exits"], "openings_mm": S["openings"],
-             "opening_width_mm": OPENING_W,
-             "deleted_handles": S["deleted"],
-             "cell_mm": FULL_CELL, "clearance_mm": core.CLEARANCE}
-    with open(os.path.join(site_dir, "floor.json"), "w") as f:
-        json.dump(floor, f, ensure_ascii=False, indent=2)
+    # 3) floor.json (비파괴 편집내역 + 좌표계) — 층별 파일명(floor_name)
+    floor_meta = {"source": S["src_name"], "bounds_mm": bounds,
+                  "m_per_px": m_per_px, "map_px": [w_px, h_px],
+                  "exits_mm": S["exits"], "openings_mm": S["openings"],
+                  "opening_width_mm": OPENING_W,
+                  "deleted_handles": S["deleted"],
+                  "cell_mm": FULL_CELL, "clearance_mm": core.CLEARANCE}
+    with open(os.path.join(site_dir, floor_name), "w") as f:
+        json.dump(floor_meta, f, ensure_ascii=False, indent=2)
 
-    # 4) 운영 서버(:8900) 반영 — 명시적 opt-in 일 때만.
-    #    (기본 꺼짐: :8900 의 map 엔드포인트는 site 구분 없이 default 를 덮으므로
-    #     운영 중인 맵을 실수로 교체하는 사고 방지 — 2026-07-16 실측으로 확인된 리스크)
+    saved_names = (map_name, floor_name, "evac_distfield.npz")
+    # 4) 운영 서버(:8900) 반영 — 명시적 opt-in 일 때만. 해당 층(floor)에만 반영.
     applied = False
     if not bool(payload.get("apply_live", False)):
-        return {"site": site, "map_px": [w_px, h_px], "m_per_px": round(m_per_px, 5),
+        return {"site": site, "floor": floor, "map_px": [w_px, h_px],
+                "m_per_px": round(m_per_px, 5),
                 "exits": len(exits), "openings": len(S["openings"]),
                 "deleted": len(S["deleted"]),
                 "worst_dist_m": round(max((p["dist_mm"] for p in an.paths), default=0) / 1000, 1),
                 "applied_to_system": False,
-                "saved": [os.path.join("data/sites", site, n)
-                          for n in ("map.png", "floor.json", "evac_distfield.npz")]}
+                "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
     try:
         import urllib.request
         boundary = "evacfloor"
@@ -333,21 +339,24 @@ async def apply(payload: dict = None):
                 f"{meta}\r\n--{boundary}\r\nContent-Disposition: form-data; "
                 f"name=\"image\"; filename=\"map.png\"\r\nContent-Type: image/png\r\n\r\n"
                 ).encode() + img + f"\r\n--{boundary}--\r\n".encode()
+        # ?floor= 로 해당 층에만 반영 (:8900 v1.7). default면 기존과 동일.
+        from urllib.parse import urlencode
+        url = f"{SYSTEM_API}/api/site/map?" + urlencode({"floor": floor})
         req = urllib.request.Request(
-            f"{SYSTEM_API}/api/site/map", data=body, method="POST",
+            url, data=body, method="POST",
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
         with urllib.request.urlopen(req, timeout=5) as r:
             applied = (r.status == 200)
     except Exception:
         applied = False
 
-    return {"site": site, "map_px": [w_px, h_px], "m_per_px": round(m_per_px, 5),
+    return {"site": site, "floor": floor, "map_px": [w_px, h_px],
+            "m_per_px": round(m_per_px, 5),
             "exits": len(exits), "openings": len(S["openings"]),
             "deleted": len(S["deleted"]),
             "worst_dist_m": round(max((p["dist_mm"] for p in an.paths), default=0) / 1000, 1),
             "applied_to_system": applied,
-            "saved": [os.path.join("data/sites", site, n)
-                      for n in ("map.png", "floor.json", "evac_distfield.npz")]}
+            "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
 
 
 # ───────────────────────────────────────────── 기존 floor.json 재개(선택)

@@ -441,15 +441,18 @@ $("applyBtn").onclick = async () => {
       body: JSON.stringify({ deleted: [...deleted], openings, exits }) });
     const r = await fetch("/api/apply", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ site: $("site").value, apply_live: $("liveChk").checked }) });
+      body: JSON.stringify({ site: $("site").value, floor: EDIT_FLOOR,
+                             apply_live: $("liveChk").checked }) });
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const j = await r.json();
     stepDone(5);
+    const floorTxt = j.floor && j.floor !== "default" ? ` · 층 <b>${j.floor}</b>` : "";
     $("applyMsg").innerHTML =
-      `✅ 저장됨 → <b>${j.saved[0]}</b><br>축척 ${j.m_per_px} m/px 자동 · worst ${j.worst_dist_m}m` +
+      `✅ 저장됨 → <b>${j.saved[0]}</b>${floorTxt}<br>축척 ${j.m_per_px} m/px 자동 · worst ${j.worst_dist_m}m` +
       (j.applied_to_system ? "<br>✅ 운영서버(:8900) 반영 완료"
                            : "<br>💾 파일만 저장됨 (운영 반영은 체크박스 선택 시)");
-    if (window.opener) window.opener.postMessage({ type: "evac-floor-applied", site: j.site }, "*");
+    if (window.opener) window.opener.postMessage(
+        { type: "evac-floor-applied", site: j.site, floor: j.floor }, "*");
   } catch (e) { $("applyMsg").textContent = "실패: " + e; }
   spin(false); $("applyBtn").disabled = false;
 };
@@ -518,7 +521,10 @@ function toast(msg) {
 }
 function spin(on) { $("spin").style.display = on ? "block" : "none"; }
 // 운영 웹(:8900) 맵설정 버튼 경유(?live=1)면 "운영 반영" 기본 ON — 사용자가 끌 수 있음
-if (new URLSearchParams(location.search).get("live") === "1") $("liveChk").checked = true;
+const _qs = new URLSearchParams(location.search);
+if (_qs.get("live") === "1") $("liveChk").checked = true;
+// ?floor=<층id> — 이 층 맵으로 저장·반영(다중 도면, :8900 v1.7). 없으면 default.
+const EDIT_FLOOR = _qs.get("floor") || "default";
 resize();
 </script>
 </body>
