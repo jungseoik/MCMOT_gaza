@@ -32,13 +32,23 @@ AutoCAD `.dwg`를 열 수 있는 `.dxf`로 변환하고, 그 도면을 (1)깨끗
 
 ## 새 서버에서 처음부터 (설치 → 변환)
 ```bash
-# 1) 설치 (OSS libredwg + 폰트 + 파이썬 의존성). ODA도 원하면 .deb 경로/URL 주입:
-bash tools/setup_cad_convert.sh                                   # OSS만
-ODA_DEB=/path/ODAFileConverter_QT6_lnxX64_*.deb bash tools/setup_cad_convert.sh   # +ODA
-# PYTHON 환경 지정 가능: PYTHON=~/miniconda3/envs/boosttrack/bin/python bash tools/setup_cad_convert.sh
+# 1) 설치. 인터넷 있으면 libredwg는 apt/소스빌드로 자동:
+bash tools/setup_cad_convert.sh                                   # 온라인, OSS 자동
+ODA_DEB=/store/ODAFileConverter_QT6_lnxX64_*.deb bash tools/setup_cad_convert.sh  # +ODA
+# 오프라인/고정 재현 — "미리 챙긴 파일" 주입(인터넷·빌드 불필요):
+LIBREDWG_BIN=/store/dwg2dxf bash tools/setup_cad_convert.sh       # OSS 정적바이너리 복사
+# PYTHON 지정: PYTHON=~/miniconda3/envs/boosttrack/bin/python bash tools/setup_cad_convert.sh
 
 # 2) 변환 (아래 1)·2)단계)
 ```
+
+### 오프라인 재현 — 무엇을 보관하나
+| 백엔드 | 보관물 | 이유 |
+|--------|--------|------|
+| **libredwg** | `dwg2dxf` **정적 바이너리**(~50MB, libc/libm만 의존) | 복사만으로 동작(검증됨). 원본 소스/설치파일 불필요. GPL이라 재배포 자유 |
+| **ODA** | `ODAFileConverter_*.deb` | 독점 → 레포 불가, 사설 저장소(Git LFS/내부 파일서버/버킷)에 보관 후 `ODA_DEB=`로 주입 |
+> 인터넷이 되는 서버면 libredwg는 보관 없이 스크립트가 빌드/설치한다. 오프라인이거나
+> 버전을 고정하고 싶을 때만 위 파일을 챙긴다. **git 본체엔 넣지 말 것**(용량·라이선스).
 - **이 개발 머신엔 ODA가 이미 설치됨**(`/usr/bin/ODAFileConverter` v27.1.0.0) — 재설치 금지.
 - 파이썬: `~/miniconda3/envs/boosttrack/bin/python`(`ezdxf`,`matplotlib`). 한글 폰트
   `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`.

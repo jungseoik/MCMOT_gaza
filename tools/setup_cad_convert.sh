@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
 # setup_cad_convert.sh — 새 서버에서 CAD 변환 파이프라인을 처음부터 구성한다.
 #   1) 파이썬 렌더 의존성(ezdxf, matplotlib) + 한글 폰트
-#   2) 오픈소스 변환 백엔드 libredwg(dwg2dxf) — apt 자동설치(주입 불필요)
-#   3) (선택) ODA File Converter — 독점 프리웨어라 자동설치 불가.
-#      ODA_DEB=<로컬 .deb 경로 또는 http URL> 를 주면 설치, 없으면 안내만 출력.
+#   2) 오픈소스 변환 백엔드 libredwg(dwg2dxf)
+#   3) (선택) ODA File Converter (독점 프리웨어)
+#
+# 설치 소스 3가지 (오프라인/온라인, 주입 여부):
+#   - 인터넷 있음: libredwg는 apt(있는 배포판) 또는 GitHub 소스빌드 → 파일 보관 불필요.
+#   - 오프라인/고정 재현: 아래 환경변수로 "미리 챙긴 파일"을 주입.
+#       LIBREDWG_BIN=<dwg2dxf 정적 바이너리 경로>   # 복사만으로 설치(빌드·인터넷 불필요)
+#       ODA_DEB=<.deb 로컬경로 또는 http URL>        # ODA 설치(독점, 별도 보관 필요)
 #
 # 사용:
-#   bash tools/setup_cad_convert.sh                 # OSS(libredwg)만 설치
-#   ODA_DEB=/path/ODAFileConverter_*.deb bash tools/setup_cad_convert.sh
+#   bash tools/setup_cad_convert.sh                              # 온라인, OSS 자동
+#   LIBREDWG_BIN=/store/dwg2dxf bash tools/setup_cad_convert.sh  # 오프라인 OSS 주입
+#   ODA_DEB=/store/ODAFileConverter_*.deb bash tools/setup_cad_convert.sh
 #   PYTHON=~/miniconda3/envs/boosttrack/bin/python bash tools/setup_cad_convert.sh
 #
 # 왜 ODA는 자동설치가 안 되나:
 #   ODA File Converter는 Open Design Alliance의 무료(프리웨어)지만 *오픈소스가 아니고*
-#   EULA상 재배포가 금지된다. 그래서 레포에 담을 수 없고 opendesign.com에서 직접 받아
-#   외부에서 주입해야 한다. 정합도가 최상이라 정밀 변환엔 권장.
+#   EULA상 재배포가 금지된다. 레포에 담을 수 없고 opendesign.com에서 직접 받아 주입한다.
+#   libredwg(GPL)는 자유 재배포 가능 → 빌드한 바이너리를 보관·복사해도 된다.
 set -euo pipefail
 
 PYTHON="${PYTHON:-python3}"
@@ -37,6 +43,11 @@ fi
 echo "== [2.5/3] OSS 변환 백엔드 libredwg(dwg2dxf) =="
 if command -v dwg2dxf >/dev/null 2>&1; then
   echo "  이미 있음: $(command -v dwg2dxf)"
+elif [ -n "${LIBREDWG_BIN:-}" ]; then
+  # 오프라인 재현: 미리 빌드한 정적 바이너리를 주입(인터넷/빌드 불필요).
+  # dwg2dxf는 libc/libm만 의존하는 정적 바이너리라 복사만으로 동작한다.
+  echo "  주입: $LIBREDWG_BIN → /usr/local/bin/dwg2dxf"
+  $SUDO install -m 0755 "$LIBREDWG_BIN" /usr/local/bin/dwg2dxf
 elif command -v apt-get >/dev/null 2>&1 && apt-cache show libredwg-tools >/dev/null 2>&1; then
   echo "  apt로 설치(libredwg-tools 제공 배포판: Debian/일부 Ubuntu)"
   $SUDO apt-get install -y libredwg-tools
@@ -49,6 +60,10 @@ else
     ( cd "$BUILD" && sh autogen.sh && ./configure --disable-bindings --disable-shared \
         && make -j"$(nproc)" && $SUDO make install ) \
       && $SUDO ldconfig 2>/dev/null || echo "  [warn] libredwg 빌드 실패 — ODA를 대신 쓰라"
+    if command -v dwg2dxf >/dev/null 2>&1; then
+      echo "  [tip] 오프라인 재현용으로 이 정적 바이너리를 보관해두면 다음 서버는"
+      echo "        LIBREDWG_BIN=<복사본> 으로 빌드 없이 설치 가능: $(command -v dwg2dxf)"
+    fi
   else
     echo "  [warn] GitHub 접근 불가 — libredwg 생략(ODA 사용)"
   fi
