@@ -344,17 +344,41 @@ async def apply(payload: dict = None):
             routes_px.append({"id": f"auto-evac-{i}",
                               "name": f"자동피난경로{i + 1}", "points": pts})
 
+    # 3.6) Exit 선분(mm) → ExitLine(맵 px) 변환 — CAD 기준 출입구 통과선 반영용.
+    #      inside(안쪽 반평면 지정점) 추론: 편집기 Exit엔 방향정보가 없으므로,
+    #      Exit 중점에서 도면 bounds 중심 쪽으로 오프셋한 점을 inside로 둔다.
+    #      근거: 대형 평면도에서 출구는 보통 외곽, 건물 안쪽은 도면 중심 방향.
+    #      [한계] 안뜰·중정형 평면, 중심이 통과선상에 놓이는 배치에서는 방향이
+    #      틀릴 수 있음 — 그런 경우 맵설정에서 inside를 수동 보정해야 한다.
+    cx_mm, cy_mm = (minx + maxx) / 2.0, (miny + maxy) / 2.0
+    diag_mm = math.hypot(maxx - minx, maxy - miny)
+    exits_px = []
+    for i, (x1, y1, x2, y2) in enumerate(S["exits"]):
+        mx, my = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        dx, dy = cx_mm - mx, cy_mm - my
+        norm = math.hypot(dx, dy)
+        if norm < 1e-6:  # 중점이 도면 중심과 일치(희귀) → 선분 수직방향으로 대체
+            dx, dy = -(y2 - y1), (x2 - x1)
+            norm = math.hypot(dx, dy) or 1.0
+        off = max(1500.0, 0.05 * diag_mm)   # 안쪽으로 1.5m 또는 대각선 5% 이동
+        ix_mm, iy_mm = mx + dx / norm * off, my + dy / norm * off
+        exits_px.append({"id": f"exit-{i}", "name": f"출구{i + 1}",
+                         "line": [_to_px(x1, y1), _to_px(x2, y2)],
+                         "inside": _to_px(ix_mm, iy_mm),
+                         "design_capacity": None})
+
     saved_names = (map_name, floor_name, "evac_distfield.npz")
     # 4) 운영 서버(:8900) 반영 — 명시적 opt-in 일 때만. 해당 층(floor)에만 반영.
     applied = False
-    routes_applied = False
+    elements_applied = False
     if not bool(payload.get("apply_live", False)):
         return {"site": site, "floor": floor, "map_px": [w_px, h_px],
                 "m_per_px": round(m_per_px, 5),
-                "exits": len(exits), "openings": len(S["openings"]),
+                "exits": len(exits_px), "openings": len(S["openings"]),
                 "deleted": len(S["deleted"]), "routes": len(routes_px),
                 "worst_dist_m": round(max((p["dist_mm"] for p in an.paths), default=0) / 1000, 1),
                 "applied_to_system": False, "routes_applied": False,
+                "elements_applied": False,
                 "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
     import urllib.request
     from urllib.parse import urlencode
@@ -377,27 +401,33 @@ async def apply(payload: dict = None):
     except Exception:
         applied = False
 
-    # 4.5) 맵 반영 성공 시에만 그 층 routes 를 자동 피난경로로 반영.
-    #      PUT /api/site/routes?floor= (그 층 routes만 교체, 수동경로 보존).
-    #      맵을 방금 올렸으므로 :8900 그 층 map.w/h == 여기 w_px/h_px 로 좌표 정합.
-    if applied and routes_px:
+    # 4.5) 맵 반영 성공 시에만 그 층의 공간요소를 CAD 기준으로 재세팅.
+    #      PUT /api/site/floor-elements?floor= (:8900 v1.9): 피난경로·출입구는
+    #      CAD 산출값으로 새로 세팅, 구역·병목은 비운다(옛 맵 px 좌표가 새 맵과
+    #      안 맞으므로 새 맵 위에 다시 그리게 함). 맵을 방금 올렸으므로 :8900
+    #      그 층 map.w/h == 여기 w_px/h_px 로 좌표 정합.
+    if applied:
         try:
-            rbody = json.dumps({"routes": routes_px, "replace": "auto"}).encode()
-            rurl = f"{SYSTEM_API}/api/site/routes?" + urlencode({"floor": floor})
+            ebody = json.dumps({"routes": routes_px, "replace": "auto",
+                                "exits": exits_px,
+                                "clear_zones": True,
+                                "clear_bottlenecks": True}).encode()
+            eurl = f"{SYSTEM_API}/api/site/floor-elements?" + urlencode({"floor": floor})
             req2 = urllib.request.Request(
-                rurl, data=rbody, method="PUT",
+                eurl, data=ebody, method="PUT",
                 headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req2, timeout=5) as r2:
-                routes_applied = (r2.status == 200)
+                elements_applied = (r2.status == 200)
         except Exception:
-            routes_applied = False
+            elements_applied = False
 
     return {"site": site, "floor": floor, "map_px": [w_px, h_px],
             "m_per_px": round(m_per_px, 5),
-            "exits": len(exits), "openings": len(S["openings"]),
+            "exits": len(exits_px), "openings": len(S["openings"]),
             "deleted": len(S["deleted"]), "routes": len(routes_px),
             "worst_dist_m": round(max((p["dist_mm"] for p in an.paths), default=0) / 1000, 1),
-            "applied_to_system": applied, "routes_applied": routes_applied,
+            "applied_to_system": applied, "routes_applied": elements_applied,
+            "elements_applied": elements_applied,
             "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
 
 

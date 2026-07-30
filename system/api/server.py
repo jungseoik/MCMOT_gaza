@@ -36,6 +36,7 @@ from system.config.schema import (
     DEFAULT_FLOOR_ID,
     CameraConfig,
     CameraMapping,
+    ExitLine,
     Floor,
     MapSpec,
     Route,
@@ -309,6 +310,64 @@ async def put_site_routes(request: Request, floor: str = DEFAULT_FLOOR_ID):
     return {"floor": fid, "routes": len(fl.routes),
             "auto": sum(1 for r in fl.routes if r.id.startswith(AUTO_ROUTE_PREFIX)),
             "manual": sum(1 for r in fl.routes if not r.id.startswith(AUTO_ROUTE_PREFIX))}
+
+
+@app.put("/api/site/floor-elements")
+async def put_site_floor_elements(request: Request, floor: str = DEFAULT_FLOOR_ID):
+    """CAD 도면 적용 시 한 층(floor)의 공간요소를 새 CAD 기준으로 재세팅 —
+    다층 붕괴 위험 없는 부분 반영 (요구사항 D-2, v1.9).
+
+    새 CAD 도면으로 맵이 바뀌면 옛 공간요소 좌표(옛 맵 px 기준)가 새 맵과
+    맞지 않으므로: 편집기가 아는 것(피난경로·출입구)만 CAD 기준으로 자동
+    세팅하고, 모르는 것(구역·병목)은 옛것을 남기지 않고 비워 새 맵 위에
+    다시 그리게 한다.
+
+    body (모두 선택 — 키가 있을 때만 반영):
+      routes            : [{id, name, points:[[px,px]...]}] — 맵 원본 px polyline.
+      replace           : "auto"(기본)/"all" — routes 교체 규칙(put_site_routes와 동일).
+                          자동경로 id 접두 'auto-evac-'만 교체하거나 전체 교체.
+      exits             : [{id, name, line:[[px,px],[px,px]], inside:[px,px],
+                          design_capacity?}] — 그 층 exits **전체 교체**(CAD 기준 재세팅).
+      clear_zones       : true → 그 층 zones를 빈 리스트로.
+      clear_bottlenecks : true → 그 층 bottlenecks를 빈 리스트로.
+    PUT /api/site 로 floors 통째 전송하지 않으므로 다른 층은 절대 건드리지
+    않는다. reload_engine 으로 즉시 반영.
+    """
+    body = await request.json()
+    mode = str(body.get("replace", "auto"))
+    if mode not in ("auto", "all"):
+        raise HTTPException(422, "replace는 'auto'|'all'")
+    try:
+        new_routes = ([Route.model_validate(r) for r in body["routes"]]
+                      if "routes" in body else None)
+        new_exits = ([ExitLine.model_validate(e) for e in body["exits"]]
+                     if "exits" in body else None)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    cfg = rt.site()
+    fid = rt.resolve_floor(floor)
+    fl = cfg.get_floor(fid)
+
+    if new_routes is not None:
+        kept = ([] if mode == "all"
+                else [r for r in fl.routes if not r.id.startswith(AUTO_ROUTE_PREFIX)])
+        fl.routes = kept + new_routes
+    if new_exits is not None:
+        fl.exits = new_exits                 # CAD 기준 전체 교체
+    if bool(body.get("clear_zones", False)):
+        fl.zones = []
+    if bool(body.get("clear_bottlenecks", False)):
+        fl.bottlenecks = []
+
+    if fid == DEFAULT_FLOOR_ID:              # top-level 동기화(재승격 대비)
+        cfg.routes, cfg.exits = fl.routes, fl.exits
+        cfg.zones, cfg.bottlenecks = fl.zones, fl.bottlenecks
+    rt.store.save_site(cfg)
+    rt.reload_engine()
+    return {"floor": fid, "routes": len(fl.routes), "exits": len(fl.exits),
+            "zones": len(fl.zones), "bottlenecks": len(fl.bottlenecks),
+            "auto_routes": sum(1 for r in fl.routes if r.id.startswith(AUTO_ROUTE_PREFIX))}
 
 
 # ================================================================ 카메라

@@ -1,4 +1,20 @@
-# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.8)
+# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.9)
+
+> **v1.9 개정 (2026-07-30 — CAD 도면 적용 시 공간요소 재세팅, D-2)**
+> - API 신설: **`PUT /api/site/floor-elements?floor=`** — 한 층의 공간요소를 새 CAD
+>   도면 기준으로 재세팅하는 통합 부분 반영 엔드포인트(다층 붕괴 위험 없음).
+>   새 CAD 도면으로 맵이 바뀌면 옛 공간요소 좌표(옛 맵 px 기준)가 새 맵과 안 맞으므로,
+>   편집기가 아는 것(피난경로·출입구)만 CAD 기준으로 새로 세팅하고, 모르는 것
+>   (구역·병목)은 옛것을 남기지 않고 비워 새 맵 위에 다시 그리게 한다.
+>   body(모두 선택, 키가 있을 때만 반영) `{routes?, replace?:"auto"|"all",
+>   exits?, clear_zones?:bool, clear_bottlenecks?:bool}`:
+>   `routes`는 `PUT /api/site/routes`와 동일 규칙(auto=자동경로만 교체·수동 보존, all=전체),
+>   `exits`는 그 층 exits **전체 교체**(CAD 기준 재세팅),
+>   `clear_zones`/`clear_bottlenecks`가 true면 그 층 zones/bottlenecks를 빈 리스트로.
+>   그 층(floor)만 수정하고 `PUT /api/site`로 floors 통째 전송하지 않는다. reload_engine.
+>   CAD 편집기(:8910) apply가 맵 POST 성공 시 이 엔드포인트로 routes+exits(clear=true)를
+>   함께 전송. exits inside(안쪽 반평면)는 Exit 중점→도면 bounds 중심 방향으로 추론.
+> - 스키마·`contracts.py` 무개정(기존 `Route`·`ExitLine` 재사용).
 
 > **v1.8 개정 (2026-07-28 — CAD 최단경로→피난경로 자동 반영, D-2 ①)**
 > - API 신설: **`PUT /api/site/routes?floor=`** — 한 층의 `routes`만 교체하는
@@ -75,6 +91,7 @@
 | `POST /api/site/map` | multipart: `image`(png), 선택 `meta`(cad-convert JSON) | `MapSpec` (meta 있으면 m_per_px 자동) |
 | `GET /api/site/map` | — | image/png (업로드된 맵 이미지, 없으면 404) |
 | `PUT /api/site/routes?floor=` | `{routes: [{id, name, points:[[px,px]...]}], replace?: "auto"\|"all"}` | `{floor, routes, auto, manual}` — **그 층 routes만 교체**(다층 붕괴 없음). `replace="auto"`(기본): id가 `auto-evac-`로 시작하는 자동경로만 교체·수동경로 보존. `"all"`: 전체 교체. CAD 편집기(:8910)의 worst-N 최단경로를 EPFI 기준경로로 자동 반영 (D-2 ①, v1.8) |
+| `PUT /api/site/floor-elements?floor=` | `{routes?, replace?:"auto"\|"all", exits?:[{id,name,line:[[px,px],[px,px]],inside:[px,px],design_capacity?}], clear_zones?:bool, clear_bottlenecks?:bool}` | `{floor, routes, exits, zones, bottlenecks, auto_routes}` — **그 층 공간요소만 재세팅**(다층 붕괴 없음). CAD 도면 적용 시: `routes`(routes와 동일 규칙)·`exits`(전체 교체)를 CAD 기준으로 새로 세팅, `clear_zones`/`clear_bottlenecks`=true면 그 층 zones/bottlenecks를 비움(옛 맵 px 좌표가 새 맵과 불일치하므로 다시 그리게). 키 없는 요소는 무변경 (D-2, v1.9) |
 | `GET /api/cameras` | — | `list[CameraConfig]` + 런타임 상태 병합 `[{...cfg, state: CameraState}]` |
 | `POST /api/cameras` | `{name, rtsp, analyze_fps?, min_conf?}` | `CameraConfig` (cam_id 서버 발급 `cam01..`) |
 | `PUT /api/cameras/{id}` | `CameraConfig` 부분 갱신(enabled·min_conf 등). `min_conf`: 0~1이면 그 카메라 오버라이드, `null`이면 사이트값 상속. 범위 밖은 422 | `CameraConfig` |
