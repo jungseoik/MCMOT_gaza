@@ -12,7 +12,9 @@
 # ⚠️ backseollgi/MCMOT 는 현재 **비공개**다. 접근하려면 토큰이 필요하다:
 #     export HF_TOKEN=hf_xxxxxxxx        # 절대 커밋하지 말 것
 #   (또는 `hf auth login`). 공개로 전환되면 토큰 없이 받아진다.
-#   가중치 2개와 mot_dataset(RTSP)은 공개라 토큰 없이 받아진다.
+#   가중치 2개(개별 공개 레포)는 공개라 토큰 없이 받아진다.
+#   RTSP 테스트 영상은 backseollgi/MCMOT/videos/ 에 있고 tools/rtsp/setup_rtsp_streams.sh 가 받는다
+#   (역할 분리 — 이 스크립트 소관 아님). MCMOT가 비공개라 그쪽도 HF_TOKEN 필요.
 #
 # 사용:
 #   bash tools/fetch_assets.sh                # 전체(가중치+ONNX+CAD)
@@ -98,6 +100,6 @@ else
 fi
 echo "가중치는 이 스크립트 없이도 추론/추적 코드가 assets 를 import할 때 자동 확보된다"
 echo "(공개 레포). ONNX·CAD 는 이 스크립트(또는 원본 서버 복사)로만 확보된다."
-echo "RTSP 테스트 영상(backseollgi/mot_dataset)은 tools/rtsp/setup_rtsp_streams.sh 소관 —"
-echo "  송출까지 함께 하므로 여기서는 다루지 않는다(역할 분리)."
+echo "RTSP 테스트 영상은 backseollgi/MCMOT/videos/ 에 있고 tools/rtsp/setup_rtsp_streams.sh 소관 —"
+echo "  송출까지 함께 하므로 여기서는 다루지 않는다(역할 분리). MCMOT 비공개라 토큰 필요."
 exit "$RC"

@@ -123,10 +123,10 @@ CUDA_VISIBLE_DEVICES=<빈GPU> conda run -n boosttrack python \
 
 ### 2-6b. RTSP 테스트 소스 구성 (MACS 입력 = RTSP)
 MACS는 RTSP 입력으로 동작하므로 테스트하려면 송출 소스가 필요하다. 테스트 3채널 영상은
-HuggingFace 데이터셋(`backseollgi/mot_dataset`)에 있고, 스크립트로 재현한다:
+HuggingFace `backseollgi/MCMOT`(model, `videos/`)에 있고, 스크립트로 재현한다:
 ```bash
-# hf CLI 필요(pip install -U huggingface_hub). 데이터셋 공개라 토큰 불필요.
-bash tools/rtsp/setup_rtsp_streams.sh
+# hf CLI 필요(pip install -U huggingface_hub). MCMOT는 비공개(model)라 HF_TOKEN 필요.
+HF_TOKEN=hf_xxx bash tools/rtsp/setup_rtsp_streams.sh
 # → HF 다운로드 → 적합성 체크(부적합시 자동 인코딩) → mediamtx → pm2 송출
 # → rtsp://<이서버IP>:8554/{1_v1,2_v1,3_v1} → MACS 카메라 등록 주소로 사용
 ```
