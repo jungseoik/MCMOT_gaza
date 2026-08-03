@@ -81,19 +81,33 @@ def index():
 
 # ───────────────────────────────────────────── 업로드/로드
 def _dwg_to_dxf(src, out_dir):
-    """ODAFileConverter(xvfb 헤드리스)로 DWG→DXF. tools/cad_convert.py 와 동일 방식."""
-    if not shutil.which("ODAFileConverter"):
-        raise HTTPException(500, "ODAFileConverter 없음 — tools/setup_cad_convert.sh 참조")
-    with tempfile.TemporaryDirectory() as tin:
-        shutil.copy(src, tin)
-        cmd = ["xvfb-run", "-a", "ODAFileConverter", tin, out_dir,
-               "ACAD2018", "DXF", "0", "1", "*.dwg"]
-        subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    """DWG→DXF. ODAFileConverter(정합 최상) 우선, 없으면 libredwg(dwg2dxf, OSS)로
+    폴백 — tools/cad_convert.py 와 동일한 엔진 선택. 둘 다 없으면 설치 안내(500).
+
+    (순정 서버 재현: ODA는 EULA로 자동설치 불가하지만 libredwg는
+     tools/setup_cad_convert.sh 로 자동 빌드되므로, 편집기가 ODA를 강제하면
+     ODA 미설치 서버에서 DWG 업로드가 막힌다 — 폴백으로 그 갭을 없앤다.)"""
     base = os.path.splitext(os.path.basename(src))[0]
     out = os.path.join(out_dir, base + ".dxf")
-    if not os.path.exists(out):
-        raise HTTPException(422, "DWG→DXF 변환 실패")
-    return out
+    if shutil.which("ODAFileConverter"):
+        with tempfile.TemporaryDirectory() as tin:
+            shutil.copy(src, tin)
+            cmd = ["xvfb-run", "-a", "ODAFileConverter", tin, out_dir,
+                   "ACAD2018", "DXF", "0", "1", "*.dwg"]
+            subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if os.path.exists(out):
+            return out
+        # ODA가 있었으나 실패 → libredwg로 재시도(있으면)
+    if shutil.which("dwg2dxf"):
+        subprocess.run(["dwg2dxf", "-o", out, src],
+                       capture_output=True, text=True, timeout=300)
+        if os.path.exists(out):
+            return out
+        raise HTTPException(422, "DWG→DXF 변환 실패(libredwg)")
+    if not shutil.which("ODAFileConverter"):
+        raise HTTPException(500, "DWG 변환기 없음(ODAFileConverter/dwg2dxf) — "
+                                 "tools/setup_cad_convert.sh 로 설치")
+    raise HTTPException(422, "DWG→DXF 변환 실패")
 
 
 @app.post("/api/load")

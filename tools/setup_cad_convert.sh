@@ -34,8 +34,11 @@ if command -v apt-get >/dev/null 2>&1; then
   $SUDO apt-get install -y \
     fonts-noto-cjk \
     xvfb libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 \
-    git gcc make autoconf automake libtool pkg-config texinfo || \
+    git gcc make autoconf automake libtool pkg-config texinfo \
+    python3 libpcre2-dev || \
     echo "  [warn] 일부 패키지 설치 실패 — 배포판 패키지명 확인"
+    # python3·libpcre2-dev: libredwg configure/빌드 필수 (순정 ubuntu:24.04 최소
+    # 이미지엔 python이 없어 --disable-bindings 여도 configure가 실패한다 — 실측 확인)
 else
   echo "  [warn] apt-get 없음 — 위 의존성을 배포판 방식으로 설치하라"
 fi
