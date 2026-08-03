@@ -9,6 +9,10 @@
 > 특히 **TRT 엔진 재빌드**와 **한계 처리량 재측정**은 생략 불가.
 >
 > 작성 2026-07-23 · 근거: `system/ingest_ds/README.md`(엔진 빌드), `docs/reports/DeepStream-한계처리량-실측.md`(성능 실측).
+>
+> 🧱 **순정 우분투(드라이버만)에서 시작하나요?** → 먼저 **[설치-맨서버-부트스트랩.md](설치-맨서버-부트스트랩.md)**
+> 의 "0단계: 시스템 준비"(conda·docker·nvidia-container-toolkit·ffmpeg·node/pm2·CAD)를 복붙으로
+> 갖춘 뒤 이 문서로 온다. 이 문서는 **GPU 아키텍처가 바뀔 때의 재작업**(엔진 재빌드·재측정)에 집중한다.
 
 ---
 
@@ -64,8 +68,13 @@ bash install_yolox.sh
 > 수동: `hf download backseollgi/mot20_sbs_S50.pth mot20_sbs_S50.pth --local-dir external/weights`
 > (tar도 동일). `hf` CLI는 `pip install -U huggingface_hub`.
 
+> 💡 **대용량 일괄 다운로드**: 가중치·ONNX·CAD 원본을 한 번에 받으려면
+> `export HF_TOKEN=hf_xxx && bash tools/fetch_assets.sh` (멱등). ONNX·CAD는 `backseollgi/MCMOT`
+> (현재 비공개→토큰 필요), 가중치는 공개 개별 레포. 상세: [설치-맨서버-부트스트랩.md §2단계](설치-맨서버-부트스트랩.md).
+
 ### 2-3. ONNX 수출 (GPU 무관 — 원본에서 복사 가능)
-`external/weights/trt/*.onnx`는 GPU 아키텍처와 무관하므로 원본 서버에서 그대로 복사해도 된다. 없으면 재생성:
+`external/weights/trt/*.onnx`는 GPU 아키텍처와 무관하므로 원본 서버 복사 또는
+`bash tools/fetch_assets.sh --onnx`(HF `backseollgi/MCMOT`)로 확보한다. 없으면 재생성:
 ```bash
 CUDA_VISIBLE_DEVICES=<빈GPU> conda run -n boosttrack python docs/reports/bench/build_dynamic_yolox.py
 # ReID ONNX는 src/build_trt.py 경로에서 생성
