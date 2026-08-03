@@ -4,7 +4,7 @@ description: >-
   CAD 도면 변환 파이프라인. AutoCAD DWG를 열 수 있는 DXF로 바꾸고, DXF를 평면도 PNG와
   미터 척도(격자·스케일바) PNG로 렌더한다. "이 dwg 변환해줘", "캐드 파일 열 수 있게 바꿔줘",
   "도면 png로 뽑아줘", "도면에 거리 척도 표시해줘", "평면도 이미지 만들어줘", "dxf 렌더",
-  "figure/도면 스케일 이미지" 같은 요청에 사용. DWG→DXF는 ODAFileConverter(GUI)를 xvfb로
+  "figure/도면 스케일 이미지" 같은 요청에 사용. DWG→DXF는 libredwg(OSS, dwg2dxf) 기본·ODA 없으면 자동 폴백. ODAFileConverter(GUI)는 xvfb로
   헤드리스 실행, DXF→PNG는 ezdxf+matplotlib. tools/cad_convert.py 위에서 동작한다 —
   새로 구현하지 말 것. (CAD conversion, DWG, DXF, floor plan, scale, ODA, ezdxf)
 ---

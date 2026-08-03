@@ -26,6 +26,14 @@ onnxscript
 gdown
 Pillow>=9.0
 pyzmq        # DeepStream 인제스트(INGEST_BACKEND=deepstream) 호스트 브리지용 — system/ingest_ds/bridge.py
+# 웹 서버(FastAPI) — 멀티카메라 시스템(:8900, system/api/server.py)·CAD 편집기(:8910,
+# cad/.../evac/web.py) 공통 필수. python-multipart는 맵/도면 업로드(UploadFile)에 필요.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+# CAD 렌더·도면 편집기(evac) 파이썬 의존 (system도 scipy·opencv 이미 위에 있음)
+ezdxf>=1.1
+matplotlib>=3.7
 
-# [선택] CAD 변환 (tools/cad_convert.py): pip install ezdxf matplotlib
+# [선택] CAD 변환(구버전 안내): 위 ezdxf·matplotlib로 충족
 # [선택] 합성 데이터 생성 (tools/cctv_gen.py): pip install google-genai + GOOGLE_API_KEY 필요
