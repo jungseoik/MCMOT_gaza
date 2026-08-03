@@ -16,9 +16,12 @@
 ```bash
 # hf CLI 필요 (없으면: pip install -U huggingface_hub)
 # 공개 데이터셋이라 토큰 불필요. (비공개로 바뀌면 HF_TOKEN=hf_xxx 를 앞에 — 커밋 금지)
-bash tools/rtsp/setup_rtsp_streams.sh
+bash tools/rtsp/setup_rtsp_streams.sh          # 기본 3채널(멀티카메라 최소재현)
+bash tools/rtsp/setup_rtsp_streams.sh --all    # 전체 12개(단일영상 MVP·벤치 재현 포함)
+STREAMS="sample1 zara01" bash tools/rtsp/setup_rtsp_streams.sh   # 임의 조합
 ```
-→ `rtsp://<이서버IP>:8554/{1_v1,2_v1,3_v1}` 3채널 송출. MACS 등록 주소로 그대로 사용.
+→ 기본은 `rtsp://<이서버IP>:8554/{1_v1,2_v1,3_v1}` 3채널 송출. MACS 등록 주소로 그대로 사용.
+`--all`이면 아래 표의 12개 전부 송출(단일영상 MVP·DS 벤치용 `sample1`·`zara01` 등 포함).
 
 스크립트가 하는 일: HF에서 `videos/*.mp4` 다운로드(`~/rtsp-stream/`) → **적합성 체크
 (부적합하면 자동 재인코딩)** → mediamtx(도커) 기동 → 스트림별 pm2 송출 등록.
@@ -114,9 +117,19 @@ ffplay rtsp://localhost:8554/카테고리_이름_1   # 영상 확인(선택)
 - 포트: RTSP 8554 / RTMP 1935 / HLS 8888 / WebRTC 8889
 
 ## 테스트 데이터셋 (HuggingFace)
-- 레포: **`backseollgi/mot_dataset`** (dataset), 경로 `videos/*.mp4`
-- 현재 3채널: `1_v1`(1280×720), `2_v1`·`3_v1`(1108×828) — 전부 H.264 Constrained Baseline, 24fps
+- 레포: **`backseollgi/mot_dataset`** (dataset, 공개), 경로 `videos/*.mp4`
+- **총 12개** — 전부 H.264 Constrained Baseline(WebRTC 호환, 재인코딩 불필요):
+
+| 스트림명 | 용도 | 비고 |
+|----------|------|------|
+| `1_v1` `2_v1` `3_v1` | **멀티카메라(:8900) 최소재현** — seed 카메라 3채널 | setup 기본값 |
+| `sample1` | **단일영상 MVP(:8000)·`src.benchmark`** 핵심 샘플(코드 55회 참조) | `assets/sample1.mp4` |
+| `zara01` `zara02` `eth` | **DS 벤치** `system/ingest_ds/configs/cams_4ch.json` 참조 | 다채널 한계 측정 |
+| `hotel` `students03` `arxiepiskopi` | 벤치/추적 테스트(`docs/reports/bench/*`) | 큰 파일(hotel 149M 등) |
+| `in_out_counting` `inout_sample2` | webui 인·아웃 카운팅 데모 | 단일채널 UI |
+
 - 업로드: `hf upload backseollgi/mot_dataset <로컬>.mp4 videos/<이름>.mp4 --repo-type dataset`
 - 다운로드: `hf download backseollgi/mot_dataset videos/<이름>.mp4 --repo-type dataset --local-dir <dir>`
+- 일괄 송출: `bash tools/rtsp/setup_rtsp_streams.sh --all` (12개 전부 pm2 등록)
 
 > ⚠️ **토큰은 절대 레포에 커밋하지 않는다.** `HF_TOKEN` 환경변수 또는 `hf auth login`으로만 사용.

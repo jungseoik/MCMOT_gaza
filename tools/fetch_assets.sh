@@ -98,4 +98,6 @@ else
 fi
 echo "가중치는 이 스크립트 없이도 추론/추적 코드가 assets 를 import할 때 자동 확보된다"
 echo "(공개 레포). ONNX·CAD 는 이 스크립트(또는 원본 서버 복사)로만 확보된다."
+echo "RTSP 테스트 영상(backseollgi/mot_dataset)은 tools/rtsp/setup_rtsp_streams.sh 소관 —"
+echo "  송출까지 함께 하므로 여기서는 다루지 않는다(역할 분리)."
 exit "$RC"

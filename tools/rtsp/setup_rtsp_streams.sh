@@ -4,10 +4,13 @@
 # mediamtx(도커)로 RTSP 송출(pm2 등록)한다. 새 서버 이관 시 이거 한 방으로 재현.
 #
 # 사용:
+#   bash tools/rtsp/setup_rtsp_streams.sh            # 기본 3채널(멀티카메라 최소재현)
+#   bash tools/rtsp/setup_rtsp_streams.sh --all      # 전체 12개(단일영상 MVP·벤치 재현 포함)
+#   STREAMS="sample1 zara01" bash tools/rtsp/setup_rtsp_streams.sh   # 임의 조합
 #   HF_TOKEN=hf_xxx bash tools/rtsp/setup_rtsp_streams.sh
 #   (공개 데이터셋이면 HF_TOKEN 없이도 됨. 비공개면 토큰 필요)
 #
-# 결과: rtsp://<이서버IP>:8554/{1_v1,2_v1,3_v1} 3채널 송출.
+# 결과: rtsp://<이서버IP>:8554/<스트림이름> 송출 (기본 1_v1,2_v1,3_v1).
 # MACS 등록 주소 = rtsp://<송출서버IP>:8554/<스트림이름>
 #
 # 상세·조건(WebRTC 호환 인코딩 등)은 docs/RTSP-송출서버-구성.md 참조.
@@ -16,8 +19,26 @@ set -euo pipefail
 # ── 설정 ──────────────────────────────────────────────────────────────────
 HF_DATASET="${HF_DATASET:-backseollgi/mot_dataset}"
 STREAM_DIR="${STREAM_DIR:-$HOME/rtsp-stream}"       # 영상·스크립트 보관 위치
-STREAMS=("1_v1" "2_v1" "3_v1")                       # 송출할 스트림(=영상 파일명)
 MEDIAMTX_NAME="mediamtx"
+
+# 송출할 스트림(=영상 파일명, backseollgi/mot_dataset videos/<이름>.mp4).
+#   기본: 멀티카메라 최소재현 3채널.
+#   --all: 단일영상 MVP·벤치(sample1 등) 재현용 전체 12개.
+#   STREAMS 환경변수(공백구분)로 임의 조합 오버라이드 가능.
+DEFAULT_STREAMS=("1_v1" "2_v1" "3_v1")
+ALL_STREAMS=("1_v1" "2_v1" "3_v1" \
+  "sample1" "zara01" "zara02" "eth" "hotel" "students03" \
+  "arxiepiskopi" "in_out_counting" "inout_sample2")
+
+if [[ -n "${STREAMS:-}" ]]; then
+  # STREAMS="a b c" 환경변수 오버라이드
+  read -r -a STREAMS <<< "$STREAMS"
+elif [[ "${1:-}" == "--all" ]]; then
+  STREAMS=("${ALL_STREAMS[@]}")
+else
+  STREAMS=("${DEFAULT_STREAMS[@]}")   # 기본 3채널
+fi
+echo "▶ 송출 대상(${#STREAMS[@]}개): ${STREAMS[*]}"
 
 echo "▶ 송출 디렉토리: $STREAM_DIR"
 mkdir -p "$STREAM_DIR"
