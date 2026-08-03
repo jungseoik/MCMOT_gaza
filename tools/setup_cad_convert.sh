@@ -35,10 +35,13 @@ if command -v apt-get >/dev/null 2>&1; then
     fonts-noto-cjk \
     xvfb libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 \
     git gcc make autoconf automake libtool pkg-config texinfo \
-    python3 libpcre2-dev || \
+    python3 libpcre2-dev \
+    libgl1 libglib2.0-0 || \
     echo "  [warn] 일부 패키지 설치 실패 — 배포판 패키지명 확인"
     # python3·libpcre2-dev: libredwg configure/빌드 필수 (순정 ubuntu:24.04 최소
-    # 이미지엔 python이 없어 --disable-bindings 여도 configure가 실패한다 — 실측 확인)
+    # 이미지엔 python이 없어 --disable-bindings 여도 configure가 실패 — 실측 확인).
+    # libgl1·libglib2.0-0: opencv-python 런타임(cv2 import) — CAD 렌더·도면 편집기가
+    # cv2를 쓰는데 순정 서버엔 libGL이 없어 ImportError 난다 — 도커 실측 확인.
 else
   echo "  [warn] apt-get 없음 — 위 의존성을 배포판 방식으로 설치하라"
 fi
