@@ -107,12 +107,14 @@
 | `GET /api/session` | — | `SessionLive` (없으면 404) |
 | `GET /api/session/result` | — | 마지막 `EvaluationResult` (없으면 404) |
 | `GET /api/session/timeline` | — | `list[TimelinePoint]` (1초 샘플 — 시간대별 시각화) |
+| `GET /api/session/person_series?floor=` | — | 객체별 `d_i(t)` 1초 시계열 `{gid: [...]}` (진행 중이면 현재까지, 종료 후엔 마지막/저장본) — EPFI 지연 표출·역추적 (v1.4) |
 | `GET /api/session/export?format=json\|csv` | — | EvaluationResult 파일 다운로드 (FR-09) |
 | `GET /api/sessions` | — | 세션 이력 요약 목록(최신순) — v1.3, `data/sites/<site>/sessions/*.json` 영속화 기반 |
 | `GET /api/sessions/{id}` | — | 저장된 `{result, timeline}` (v1.3). result/timeline 단건 API는 재시작 후 최신 저장본 폴백 |
 | `GET /api/map/state` | — | `MapState` (최신 스냅샷, 세션 중 `.session=SessionLive`) |
 | `GET /api/map/stream` | — | **SSE**, 1초 간격 `event: state\ndata: <MapState JSON>` |
 | `GET /api/status` | — | `{pipeline: {...}, cameras: list[CameraState]}` |
+| `GET /api/debug/tracks?floor=` | — | 트래커 진단 — gid별 `foot_uv`·맵 투영 좌표·카메라 해상도·커버리지(좌표가 카메라 원본 해상도 범위 안인지 확인용) |
 
 ## 5. MapState (B→C)
 

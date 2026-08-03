@@ -4,6 +4,13 @@
 BoostTrack++ 다중 객체 추적(MOT) 기술을 활용하여 실시간으로 비디오에서 객체를 감지하고 추적하는 시스템입니다. ROI(관심 영역)를 설정하여 해당 영역 내에서 이동하는 객체의 속도를 계산하고, 결과를 시각적으로 표시합니다.
 
 ## 환경 설정
+
+> 🧱 **순정 우분투(NVIDIA 드라이버만)에서 처음부터 올리나요?** →
+> **[docs/설치-맨서버-부트스트랩.md](docs/설치-맨서버-부트스트랩.md)** 의 "0단계: 시스템 준비"
+> (conda·docker·nvidia-container-toolkit·ffmpeg·node/pm2·CAD 스택)를 복붙으로 갖춘 뒤 아래로.
+> 대용량 자산(가중치·ONNX·CAD)은 `bash tools/fetch_assets.sh` 로 일괄 다운로드
+> (HF `backseollgi/MCMOT`; 현재 비공개라 `HF_TOKEN` 필요).
+
 ```bash
 # Conda 가상환경 생성
 $ conda create -n boosttrack python=3.12 -y
@@ -224,6 +231,7 @@ system/                        # 멀티카메라 2D맵 시스템 (FastAPI, :8900
   api/mock_server.py           # 프론트 개발용 mock (GPU 불필요)
   config/                      # pydantic 스키마 + JSON 영속화 (SiteStore)
   ingest/                      # ffmpeg-NVDEC 카메라 워커·FrameQueue·재접속 워치독
+  ingest_ds/                   # DeepStream zero-copy 인제스트 (INGEST_BACKEND=deepstream)
   tracking/                    # 공유 TRT 검출·ReID + 카메라별 BoostTrack
   spatial/                     # 호모그래피 맵 투영·polygon/통과선/polyline 기하
   metrics/                     # MetricsEngine — 4대 지표 세션 산출

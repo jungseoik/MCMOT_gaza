@@ -1,7 +1,7 @@
 # system/ — 멀티카메라 2D 맵 분석 시스템
 
 > 설계: [docs/architecture/02-멀티카메라-시스템-전환-설계.md](../docs/architecture/02-멀티카메라-시스템-전환-설계.md) ·
-> 계약: [CONTRACT.md](CONTRACT.md) (v1.1) · M0 실측: [docs/architecture/03](../docs/architecture/03-M0-환경검증-디코딩스택-실측.md)
+> 계약: [CONTRACT.md](CONTRACT.md) (v1.9) · M0 실측: [docs/architecture/03](../docs/architecture/03-M0-환경검증-디코딩스택-실측.md)
 
 ## 사전 설치 (1회)
 
