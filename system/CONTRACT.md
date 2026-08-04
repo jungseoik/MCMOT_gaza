@@ -1,4 +1,28 @@
-# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.9)
+# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.10)
+
+> **v1.10 개정 (2026-08-04 — 세션 녹화·리플레이·지표 재계산)**
+> 설계: `docs/architecture/05-세션-녹화-리플레이-지표재계산-설계.md`. 요지: 경보 세션의
+> 입력 트랙을 세션별 SQLite로 녹화해두고, 결정적 리플레이로 **다른 임계값(4대 지표
+> 세팅값)에 대해 지표를 재산출**한다(도면·호모그래피 동일 전제 — '역방향 재파라미터화').
+> - **녹화층**: `system/metrics/recorder.py`(`SessionRecorder`). 세션 시작 시
+>   `data/sites/<site>/sessions/[<floor>/]<session_id>.db` 생성 — `tracks`(프레임별
+>   raw 입력: call_seq·ts·cam_id·local_id·u·v·conf, **min_conf 필터 이전**) + `meta`
+>   (그 층 공간요소 SiteConfig 뷰·카메라·경보원·alarm_ts 스냅샷). 엔진 `on_tracks`가
+>   투영 이전에 raw 트랙을 기록(예외 격리 — 녹화 실패가 라이브를 죽이지 않음).
+>   env `SESSION_RECORD`(기본 on, `0`이면 끔=기존과 동일·롤백).
+> - **재계산**: `system/metrics/replay.py`(`run_replay`) — 녹화 db를 헤드리스
+>   MetricsEngine에 call_seq 순서로 재생. 기존 집계 `<session_id>.json`은 **불변**.
+> - API 신설: **`POST /api/session/{session_id}/replay?floor=`** — body(모두 선택)
+>   `{thresholds:{v_th,a_th,r_th,dt_hold,d_allow,min_conf,q_design}, rho_crit(전역 병목
+>   임계), bottlenecks:{id:{rho_crit,weight}}, exits:{id:{design_capacity}}, fps}`.
+>   resp `{result, timeline, frames(2D 재생용 경량 MapState), site(세션 당시 공간요소),
+>   meta}`. 미지정 임계값은 세션 스냅샷 값 유지.
+> - API 개정: `GET /api/sessions`·`GET /api/sessions/{id}`에 `has_record`(bool) 추가.
+> - 스키마(`contracts.py`) 무개정. `EvaluationResult` 등 기존 계약 그대로.
+> - 결정성 보증: 같은 임계값 재계산 = 원본 result와 `generated_at` 제외 완전 일치
+>   (`tests/system/test_replay.py`).
+> - 프론트: **④ 리플레이 탭**(`webui/static/main/view_replay.js`) — 세션 이력 선택 →
+>   2D 재생(재생/일시정지·배속·시크) + 임계값 조정 → 재계산.
 
 > **v1.9 개정 (2026-07-30 — CAD 도면 적용 시 공간요소 재세팅, D-2)**
 > - API 신설: **`PUT /api/site/floor-elements?floor=`** — 한 층의 공간요소를 새 CAD

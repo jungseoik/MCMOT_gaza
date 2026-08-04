@@ -47,6 +47,7 @@ from system.contracts import MapState
 from system.ingest.frame_queue import FrameQueue
 from system.ingest.manager import IngestManager
 from system.metrics.engine import MetricsEngine
+from system.metrics.recorder import SessionRecorder
 
 logger = logging.getLogger("system.api")
 
@@ -57,6 +58,9 @@ GPU_DEVICES = [int(x) for x in os.environ.get("GPU_DEVICES", "0,1").split(",") i
 INGEST_BACKEND = os.environ.get("INGEST_BACKEND", "ffmpeg").strip().lower()
 if INGEST_BACKEND not in ("ffmpeg", "deepstream"):
     raise ValueError(f"INGEST_BACKEND는 ffmpeg|deepstream — 받은 값: {INGEST_BACKEND!r}")
+# 세션 녹화 (계약 v1.10) — 경보 세션의 입력 트랙을 <session_id>.db로 기록.
+# 기본 on. 0/false면 녹화 끔(기존과 동일 동작, 롤백). 리플레이/재계산의 원료.
+SESSION_RECORD = os.environ.get("SESSION_RECORD", "1").strip().lower() not in ("0", "false", "no", "")
 FRONT_DIR = Path(__file__).resolve().parents[2] / "webui" / "static" / "main"
 
 
@@ -542,7 +546,8 @@ def delete_floor(floor_id: str):
 # ================================================================ 평가 세션 (계약 v1.2)
 @app.post("/api/session/start")
 async def session_start(request: Request, floor: str = DEFAULT_FLOOR_ID):
-    eng = rt.engine_for(floor)
+    fid = rt.resolve_floor(floor)
+    eng = rt.engine_for(fid)
     if eng is None:
         raise HTTPException(503, "엔진 미기동")
     body = await request.json()
@@ -551,11 +556,17 @@ async def session_start(request: Request, floor: str = DEFAULT_FLOOR_ID):
     # origins 우선, 없으면 단일 origin (하위 호환)
     origins = body.get("origins")
     origin_xy = tuple(body["origin"]) if "origin" in body else None
-    return eng.start_session(
+    live = eng.start_session(
         origin_xy=origin_xy,
         t_alarm=body.get("t_alarm"),
         alarm_origins=[tuple(o) for o in origins] if origins else None,
     )
+    if SESSION_RECORD:                     # 세션 녹화 부착 (계약 v1.10)
+        try:
+            _attach_recorder(eng, fid, live)
+        except Exception:
+            logger.exception("세션 녹화기 부착 실패 — 녹화 없이 진행")
+    return live
 
 
 def _sessions_dir(floor_id: str = DEFAULT_FLOOR_ID) -> Path:
@@ -565,6 +576,31 @@ def _sessions_dir(floor_id: str = DEFAULT_FLOOR_ID) -> Path:
     d = base if floor_id == DEFAULT_FLOOR_ID else base / floor_id
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _session_db_path(session_id: str, floor_id: str = DEFAULT_FLOOR_ID) -> Path:
+    """세션 녹화 db 경로 — 집계 <session_id>.json 옆에 <session_id>.db (v1.10)."""
+    return _sessions_dir(floor_id) / f"{session_id}.db"
+
+
+def _attach_recorder(eng, floor_id: str, live) -> None:
+    """세션 시작 시 녹화기 부착 — 그 층의 공간요소·카메라 스냅샷을 meta로 저장.
+    스냅샷이 있어야 리플레이가 세션 당시 도면 기준으로 결정적 재생된다."""
+    site = rt.site()
+    cams = rt.cameras()
+    floor_cams = [c for c in cams if site.floor_id_of_camera(c) == floor_id]
+    meta = {
+        "session_id": live.session_id,
+        "floor_id": floor_id,
+        "site_id": SITE_ID,
+        "alarm_ts": live.alarm_ts,
+        "alarm_origins": [list(o) for o in (live.alarm_origins or [])],
+        "site_version": site.version,
+        "site_view": site.as_floor_view(floor_id).model_dump(),
+        "cameras": [c.model_dump() for c in floor_cams],
+    }
+    rec = SessionRecorder(_session_db_path(live.session_id, floor_id), meta)
+    eng.attach_recorder(rec)
 
 
 def _save_session(result, timeline, person_series=None,
@@ -598,6 +634,12 @@ def session_stop(floor: str = DEFAULT_FLOOR_ID):
     if eng is None or eng.session_live() is None:
         raise HTTPException(404, "진행 중 세션 없음")
     result = eng.stop_session()
+    rec = eng.detach_recorder()            # 녹화 마감 (계약 v1.10)
+    if rec is not None:
+        try:
+            rec.close()
+        except Exception:
+            logger.exception("세션 녹화 종료 실패")
     _save_session(result, eng.session_timeline(),
                   eng.session_person_series(), floor_id=fid)
     return result
@@ -658,8 +700,12 @@ def sessions_list(floor: str = DEFAULT_FLOOR_ID):
             r = json.loads(p.read_text(encoding="utf-8"))["result"]
         except (json.JSONDecodeError, KeyError):
             continue
-        out.append({k: r.get(k) for k in
-                    ("session_id", "alarm_ts", "ended_at", "sei", "epfi_avg", "cbs_total")})
+        rec = {k: r.get(k) for k in
+               ("session_id", "alarm_ts", "ended_at", "sei", "epfi_avg", "cbs_total")}
+        sid = rec.get("session_id")
+        rec["has_record"] = bool(sid) and _session_db_path(
+            sid, rt.resolve_floor(floor)).is_file()
+        out.append(rec)
     return out
 
 
@@ -668,7 +714,49 @@ def sessions_get(session_id: str, floor: str = DEFAULT_FLOOR_ID):
     saved = _load_saved(session_id, rt.resolve_floor(floor))
     if saved is None:
         raise HTTPException(404, f"세션 없음: {session_id}")
+    saved["has_record"] = _session_db_path(
+        session_id, rt.resolve_floor(floor)).is_file()
     return saved
+
+
+@app.post("/api/session/{session_id}/replay")
+async def session_replay(session_id: str, request: Request,
+                         floor: str = DEFAULT_FLOOR_ID):
+    """저장 세션 리플레이·지표 재계산 (계약 v1.10).
+
+    녹화 db를 세션 당시 도면 스냅샷 위에서 헤드리스 재생 → 2D 재생 프레임 +
+    (thresholds 오버라이드 시) 재산출 4대 지표. 도면·호모그래피는 그대로 —
+    임계값만 바꿔 '역방향 재파라미터화'. 원본 저장물은 절대 변경하지 않는다.
+
+    body(모두 선택): {thresholds:{v_th,a_th,r_th,dt_hold,d_allow,min_conf,q_design},
+      rho_crit(전역 병목 임계), bottlenecks:{id:{rho_crit,weight}},
+      exits:{id:{design_capacity}}, fps(재생 샘플 격자, 기본 5)}
+    """
+    fid = rt.resolve_floor(floor)
+    db = _session_db_path(session_id, fid)
+    if not db.is_file():
+        raise HTTPException(404, f"녹화 없음: {session_id} — 녹화 이후 세션만 재생 가능")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    overrides = {k: body[k] for k in ("thresholds", "rho_crit", "bottlenecks", "exits")
+                 if k in body and body[k] is not None}
+    fps = float(body.get("fps", 5.0))
+
+    import anyio  # replay는 CPU 바운드 → 워커 스레드로 오프로드 (이벤트루프 보호)
+    from system.metrics.replay import run_replay
+    result, timeline, frames, meta = await anyio.to_thread.run_sync(
+        run_replay, db, overrides, fps)
+    return {
+        "result": result.model_dump(),
+        "timeline": [t.model_dump() for t in timeline],
+        "frames": frames,
+        "site": meta.get("site_view"),        # 세션 당시 공간요소(배경 렌더용)
+        "meta": {k: meta.get(k) for k in
+                 ("session_id", "floor_id", "alarm_ts", "alarm_origins",
+                  "site_version", "call_count", "track_row_count")},
+    }
 
 
 @app.get("/api/session/export")

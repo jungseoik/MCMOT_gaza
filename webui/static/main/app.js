@@ -137,7 +137,7 @@ const App = {
   switchView(v) {
     if (Views[App.view] && Views[App.view].leave) Views[App.view].leave();
     App.view = v;
-    ["map", "cams", "live"].forEach((k) => {
+    ["map", "cams", "live", "replay"].forEach((k) => {
       document.getElementById("view" + k[0].toUpperCase() + k.slice(1))
         .classList.toggle("hidden", k !== v);
     });

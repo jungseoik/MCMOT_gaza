@@ -71,6 +71,12 @@ const API = {
   exportUrl: (format, floor) =>
     `/api/session/export?format=${format || "json"}&` + API._fq(floor),
 
+  // ---- 세션 이력·리플레이/재계산 (CONTRACT v1.10)
+  getSessions: (floor) => API._j("/api/sessions?" + API._fq(floor)),
+  getSavedSession: (id, floor) => API._j(`/api/sessions/${id}?` + API._fq(floor)),
+  replaySession: (id, body, floor) =>
+    API._post(`/api/session/${encodeURIComponent(id)}/replay?` + API._fq(floor), body || {}),
+
   // ---- map state (층별)
   getMapState: (floor) => API._j("/api/map/state?" + API._fq(floor)),
   streamUrl: (floor) => "/api/map/stream?" + API._fq(floor),

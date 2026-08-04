@@ -14,6 +14,7 @@ webui/speed.py(속도 sliding-window·밀도)·webui/counter.py(방향성 crossi
 """
 from __future__ import annotations
 
+import logging
 import math
 import threading
 import time
@@ -21,6 +22,8 @@ from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
+
+logger = logging.getLogger("system.metrics.engine")
 
 from system.config.schema import CameraConfig, SiteConfig
 from system.contracts import (
@@ -105,6 +108,7 @@ class MetricsEngine:
         self._exits: dict[str, _ExitCounter] = {}
         # 평가 세션 (계약 v1.2) — 진행 중 세션·마지막 결과·타임라인
         self._session: EvaluationSession | None = None
+        self._recorder = None   # SessionRecorder | None (계약 v1.10 — 세션 녹화)
         self._last_result: EvaluationResult | None = None
         self._last_timeline: list[TimelinePoint] = []
         self._last_person_series: dict = {}
@@ -175,6 +179,12 @@ class MetricsEngine:
             ts = float(ts)
             if self._latest_ts is None or ts > self._latest_ts:
                 self._latest_ts = ts
+            if self._recorder is not None and tracks:  # 세션 녹화 (계약 v1.10) —
+                try:                                    # min_conf 필터 이전 raw 저장
+                    self._recorder.record(cam_id, ts, tracks)
+                except Exception:                       # 녹화 실패가 라이브를 죽이지 않게
+                    logger.exception("세션 녹화 실패 — 녹화 중단, 라이브 계속")
+                    self._recorder = None
             sess = self._session                 # 평가 세션 (없으면 None)
             proj = self._projectors.get(cam_id)
             if proj is None:                     # mapping 미설정 → 처리 제외
@@ -285,6 +295,17 @@ class MetricsEngine:
             self._reset_locked()
             self._session = EvaluationSession(self, origins, float(t_alarm))
             return self._session.live(float(t_alarm))
+
+    def attach_recorder(self, recorder) -> None:
+        """세션 녹화기 부착 (계약 v1.10) — on_tracks가 raw 입력을 기록한다."""
+        with self._lock:
+            self._recorder = recorder
+
+    def detach_recorder(self):
+        """녹화기 분리 후 반환 (API가 close 담당). 없으면 None."""
+        with self._lock:
+            rec, self._recorder = self._recorder, None
+            return rec
 
     def _session_now(self) -> float:
         """세션 기준 '현재' — 관측된 최신 ts (없으면 alarm_ts, 결정성 §8)."""
