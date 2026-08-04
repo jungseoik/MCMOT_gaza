@@ -27,7 +27,8 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
 
 - 환경변수: `SITE_ID`(기본 default) · `SITE_ROOT`(기본 data/sites) ·
   `GPU_DEVICES`(ffmpeg 모드 기본 0,1 — NVDEC 분산 / deepstream 모드 기본 1) ·
-  `INGEST_BACKEND`(기본 **ffmpeg** — 아래 '인제스트 백엔드' 참조)
+  `INGEST_BACKEND`(기본 **ffmpeg** — 아래 '인제스트 백엔드' 참조) ·
+  `SESSION_RECORD`(기본 **on** — 세션 녹화. `0`이면 끔=기존과 동일·롤백, 아래 '세션 녹화·리플레이' 참조)
 - 설정은 `data/sites/<site_id>/`(site.json·cameras/*.json·map.png)에 영속화 — 재시작 시 자동 복원
 - **디폴트 세팅(seed)**: `data/seed/default/`가 git에 커밋돼 있어 **클론 후 첫 기동 시
   자동 복사**됨(2개 층 17F/19F 맵·카메라·매핑·valid_roi·경로/구역/출입구 전부 포함) —
@@ -39,6 +40,10 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
   현재 라이브 세팅을 seed로 갱신: `bash tools/seed_snapshot.sh` (sessions 제외)
 - 평가 세션: 운영 뷰 🔔 경보 시작(맵 클릭) → 4대 지표 카드 → 종료 시 결과 산출,
   `sessions/<id>.json` 영속화 + `GET /api/sessions` 이력 (계약 v1.3)
+- **세션 녹화·리플레이 (계약 v1.10)**: 세션 중 입력 트랙을 `sessions/<id>.db`(SQLite)에
+  자동 녹화(도면·카메라 스냅샷 포함) → **④ 리플레이 탭**에서 2D 재생(시크·배속) +
+  임계값만 바꿔 4대 지표 재계산(`POST /api/session/{id}/replay`). 도면 그대로,
+  값만 변경 = 역방향 재파라미터화. 설계·DB 근거: [ADR 05](../docs/architecture/05-세션-녹화-리플레이-지표재계산-설계.md)
 - **기존 webui PoC(webui/server.py)와 같은 프로세스 동시 구동 금지** (전역 GeneralSettings 충돌, CONTRACT v1.1 §5). 별도 포트로 각각 실행 — 기존 UI 좌측 레일의 맵 아이콘이 :8900을 연다.
 
 ## 인제스트 백엔드 (INGEST_BACKEND)
@@ -65,7 +70,7 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 | `ingest_ds/` | DeepStream zero-copy 워커·멀티 GPU 런처·ZMQ 브리지 (`INGEST_BACKEND=deepstream`) | A |
 | `tracking/` | 공유 TRT 검출·ReID + 카메라별 BoostTrack + 분석 스레드 | A |
 | `spatial/` | 호모그래피 맵 투영·polygon/통과선/polyline 기하 | B |
-| `metrics/` | MetricsEngine — 속도·정렬도·구역 밀도·병목·출입구 카운트 → MapState | B |
+| `metrics/` | MetricsEngine — 속도·정렬도·구역 밀도·병목·출입구 카운트 → MapState. `recorder.py`(세션 SQLite 녹화)·`replay.py`(헤드리스 재생·재계산, v1.10) | B |
 | `api/` | `server.py`(실서버) · `mock_server.py`(개발용) | 메인/C |
 | `contracts.py` | FrameItem → TrackedObject → MapState 인터페이스 | 동결 |
 
