@@ -45,6 +45,7 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
   임계값만 바꿔 4대 지표 재계산(`POST /api/session/{id}/replay`). 도면 그대로,
   값만 변경 = 역방향 재파라미터화. 설계·DB 근거: [ADR 05](../docs/architecture/05-세션-녹화-리플레이-지표재계산-설계.md)
 - **기존 webui PoC(webui/server.py)와 같은 프로세스 동시 구동 금지** (전역 GeneralSettings 충돌, CONTRACT v1.1 §5). 별도 포트로 각각 실행 — 기존 UI 좌측 레일의 맵 아이콘이 :8900을 연다.
+- **로그인 게이트(간이·프론트 전용)**: 진입 시 PIA×삼성화재 브랜딩 로그인 화면(`webui/static/main/login_gate.js`). **mock**이라 접속코드는 아무거나(빈 값 포함) 통과(`ACCEPT_ANY`), 매 접속마다 표시(`REMEMBER=false`). 로고·배경은 `webui/static/`(samsung-fire-*.png·login-bg.jpg). 끄기: index.html에서 `login_gate.js` `<script>` 한 줄 제거. **실제 인증 아님** — 접근통제 필요 시 서버측 세션으로 교체.
 
 ## 인제스트 백엔드 (INGEST_BACKEND)
 
