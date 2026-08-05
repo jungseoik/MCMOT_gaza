@@ -106,6 +106,9 @@ docker run --rm --gpus device=<빈GPU> -v "$PWD:/workspace" -w /workspace macs-d
 - `GPU_DEVICES`를 **§1에서 확인한 실제 빈 GPU 인덱스**로 설정 (`0,1,2,3` 가정 금지).
 - `INGEST_BACKEND=deepstream`(멀티카메라) 또는 미설정(=ffmpeg, 단일/기존).
 - `WORKERS_PER_GPU`는 기본 1 권장(원본 실측: 분할은 5fps 한계를 못 늘림).
+- `SESSION_RECORD`(세션 녹화·리플레이, 기본 on). 녹화본은 `data/sites/<site>/sessions/*.db`에
+  쌓이는 **런타임 산출물**(git 무시) — 이관 시 옮기지 않아도 되고, 지난 세션 리플레이가 필요하면
+  그 `.db`(+`.json`)만 함께 복사. 끄려면 `SESSION_RECORD=0`.
 - 상세: `.env.example`, `tools/run_system_server.sh`.
 
 ```bash
