@@ -90,6 +90,7 @@ if [ "$DO_CAD" -eq 1 ]; then
   fetch "backseollgi/MCMOT" model "cad/17F.dwg"                       "cad/17F.dwg"                       || RC=1
   fetch "backseollgi/MCMOT" model "cad/17F.dxf"                       "cad/17F.dxf"                       || RC=1
   fetch "backseollgi/MCMOT" model "cad/17F_Egress Review(Sample).dwg" "cad/17F_Egress Review(Sample).dwg" || RC=1
+  fetch "backseollgi/MCMOT" model "cad/A-101_128_각 층 평면도_최종_수정.dwg" "cad/A-101_128_각 층 평면도_최종_수정.dwg" || RC=1
 fi
 
 echo
