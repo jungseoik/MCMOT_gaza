@@ -205,6 +205,8 @@ cad/17F.dxf
 cad/17F_v2.dwg
 cad/17F_Egress Route.pdf
 cad/17F_Egress Review(Sample).dwg
+cad/A-101_128_각 층 평면도_최종_수정.dwg
+cad/A-101_128_각 층 평면도_최종_수정.dxf
 # 피난경로 알고리즘: 변환 DXF(대용량, dwg에서 재생성 가능)만 제외. dwg/zip/png/py는 추적
 cad/CAD_API_Based_Optimal_Evacuation_Route_Algorithm/*.dxf
 # 멀티카메라 시스템 런타임 사이트 데이터(데모/운영) — 의도적 커밋만 허용

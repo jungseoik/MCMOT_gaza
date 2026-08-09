@@ -1,6 +1,6 @@
 {
   "site_id": "default",
-  "version": 43,
+  "version": 47,
   "map": {
     "image": "map_floor2.png",
     "w": 3400,
@@ -1041,6 +1041,29 @@
           ]
         }
       ],
+      "grid": {
+        "cell_size_m": 2.0
+      }
+    },
+    {
+      "id": "floor3",
+      "name": "지상1층",
+      "map": {
+        "image": "map_floor3.png",
+        "w": 2346,
+        "h": 1672,
+        "scale": null,
+        "m_per_px": 0.039995
+      },
+      "routes": [],
+      "zones": [],
+      "bottlenecks": [],
+      "exits": [],
+      "graph": {
+        "nodes": [],
+        "edges": []
+      },
+      "alarm_origins": [],
       "grid": {
         "cell_size_m": 2.0
       }
