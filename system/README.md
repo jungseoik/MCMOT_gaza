@@ -31,7 +31,8 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
   `SESSION_RECORD`(기본 **on** — 세션 녹화. `0`이면 끔=기존과 동일·롤백, 아래 '세션 녹화·리플레이' 참조)
 - 설정은 `data/sites/<site_id>/`(site.json·cameras/*.json·map.png)에 영속화 — 재시작 시 자동 복원
 - **디폴트 세팅(seed)**: `data/seed/default/`가 git에 커밋돼 있어 **클론 후 첫 기동 시
-  자동 복사**됨(2개 층 17F/19F 맵·카메라·매핑·valid_roi·경로/구역/출입구 전부 포함) —
+  자동 복사**됨(3개 층 17F/19F/지상1층 맵·카메라·매핑·valid_roi·경로/구역/출입구 전부 포함
+  — 지상1층은 실건물 CAD 척도만 있고 카메라 미배정·공간요소 비어 있음) —
   바로 운영 뷰 확인 가능. 카메라는 **`rtsp://127.0.0.1:8554/{1,2,3}_v1`**(같은 호스트의
   mediamtx, pm2 `1_v1`~`3_v1` 송출)을 바라본다 → **같은 서버에서 `tools/rtsp/setup_rtsp_streams.sh`로
   송출을 띄우면 추가 설정 없이 라이브가 붙는다**(RTSP 재현: [`docs/RTSP-송출서버-구성.md`](../docs/RTSP-송출서버-구성.md)).

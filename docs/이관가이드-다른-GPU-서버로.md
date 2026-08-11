@@ -143,7 +143,7 @@ conda run -n boosttrack python -m pytest tests/system -q   # GPU 무관 도메�
 curl -s localhost:8900/api/status                          # 기동 확인
 ```
 - webui(:8900) 접속 → 카메라 등록·매핑·운영뷰 확인.
-- 다중 도면(N층) 쓰면 도면 등록·층 전환 동작 확인. (시드에 17F/19F 2층·매핑·구역·통과선 포함 — clone 후 자동 복원)
+- 다중 도면(N층) 쓰면 도면 등록·층 전환 동작 확인. (시드에 17F/19F/지상1층 3개 층·매핑·구역·통과선 포함 — clone 후 자동 복원. 지상1층은 실건물 CAD 척도만·카메라 미배정)
 
 ---
 
