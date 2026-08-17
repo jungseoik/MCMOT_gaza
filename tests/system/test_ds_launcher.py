@@ -107,6 +107,138 @@ def test_manager_2분할_슬롯과엔드포인트():
     assert eps == ["tcp://127.0.0.1:5702", "tcp://127.0.0.1:5802"]
 
 
+# ------------------------------------------------- 벌크 등록 (add_cameras)
+
+
+def _mgr_with_restart_spy(monkeypatch, **kw):
+    """_restart_slot 호출을 기록하는 매니저 — docker를 띄우지 않는다."""
+    mgr = DsIngestManager(lambda *a: None, **kw)
+    calls: list = []
+    monkeypatch.setattr(DsIngestManager, "_restart_slot",
+                        lambda self, slot: calls.append(slot))
+    return mgr, calls
+
+
+def test_add_cameras_슬롯당_재시작_1회(monkeypatch):
+    """벌크 등록의 핵심 — N대를 넣어도 슬롯당 워커 재시작은 1회."""
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    mgr.add_cameras(_cams(9))
+    assert calls == [(1, 0)]                       # 9대인데 재시작 1회
+    assert len(mgr._cam_slot) == 9
+
+
+def test_add_camera_하나씩이면_매번_재시작(monkeypatch):
+    """대조군 — 기존 경로는 대수만큼 재시작(그래서 느리고 매번 끊긴다)."""
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    for cam in _cams(9):
+        mgr.add_camera(cam)
+    assert calls == [(1, 0)] * 9
+
+
+def test_add_cameras_GPU_2장_부하분산_후_각1회(monkeypatch):
+    """GPU가 여러 장이면 누적 fps가 작은 슬롯으로 자동 배정되고,
+    재시작은 '영향받은 슬롯'마다 1회씩."""
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[0, 1],
+                                       workers_per_gpu=1)
+    mgr.add_cameras(_cams(8))
+    assert calls == [(0, 0), (1, 0)]               # 슬롯 순서대로 각 1회
+    per_slot = {s: sum(1 for v in mgr._cam_slot.values() if v == s)
+                for s in mgr.slots}
+    assert per_slot == {(0, 0): 4, (1, 0): 4}      # 균등 분배
+
+
+def test_add_cameras_비활성은_슬롯배정_없음(monkeypatch):
+    """enabled=False는 설정만 보관하고 워커에 올리지 않는다."""
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    cams = _cams(3)
+    cams[1]["enabled"] = False
+    mgr.add_cameras(cams)
+    assert calls == [(1, 0)]
+    assert set(mgr._cam_slot) == {"cam01", "cam03"}
+    assert "cam02" in mgr._cfgs                    # 설정은 남아 있다
+
+
+def test_add_cameras_중복으로_실패해도_그전까지는_반영(monkeypatch):
+    """도중 실패해도 이미 배정된 슬롯은 재시작 — 메모리/워커 불일치를 안 남긴다."""
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    mgr.add_cameras(_cams(2))                      # cam01·cam02 등록됨
+    calls.clear()
+
+    new, dup = _cams(3)[2], _cams(1)[0]            # cam03(신규), cam01(중복)
+    with pytest.raises(ValueError):
+        mgr.add_cameras([new, dup])
+
+    assert calls == [(1, 0)]                       # cam03 반영분 1회 재시작
+    assert set(mgr._cam_slot) == {"cam01", "cam02", "cam03"}
+
+
+def test_add_camera_defer_restart는_재시작_생략(monkeypatch):
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    slot = mgr.add_camera(_cams(1)[0], defer_restart=True)
+    assert slot == (1, 0) and calls == []
+
+
+# ------------------------------------------- 벌크 변경 (update_cameras)
+
+
+def test_update_cameras_일괄활성화_재시작_1회(monkeypatch):
+    """매핑 후 일괄 활성화 — 9대를 켜도 워커 재시작은 1회."""
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    cams = _cams(9)
+    for c in cams:
+        c["enabled"] = False
+    mgr.add_cameras(cams)                          # 비활성 등록 → 슬롯 배정 없음
+    assert calls == [] and mgr._cam_slot == {}
+
+    for c in cams:
+        c["enabled"] = True
+    mgr.update_cameras(cams)
+    assert calls == [(1, 0)]                       # 9대를 켰는데 재시작 1회
+    assert len(mgr._cam_slot) == 9
+
+
+def test_update_camera_하나씩_켜면_매번_재시작(monkeypatch):
+    """대조군 — 비활성→활성은 신규 추가와 같은 경로라 켤 때마다 재시작된다."""
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    cams = _cams(9)
+    for c in cams:
+        c["enabled"] = False
+    mgr.add_cameras(cams)
+    calls.clear()
+    for c in cams:
+        mgr.update_camera({**c, "enabled": True})
+    assert calls == [(1, 0)] * 9
+
+
+def test_update_cameras_비활성화도_슬롯에서_내린다(monkeypatch):
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    cams = _cams(3)
+    mgr.add_cameras(cams)
+    calls.clear()
+    mgr.update_cameras([{**cams[0], "enabled": False}])
+    assert calls == [(1, 0)]
+    assert set(mgr._cam_slot) == {"cam02", "cam03"}
+
+
+def test_update_cameras_변화없는_비활성은_재시작_안함(monkeypatch):
+    """이미 비활성인 카메라의 이름만 바꾸는 등 — 워커를 건드릴 이유가 없다."""
+    mgr, calls = _mgr_with_restart_spy(monkeypatch, gpu_devices=[1],
+                                       workers_per_gpu=1)
+    cam = {**_cams(1)[0], "enabled": False}
+    mgr.add_cameras([cam])
+    calls.clear()
+    mgr.update_cameras([{**cam, "analyze_fps": 3.0}])
+    assert calls == []
+
+
 # ------------------------------------------------------------ env 파싱
 
 

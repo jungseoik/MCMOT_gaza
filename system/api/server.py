@@ -165,10 +165,15 @@ class Runtime:
             self.analyzer.stop()
         self.ingest.stop()
 
-    def next_cam_id(self) -> str:
+    def next_cam_ids(self, count: int) -> list[str]:
+        """연속된 미사용 cam_id를 count개 — 벌크 등록에서 store 재조회 없이 발번."""
         nums = [int(c.cam_id[3:]) for c in self.cameras()
                 if c.cam_id.startswith("cam") and c.cam_id[3:].isdigit()]
-        return f"cam{(max(nums) + 1 if nums else 1):02d}"
+        start = max(nums) + 1 if nums else 1
+        return [f"cam{n:02d}" for n in range(start, start + count)]
+
+    def next_cam_id(self) -> str:
+        return self.next_cam_ids(1)[0]
 
     # ------------------------------------------------------------ 스냅샷
     def grab_frame(self, cfg: CameraConfig) -> np.ndarray | None:
@@ -392,7 +397,8 @@ async def add_camera(request: Request):
     try:
         cfg = CameraConfig(cam_id=rt.next_cam_id(), name=body.get("name", ""),
                            rtsp=body["rtsp"], analyze_fps=body.get("analyze_fps", 5.0),
-                           min_conf=body.get("min_conf"))  # None이면 사이트값 상속
+                           floor_id=body.get("floor_id"),   # None이면 default 층
+                           min_conf=body.get("min_conf"))   # None이면 사이트값 상속
     except (ValidationError, KeyError) as e:
         raise HTTPException(status_code=422, detail=str(e))
     rt.store.save_camera(SITE_ID, cfg)
@@ -401,6 +407,95 @@ async def add_camera(request: Request):
         rt.analyzer.set_camera_fps(cfg.cam_id, cfg.analyze_fps)
     rt.reload_engine()
     return cfg
+
+
+@app.post("/api/cameras/bulk")
+async def add_cameras_bulk(request: Request):
+    """카메라 여러 대를 한 번에 등록 — DS 워커 재시작을 슬롯당 1회로 묶는다.
+
+    body: {"cameras": [{rtsp, name?, analyze_fps?, floor_id?, min_conf?,
+                        enabled?}, ...]}   (최상위가 바로 리스트여도 됨)
+
+    한 대씩 POST /api/cameras 하면 DS 백엔드에서 매번 워커가 재시작되고 같은
+    슬롯의 기존 채널이 전부 ~8s 끊긴다(실측). 40채널이면 ~9.5분 + 40회 단절.
+    이 엔드포인트는 전건 검증 후 한 번에 반영해 그 비용을 1회로 만든다.
+
+    **전건 검증 후 등록** — 하나라도 유효하지 않으면 아무것도 등록하지 않는다.
+    """
+    body = await request.json()
+    items = body.get("cameras") if isinstance(body, dict) else body
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=422,
+                            detail="cameras: 비어 있지 않은 리스트가 필요")
+
+    cfgs: list[CameraConfig] = []
+    for i, (cam_id, it) in enumerate(zip(rt.next_cam_ids(len(items)), items)):
+        if not isinstance(it, dict):
+            raise HTTPException(status_code=422, detail=f"cameras[{i}]: 객체가 아님")
+        try:
+            cfgs.append(CameraConfig(
+                cam_id=cam_id, name=it.get("name", ""), rtsp=it["rtsp"],
+                enabled=it.get("enabled", True),
+                analyze_fps=it.get("analyze_fps", 5.0),
+                floor_id=it.get("floor_id"),      # None이면 default 층
+                min_conf=it.get("min_conf")))     # None이면 사이트값 상속
+        except (ValidationError, KeyError) as e:
+            raise HTTPException(status_code=422, detail=f"cameras[{i}]: {e}")
+
+    for cfg in cfgs:                    # 검증을 다 통과한 뒤에만 영속화
+        rt.store.save_camera(SITE_ID, cfg)
+    rt.ingest.add_cameras(cfgs)         # 슬롯당 워커 재시작 1회
+    if rt.analyzer is not None:
+        for cfg in cfgs:
+            rt.analyzer.set_camera_fps(cfg.cam_id, cfg.analyze_fps)
+    rt.reload_engine()
+    return cfgs
+
+
+# ⚠️ /{cam_id} 보다 먼저 등록해야 한다 — FastAPI는 선언 순서로 매칭하므로
+#    뒤에 두면 cam_id="bulk" 로 잡혀 404가 난다.
+@app.put("/api/cameras/bulk")
+async def update_cameras_bulk(request: Request):
+    """여러 카메라 설정을 한 번에 변경 — DS 워커 재시작을 슬롯당 1회로 묶는다.
+
+    body: {"cameras": [{"cam_id": "cam05", <바꿀 필드들>}, ...]}
+          (최상위가 바로 리스트여도 됨)
+
+    대표 용례는 **매핑을 끝낸 카메라들의 일괄 활성화**. 하나씩 PUT 하면
+    비활성→활성이 신규 추가와 같은 경로를 타 매번 워커가 재시작되고, 같은
+    슬롯의 기존 채널이 전부 ~8s 끊긴다. 40대면 ~9.5분 + 40회 단절.
+
+    **전건 검증 후 반영** — 하나라도 유효하지 않으면 아무것도 바뀌지 않는다.
+    """
+    body = await request.json()
+    items = body.get("cameras") if isinstance(body, dict) else body
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=422,
+                            detail="cameras: 비어 있지 않은 리스트가 필요")
+
+    cfgs: list[CameraConfig] = []
+    for i, it in enumerate(items):
+        if not isinstance(it, dict) or not it.get("cam_id"):
+            raise HTTPException(status_code=422,
+                                detail=f"cameras[{i}]: cam_id가 필요")
+        old = rt.store.load_camera(SITE_ID, it["cam_id"])
+        if old is None:
+            raise HTTPException(status_code=404,
+                                detail=f"cameras[{i}]: 카메라 없음 {it['cam_id']}")
+        patch = {k: v for k, v in it.items() if k != "cam_id"}
+        try:
+            cfgs.append(CameraConfig.model_validate({**old.model_dump(), **patch}))
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=f"cameras[{i}]: {e}")
+
+    for cfg in cfgs:                    # 검증을 다 통과한 뒤에만 영속화
+        rt.store.save_camera(SITE_ID, cfg)
+    rt.ingest.update_cameras(cfgs)      # 슬롯당 워커 재시작 1회
+    if rt.analyzer is not None:
+        for cfg in cfgs:
+            rt.analyzer.set_camera_fps(cfg.cam_id, cfg.analyze_fps)
+    rt.reload_engine()
+    return cfgs
 
 
 @app.put("/api/cameras/{cam_id}")
@@ -429,6 +524,26 @@ def delete_camera(cam_id: str):
     rt.store.delete_camera(SITE_ID, cam_id)
     rt.reload_engine()
     return {"ok": True}
+
+
+@app.post("/api/cameras/probe")
+async def probe_rtsp(request: Request):
+    """**등록 전** 임의 RTSP 주소 연결 검사 — body {"rtsp": "..."}.
+
+    벌크 등록 화면에서 수십 개 주소를 미리 검증하는 용도. 등록된 카메라를
+    요구하는 `/api/cameras/{id}/test`와 달리 저장을 남기지 않는다.
+    스냅샷은 돌려주지 않는다(수십 장을 한 번에 받을 이유가 없음) — 연결 여부와
+    해상도만.
+    """
+    body = await request.json()
+    rtsp = (body.get("rtsp") or "").strip()
+    if not rtsp:
+        raise HTTPException(status_code=422, detail="rtsp가 필요합니다")
+    probe = CameraConfig(cam_id="__probe__", rtsp=rtsp)
+    frame = rt.grab_frame(probe)      # 미등록 cam_id → ffmpeg 1회성 캡처로 폴백
+    if frame is None:
+        return {"ok": False, "width": 0, "height": 0}
+    return {"ok": True, "width": frame.shape[1], "height": frame.shape[0]}
 
 
 @app.post("/api/cameras/{cam_id}/test")
