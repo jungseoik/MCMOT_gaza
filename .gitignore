@@ -213,3 +213,7 @@ cad/CAD_API_Based_Optimal_Evacuation_Route_Algorithm/*.dxf
 data/sites/
 # 런타임 설정 백업(운영 스냅샷) — 저장소 밖 로컬 보관
 data/backups/
+
+# 실제 현장 CCTV 원본 (개인정보·대용량) — HF backseollgi/MCMOT/field/ 에 보관, git 제외
+field/
+제일제당센터 영상/
