@@ -63,6 +63,68 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 
 근거·제약·롤백 절차: [docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md](../docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md)
 
+## 카메라 일괄 등록 (벌크)
+
+현장 수십 채널을 웹 UI에서 **한 대씩** 추가하면 안 된다. deepstream 백엔드는
+카메라 추가 시 해당 GPU 슬롯의 워커 컨테이너를 재시작하므로, **추가할 때마다
+그 슬롯의 기존 채널이 전부 끊긴다.**
+
+실측 (a6000 / GPU1 전유 / `analyze_fps=5.0` / 채널 4→12에서 일정):
+
+| 방식 | 채널당 | 기존 채널 데이터 공백 | 9채널 | 40채널 |
+|------|--------|----------------------|-------|--------|
+| `POST /api/cameras` 순차 | API 6.1s · 복귀 **14.3s** | 매번 **~8s** | 129s | **~9.5분** + 40회 단절 |
+| `POST /api/cameras/bulk` | — | **~8.7s 1회** | **15.4s** | 채널 수에 거의 무관 |
+
+**UI**: ② 카메라 등록·매핑 → 좌측 **"⿻ 여러 대 한 번에 등록…"** → 모달.
+① 주소 붙여넣기(한 줄에 한 대 `이름,rtsp주소` 또는 `rtsp주소`만, `#`·빈 줄 무시)
+→ **목록으로 변환** → ② 표에서 이름 인라인 수정·행 제거, **연결 테스트**(등록 전
+`POST /api/cameras/probe`, 동시 4개)로 붙는 주소·해상도 확인 → 매핑 층 선택 →
+**비활성으로 등록** 체크 시 워커에 올리지 않고 설정만 저장 → 등록.
+
+매핑을 마친 뒤에는 카메라 목록 아래 **"▶ 매핑 완료 N대 전부 활성화"** 버튼으로
+한 번에 켠다(`PUT /api/cameras/bulk` → `DsIngestManager.update_cameras()`,
+워커 재시작 1회). 목록의 활성 체크박스를 하나씩 켜면 **켤 때마다** 재시작된다 —
+비활성→활성은 코드상 신규 추가와 같은 경로(`launcher.py:441`)이기 때문이다.
+
+현장 순서:
+
+| 단계 | 동작 | 워커 재시작 | GPU 부하 |
+|------|------|------------|---------|
+| ① | 모달에서 벌크 등록 (**비활성으로 등록** 체크) | 0회 | 0 |
+| ② | 연결 테스트로 안 붙는 주소 걸러내기 | 0회 | 0 |
+| ③ | 카메라별 매핑(대응점) 지정 | 0회 | 0 |
+| ④ | **매핑 완료 N대 전부 활성화** | **1회** | 정상 가동 |
+
+> **비활성 등록을 쓰는 이유**: mapping 없는 카메라도 디코드·추론·트래킹 자원은
+> 그대로 쓰고 결과만 버려진다(`metrics/engine.py:190`). 매핑 전 40채널을 활성으로
+> 두면 요구 fps가 GPU 천장(총 ~75fps)을 넘겨 **이미 매핑된 채널의 fps까지 떨어진다.**
+> 비활성이면 슬롯 배정 자체를 안 하므로(`launcher.py:380`) 부하가 0이다.
+> 매핑 추가(`PUT /api/cameras/{id}/mapping`)는 `reload_engine()`만 하고 워커를
+> 재시작하지 않으므로, 운영 중에도 안전하게 붙일 수 있다.
+
+```bash
+# CSV → 일괄 등록 (서버 실행 중 — 재기동 불필요)
+NVR_USER=pia NVR_PASS='...' python tools/bulk_register_cams.py cams.csv
+python tools/bulk_register_cams.py cams.csv --dry-run     # 파싱 결과만 확인
+python tools/bulk_register_cams.py cams.csv --offline     # 서버 미기동 시 JSON만 생성
+```
+
+CSV는 `rtsp` 컬럼을 직접 주거나, `nvr,port,track,stream`으로 NVR URL을 조립한다
+(`rtsp://<user>:<pass>@<nvr>:<port>/trackID=<track>&streamID=<stream>`, stream 기본 2 =
+서브스트림). 계정은 CSV가 아니라 `NVR_USER`/`NVR_PASS` 환경변수로 주입한다.
+
+- `POST /api/cameras/bulk` — body `{"cameras": [{rtsp, name?, analyze_fps?,
+  floor_id?, min_conf?, enabled?}, ...]}`. **전건 검증 후 반영**(하나라도 유효하지
+  않으면 아무것도 등록되지 않음) → `DsIngestManager.add_cameras()`가 슬롯당 재시작 1회.
+  단일 등록(`POST /api/cameras`)은 그대로 동작한다.
+- GPU 배정은 자동 — 누적 `analyze_fps`가 가장 작은 슬롯으로 간다(단일·벌크 동일).
+  ⚠️ 배정 기준이 fps뿐이라 **해상도가 섞이면 실부하와 어긋난다**(해상도 통일 권장).
+- **mapping(평면도 대응점)은 자동 생성 불가** — 등록 후 UI에서 카메라별로 지정해야
+  맵 투영·지표에 포함된다. 미지정 카메라는 처리에서 제외.
+- 평가 세션 진행 중에는 카메라 추가/삭제를 하지 않는다(8초 공백 = 트랙 ID 유실 =
+  지표 오염).
+
 ## 모듈 (트랙별 소유 — CONTRACT §6)
 
 | 모듈 | 내용 | 트랙 |

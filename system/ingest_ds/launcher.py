@@ -371,14 +371,20 @@ class DsIngestManager:
         self.workers[slot].start(cams, batch_size=self._batch_size,
                                  extra_args=self._worker_args)
 
-    def add_camera(self, cfg) -> None:
+    def add_camera(self, cfg, *, defer_restart: bool = False) -> Slot | None:
+        """카메라 1대 등록 — 배정된 슬롯 반환(비활성이면 None).
+
+        defer_restart=True면 워커 재시작을 건너뛴다. add_cameras()가 여러 대를
+        묶어 슬롯당 1회만 재시작하기 위해 쓰는 내부 경로 — 직접 쓸 경우
+        호출자가 _restart_slot() 책임을 진다.
+        """
         d = self._norm(cfg)
         with self._lock:
             if d["cam_id"] in self._cam_slot:
                 raise ValueError(f"이미 실행 중인 카메라: {d['cam_id']}")
             self._cfgs[d["cam_id"]] = d
             if not d["enabled"]:
-                return
+                return None
             # 현재 배정 기준 누적 부하가 가장 작은 슬롯에 추가
             load: dict[Slot, float] = {s: 0.0 for s in self.slots}
             for cid, s in self._cam_slot.items():
@@ -386,7 +392,32 @@ class DsIngestManager:
             slot = min(self.slots,
                        key=lambda s: (load[s], self.slots.index(s)))
             self._cam_slot[d["cam_id"]] = slot
-        self._restart_slot(slot)
+        if not defer_restart:
+            self._restart_slot(slot)
+        return slot
+
+    def add_cameras(self, cfgs) -> list[Slot]:
+        """여러 대를 한 번에 등록 — 영향받은 슬롯만 1회씩 재시작.
+
+        N대를 add_camera로 하나씩 넣으면 워커가 N번 재시작하고, 그때마다 같은
+        슬롯의 **기존 채널이 전부** 끊긴다(실측: 채널당 ~14s, 데이터 공백 ~8s).
+        벌크 등록은 그 비용을 슬롯당 1회로 줄인다 — 12채널 실측 15.1s로
+        채널 수에 거의 무관하다.
+
+        도중에 실패해도 그때까지 배정된 슬롯은 반영한다(부분 등록 상태를
+        워커에 밀어넣어 메모리-워커 불일치를 남기지 않는다).
+        """
+        touched: set[Slot] = set()
+        try:
+            for cfg in cfgs:
+                slot = self.add_camera(cfg, defer_restart=True)
+                if slot is not None:
+                    touched.add(slot)
+        finally:
+            for slot in self.slots:            # 결정적 순서
+                if slot in touched:
+                    self._restart_slot(slot)
+        return [s for s in self.slots if s in touched]
 
     def remove_camera(self, cam_id: str) -> None:
         with self._lock:
@@ -397,23 +428,46 @@ class DsIngestManager:
         if slot is not None:
             self._restart_slot(slot)
 
-    def update_camera(self, cfg) -> None:
-        """rtsp/analyze_fps/enabled 변경 반영 — 배정 슬롯 유지, 그 워커만 재시작."""
+    def update_camera(self, cfg, *, defer_restart: bool = False) -> Slot | None:
+        """rtsp/analyze_fps/enabled 변경 반영 — 배정 슬롯 유지, 그 워커만 재시작.
+
+        재시작이 필요한 슬롯을 반환한다(불필요하면 None).
+        defer_restart=True면 재시작을 미룬다 — update_cameras()가 슬롯당 1회로
+        묶기 위한 내부 경로.
+        """
         d = self._norm(cfg)
         with self._lock:
             self._cfgs[d["cam_id"]] = d
             slot = self._cam_slot.get(d["cam_id"])
-            if slot is None and d["enabled"]:
-                pass                       # 아래 add 경로로
-            elif slot is not None and not d["enabled"]:
-                self._cam_slot.pop(d["cam_id"])
+            if slot is not None and not d["enabled"]:
+                self._cam_slot.pop(d["cam_id"])   # 비활성화 → 워커에서 내린다
         if slot is None and d["enabled"]:
+            # 비활성이던 카메라를 켜는 것 = 신규 추가와 동일 (슬롯 배정부터)
             with self._lock:
                 self._cfgs.pop(d["cam_id"])   # add_camera가 다시 넣는다
-            self.add_camera(d)
-            return
-        if slot is not None:
+            return self.add_camera(d, defer_restart=defer_restart)
+        if slot is not None and not defer_restart:
             self._restart_slot(slot)
+        return slot
+
+    def update_cameras(self, cfgs) -> list[Slot]:
+        """여러 대 변경을 한 번에 반영 — 영향받은 슬롯만 1회씩 재시작.
+
+        "매핑 끝난 카메라를 전부 활성화" 같은 작업이 대표 용례다. 하나씩
+        update_camera로 켜면 켤 때마다 워커가 재시작돼 같은 슬롯의 기존 채널이
+        전부 ~8s 끊긴다(등록과 동일 비용). 이 경로는 그 비용을 1회로 만든다.
+        """
+        touched: set[Slot] = set()
+        try:
+            for cfg in cfgs:
+                slot = self.update_camera(cfg, defer_restart=True)
+                if slot is not None:
+                    touched.add(slot)
+        finally:
+            for slot in self.slots:            # 결정적 순서
+                if slot in touched:
+                    self._restart_slot(slot)
+        return [s for s in self.slots if s in touched]
 
     def set_enabled(self, cam_id: str, enabled: bool) -> None:
         with self._lock:

@@ -180,6 +180,47 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .modalhead{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:20px; }
 .modalbox img{ max-width:100%; border-radius:var(--r-md); display:block; }
 
+/* ---------------- 카메라 일괄 등록 모달 ---------------- */
+.modalbox.bulk{ width:min(920px,92vw); max-width:none; }
+.bulkstep{ margin-bottom:12px; }
+.bulksteph{ display:flex; align-items:center; gap:8px; font-size:13px;
+  font-weight:700; color:var(--text-2); margin-bottom:6px; }
+.bulksteph .stepno{ display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; border-radius:50%; background:var(--brand, #30DCFB);
+  color:#06121a; font-size:11px; font-weight:700; }
+.bulksteph .grow{ margin-left:auto; font-weight:400; }
+#bulkText{ width:100%; background:var(--bg-3); color:var(--text-1);
+  border:1px solid var(--stroke-3); border-radius:var(--r-sm); padding:8px 10px;
+  font-size:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  line-height:1.6; resize:vertical; white-space:pre; overflow-x:auto; }
+.bulkrow{ display:flex; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap; }
+.bulkrow .grow{ flex:1 1 auto; min-width:120px; }
+.bulkchk{ display:flex; align-items:center; gap:6px; font-size:12px;
+  color:var(--text-2); white-space:nowrap; cursor:pointer; }
+.bulktablewrap{ max-height:44vh; overflow:auto; border:1px solid var(--stroke-3);
+  border-radius:var(--r-sm); }
+.bulktable{ width:100%; border-collapse:collapse; font-size:12px; }
+.bulktable th{ position:sticky; top:0; background:var(--bg-3); color:var(--text-2);
+  text-align:left; font-weight:600; padding:6px 8px; border-bottom:1px solid var(--stroke-3);
+  white-space:nowrap; z-index:1; }
+.bulktable td{ padding:4px 8px; border-bottom:1px solid var(--stroke-3);
+  color:var(--text-1); vertical-align:middle; }
+.bulktable tr:last-child td{ border-bottom:none; }
+.bulktable tr.bad td{ background:rgba(255,90,90,.10); }
+.bulktable td.idx{ color:var(--text-3); width:32px; }
+.bulktable td.url{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:11px; color:var(--text-2); max-width:360px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.bulktable td.st{ white-space:nowrap; width:120px; }
+.bulktable input[type=text]{ width:100%; height:24px; background:var(--bg-3);
+  color:var(--text-1); border:1px solid var(--stroke-3); border-radius:var(--r-sm);
+  padding:0 6px; font-size:12px; }
+.bulktable .rowdel{ background:none; border:none; color:var(--text-3);
+  cursor:pointer; font-size:13px; padding:2px 4px; }
+.bulktable .rowdel:hover{ color:var(--danger); }
+.st-ok{ color:var(--success); } .st-err{ color:var(--danger); }
+.st-wait{ color:var(--text-3); }
+
 /* ---------------- 세션(4대 지표) 대시보드 카드 ---------------- */
 /* 우측 지표 패널 — 기본도 살짝 넓게, 세션 카드 표시 중엔 확폭(2열 그리드) */
 .side.metrics{ width:340px; }

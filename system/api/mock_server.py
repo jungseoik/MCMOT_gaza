@@ -702,6 +702,7 @@ class CameraCreate(BaseModel):
     name: str = ""
     rtsp: str
     analyze_fps: float = Field(default=5.0, gt=0, le=30)
+    floor_id: str | None = None       # None이면 default 층
 
 
 def _next_cam_id() -> str:
@@ -730,8 +731,42 @@ def list_cameras():
 @app.post("/api/cameras")
 def create_camera(body: CameraCreate):
     cam = CameraConfig(cam_id=_next_cam_id(), name=body.name, rtsp=body.rtsp,
-                       analyze_fps=body.analyze_fps)
+                       analyze_fps=body.analyze_fps, floor_id=body.floor_id)
     return store.save_camera(SITE_ID, cam)
+
+
+class CamerasBulkCreate(BaseModel):
+    cameras: list[CameraCreate]
+
+
+@app.post("/api/cameras/bulk")
+def create_cameras_bulk(body: CamerasBulkCreate):
+    """실서버와 동일 계약 — 여러 대 일괄 등록(mock은 워커가 없어 즉시 반영)."""
+    if not body.cameras:
+        raise HTTPException(422, "cameras: 비어 있지 않은 리스트가 필요")
+    return [store.save_camera(SITE_ID, CameraConfig(
+        cam_id=_next_cam_id(), name=b.name, rtsp=b.rtsp,
+        analyze_fps=b.analyze_fps, floor_id=b.floor_id)) for b in body.cameras]
+
+
+# ⚠️ /{cam_id} 보다 먼저 — 뒤에 두면 cam_id="bulk"로 잡힌다 (실서버와 동일)
+@app.put("/api/cameras/bulk")
+def update_cameras_bulk(body: dict):
+    """실서버와 동일 계약 — 여러 대 설정 일괄 변경(전건 검증 후 반영)."""
+    items = body.get("cameras") if isinstance(body, dict) else body
+    if not isinstance(items, list) or not items:
+        raise HTTPException(422, "cameras: 비어 있지 않은 리스트가 필요")
+    cams = []
+    for i, it in enumerate(items):
+        if not isinstance(it, dict) or not it.get("cam_id"):
+            raise HTTPException(422, f"cameras[{i}]: cam_id가 필요")
+        data = _get_cam(it["cam_id"]).model_dump()
+        data.update({k: v for k, v in it.items() if k != "cam_id"})
+        try:
+            cams.append(CameraConfig.model_validate(data))
+        except Exception as ex:
+            raise HTTPException(422, f"cameras[{i}]: {ex}")
+    return [store.save_camera(SITE_ID, c) for c in cams]
 
 
 @app.put("/api/cameras/{cam_id}")
@@ -752,6 +787,21 @@ def delete_camera(cam_id: str):
     if not store.delete_camera(SITE_ID, cam_id):
         raise HTTPException(404, f"카메라 없음: {cam_id}")
     return {"ok": True}
+
+
+class RtspProbe(BaseModel):
+    rtsp: str
+
+
+@app.post("/api/cameras/probe")
+def probe_rtsp(body: RtspProbe):
+    """실서버와 동일 계약 — 등록 전 RTSP 연결 검사.
+    mock은 실제로 붙지 않고, 주소에 'fail'이 들어간 것만 실패로 흉내낸다."""
+    if not body.rtsp.strip():
+        raise HTTPException(422, "rtsp가 필요합니다")
+    if "fail" in body.rtsp:
+        return {"ok": False, "width": 0, "height": 0}
+    return {"ok": True, "width": 1920, "height": 1080}
 
 
 @app.post("/api/cameras/{cam_id}/test")

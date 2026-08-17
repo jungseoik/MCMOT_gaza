@@ -52,13 +52,25 @@ class IngestManager:
         logger.info("IngestManager stopped (%d workers)", len(workers))
 
     # ------------------------------------------------------------ 카메라 CRUD
-    def add_camera(self, cfg: CameraConfig) -> None:
+    def add_camera(self, cfg: CameraConfig, *, defer_restart: bool = False) -> None:
+        """카메라 1대 추가.
+
+        defer_restart는 DsIngestManager와의 인터페이스 호환용으로만 받는다 —
+        이 백엔드는 카메라마다 독립 ffmpeg 워커라 '슬롯 재시작' 개념이 없고,
+        추가가 다른 채널에 영향을 주지 않는다.
+        """
         with self._lock:
             if cfg.cam_id in self._workers:
                 raise ValueError(f"이미 실행 중인 카메라: {cfg.cam_id}")
             self._cfgs[cfg.cam_id] = cfg
             if cfg.enabled:
                 self._spawn_locked(cfg)
+
+    def add_cameras(self, cfgs: list[CameraConfig]) -> None:
+        """여러 대 일괄 추가 — 이 백엔드에서는 순차 추가와 결과가 같다
+        (카메라별 독립 워커라 묶어서 얻는 이득이 없다)."""
+        for cfg in cfgs:
+            self.add_camera(cfg)
 
     def remove_camera(self, cam_id: str) -> None:
         with self._lock:
@@ -68,8 +80,17 @@ class IngestManager:
             worker.stop()
             worker.join(timeout=5.0)
 
-    def update_camera(self, cfg: CameraConfig) -> None:
-        """rtsp/analyze_fps/enabled 변경 반영 — 워커 재기동."""
+    def update_cameras(self, cfgs: list[CameraConfig]) -> None:
+        """여러 대 변경 일괄 반영 — 이 백엔드에서는 순차 변경과 결과가 같다
+        (카메라별 독립 워커라 묶어서 얻는 이득이 없다)."""
+        for cfg in cfgs:
+            self.update_camera(cfg)
+
+    def update_camera(self, cfg: CameraConfig, *, defer_restart: bool = False) -> None:
+        """rtsp/analyze_fps/enabled 변경 반영 — 워커 재기동.
+
+        defer_restart는 DsIngestManager와의 인터페이스 호환용 (이 백엔드는
+        카메라별 독립 워커라 다른 채널에 영향을 주지 않는다)."""
         with self._lock:
             worker = self._workers.pop(cfg.cam_id, None)
             self._cfgs[cfg.cam_id] = cfg

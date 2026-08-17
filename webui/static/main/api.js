@@ -49,7 +49,16 @@ const API = {
   // ---- cameras
   getCameras: () => API._j("/api/cameras"),
   addCamera: (body) => API._post("/api/cameras", body),
+  // 여러 대 일괄 등록 — body {cameras:[{rtsp,name?,analyze_fps?,floor_id?}, ...]}.
+  // 한 대씩 addCamera를 반복하면 deepstream 워커가 매번 재시작돼 같은 GPU의
+  // 기존 채널이 전부 ~8s 끊긴다. 벌크는 그 비용을 1회로 묶는다.
+  addCameras: (body) => API._post("/api/cameras/bulk", body),
+  // 등록 전 RTSP 연결 검사 — {rtsp} → {ok,width,height}. 저장을 남기지 않는다.
+  probeRtsp: (body) => API._post("/api/cameras/probe", body),
   updateCamera: (id, patch) => API._put(`/api/cameras/${id}`, patch),
+  // 여러 대 설정 일괄 변경 — body {cameras:[{cam_id, ...바꿀필드}, ...]}.
+  // 비활성→활성은 신규 추가와 같은 경로라 하나씩 하면 매번 워커가 재시작된다.
+  updateCameras: (body) => API._put("/api/cameras/bulk", body),
   deleteCamera: (id) => API._j(`/api/cameras/${id}`, { method: "DELETE" }),
   testCamera: (id) => API._post(`/api/cameras/${id}/test`),
   snapshotUrl: (id) => `/api/cameras/${id}/snapshot?ts=` + Date.now(),

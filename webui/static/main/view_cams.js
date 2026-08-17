@@ -84,6 +84,9 @@ Views.cams = (() => {
     const nc = $("newCamFloor"), ncl = $("newCamFloorLab");
     if (nc) { nc.innerHTML = floorOptions(nc.value || App.currentFloor); }
     if (ncl) ncl.classList.toggle("hidden", !multi);
+    const bc = $("bulkFloor"), bcl = $("bulkFloorLab");
+    if (bc) { bc.innerHTML = floorOptions(bc.value || App.currentFloor); }
+    if (bcl) bcl.classList.toggle("hidden", !multi);
     const mf = $("mapFloorSel"), mfl = $("mapFloorLab");
     if (mf) mf.innerHTML = floorOptions(selFloor);
     if (mfl) mfl.classList.toggle("hidden", !(multi && sel));
@@ -172,6 +175,40 @@ Views.cams = (() => {
       };
       box.appendChild(div);
     });
+    renderEnableMapped();
+  }
+
+  /** 매핑은 끝났는데 비활성인 카메라 — 있을 때만 일괄 활성화 버튼을 보여준다. */
+  const mappedDisabled = () =>
+    App.cameras.filter((c) => c.mapping && !c.enabled);
+
+  function renderEnableMapped() {
+    const btn = $("camEnableMapped");
+    if (!btn) return;
+    const n = mappedDisabled().length;
+    btn.classList.toggle("hidden", n === 0);
+    btn.textContent = `▶ 매핑 완료 ${n}대 전부 활성화`;
+  }
+
+  async function enableMapped() {
+    const targets = mappedDisabled();
+    if (!targets.length) return;
+    const btn = $("camEnableMapped");
+    btn.disabled = true;
+    btn.textContent = `${targets.length}대 활성화 중… (워커 재시작 1회)`;
+    try {
+      await API.updateCameras({
+        cameras: targets.map((c) => ({ cam_id: c.cam_id, enabled: true })),
+      });
+      await App.reloadCameras();
+      renderList();
+      $("camAddMsg").textContent = `${targets.length}대 활성화 완료.`;
+    } catch (e) {
+      alert("활성화 실패: " + e.message);
+    } finally {
+      btn.disabled = false;
+      renderEnableMapped();
+    }
   }
 
   // 카메라 행 인라인 conf 적용 (버튼/Enter로만 저장 — 실시간 저장 안 함).
@@ -203,10 +240,12 @@ Views.cams = (() => {
     if (!rtsp) { $("camAddMsg").textContent = "RTSP 주소를 입력하세요."; return; }
     $("camAddMsg").textContent = "등록 중…";
     try {
-      const cam = await API.addCamera({ name, rtsp });
-      // 선택한 매핑 층 반영 (POST는 floor_id 미지원 → PUT으로 지정)
+      // 층은 POST에 함께 실어 보낸다 — 예전처럼 PUT으로 따로 지정하면
+      // deepstream 워커가 한 번 더 재시작돼 등록 비용이 두 배가 된다.
       const fl = ($("newCamFloor") && $("newCamFloor").value) || "default";
-      if (fl && fl !== "default") await API.updateCamera(cam.cam_id, { floor_id: fl });
+      const body = { name, rtsp };
+      if (fl && fl !== "default") body.floor_id = fl;
+      const cam = await API.addCamera(body);
       $("newCamName").value = ""; $("newCamRtsp").value = "";
       await App.reloadCameras();
       $("camAddMsg").textContent = `${cam.cam_id} 등록됨 — 연결 테스트 중…`;
@@ -214,6 +253,131 @@ Views.cams = (() => {
       await select(cam.cam_id);                       // select가 test 수행
       $("camAddMsg").textContent = `${cam.cam_id} 등록·테스트 완료. 대응점을 지정하세요.`;
     } catch (e) { $("camAddMsg").textContent = "실패: " + e.message; }
+  }
+
+  // ------------------------------------------------- 일괄 등록 (모달)
+  let bulkRows = [];        // [{name, rtsp, st}] — st: null|{ok,width,height}
+
+  /** 텍스트 여러 줄 → 행 목록. 한 줄에 한 대, `이름,rtsp` 또는 `rtsp`만.
+   *  빈 줄과 #으로 시작하는 줄은 건너뛴다. rtsp 주소에 콤마가 들어갈 수 있으므로
+   *  첫 콤마만 구분자로 쓰고, 콤마 앞이 URL이면 이름 없는 줄로 본다. */
+  function parseBulkLines(text) {
+    return text.split(/\r?\n/).reduce((acc, raw) => {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) return acc;
+      const c = line.indexOf(",");
+      let name = "", rtsp = line;
+      if (c >= 0 && !line.slice(0, c).includes("://")) {
+        name = line.slice(0, c).trim();
+        rtsp = line.slice(c + 1).trim();
+      }
+      acc.push({ name, rtsp, st: null });
+      return acc;
+    }, []);
+  }
+
+  const rowValid = (r) => /^rtsps?:\/\//i.test(r.rtsp);
+
+  function renderBulkTable() {
+    const tb = $("bulkTbody");
+    tb.innerHTML = "";
+    bulkRows.forEach((r, i) => {
+      const ok = rowValid(r);
+      const tr = document.createElement("tr");
+      if (!ok) tr.className = "bad";
+      let st = '<span class="st-wait">—</span>';
+      if (!ok) st = '<span class="st-err">주소 형식 오류</span>';
+      else if (r.st === "testing") st = '<span class="st-wait">검사 중…</span>';
+      else if (r.st && r.st.ok) st = `<span class="st-ok">✓ ${r.st.width}×${r.st.height}</span>`;
+      else if (r.st) st = '<span class="st-err">✗ 연결 실패</span>';
+      tr.innerHTML = `<td class="idx">${i + 1}</td>
+        <td><input type="text" data-i="${i}" value="${(r.name || "").replace(/"/g, "&quot;")}"
+          placeholder="(이름 없음)" /></td>
+        <td class="url" title="${r.rtsp.replace(/"/g, "&quot;")}">${r.rtsp}</td>
+        <td class="st">${st}</td>
+        <td><button class="rowdel" data-del="${i}" title="이 줄 제외">✕</button></td>`;
+      tb.appendChild(tr);
+    });
+    tb.querySelectorAll("input[data-i]").forEach((el) => {
+      el.oninput = () => { bulkRows[+el.dataset.i].name = el.value; };
+    });
+    tb.querySelectorAll("button[data-del]").forEach((el) => {
+      el.onclick = () => { bulkRows.splice(+el.dataset.del, 1); renderBulkTable(); };
+    });
+
+    const valid = bulkRows.filter(rowValid).length;
+    const bad = bulkRows.length - valid;
+    $("bulkCount").textContent = `총 ${bulkRows.length}대`
+      + (bad ? ` · 유효 ${valid} · 오류 ${bad}` : "");
+    $("bulkSubmit").textContent = valid ? `${valid}대 등록` : "등록";
+    $("bulkSubmit").disabled = !valid;
+    $("bulkStep2").classList.toggle("hidden", !bulkRows.length);
+  }
+
+  function openBulk() {
+    bulkRows = [];
+    $("bulkText").value = "";
+    $("bulkMsg").textContent = "";
+    $("bulkDisabled").checked = false;
+    $("bulkStep2").classList.add("hidden");
+    renderFloorDropdowns();
+    $("bulkModal").classList.remove("hidden");
+    $("bulkText").focus();
+  }
+
+  const closeBulk = () => $("bulkModal").classList.add("hidden");
+
+  /** 등록 전 연결 검사 — 동시 4개까지만. NVR 세션 부담을 줄이고,
+   *  주소가 틀린 채널을 등록 전에 걸러낸다. */
+  async function testBulk() {
+    const targets = bulkRows.filter(rowValid);
+    if (!targets.length) return;
+    $("bulkTest").disabled = $("bulkSubmit").disabled = true;
+    targets.forEach((r) => { r.st = "testing"; });
+    renderBulkTable();
+
+    let done = 0, next = 0;
+    const worker = async () => {
+      while (next < targets.length) {
+        const r = targets[next++];
+        try { r.st = await API.probeRtsp({ rtsp: r.rtsp }); }
+        catch (e) { r.st = { ok: false, width: 0, height: 0 }; }
+        done++;
+        $("bulkMsg").textContent = `연결 검사 ${done}/${targets.length}`;
+        renderBulkTable();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
+
+    const okN = targets.filter((r) => r.st && r.st.ok).length;
+    $("bulkMsg").textContent = `연결 성공 ${okN} / 실패 ${targets.length - okN}`;
+    $("bulkTest").disabled = false;
+    renderBulkTable();
+  }
+
+  async function submitBulk() {
+    const cams = bulkRows.filter(rowValid).map((r) => ({ name: r.name, rtsp: r.rtsp }));
+    if (!cams.length) return;
+    // 층은 등록 요청에 함께 실어 보낸다 — PUT으로 따로 지정하면 워커가 한 번 더 재시작된다.
+    const fl = ($("bulkFloor") && $("bulkFloor").value) || "";
+    if (fl && fl !== "default") cams.forEach((c) => { c.floor_id = fl; });
+    if ($("bulkDisabled").checked) cams.forEach((c) => { c.enabled = false; });
+
+    $("bulkMsg").textContent = `${cams.length}대 등록 중…`
+      + ($("bulkDisabled").checked ? "" : " (워커 재시작 1회 — 기존 채널이 잠시 끊깁니다)");
+    $("bulkSubmit").disabled = $("bulkTest").disabled = true;
+    try {
+      const added = await API.addCameras({ cameras: cams });
+      await App.reloadCameras();
+      renderList();
+      closeBulk();
+      $("camAddMsg").textContent = `${added.length}대 등록 완료 `
+        + `(${added[0].cam_id}~${added[added.length - 1].cam_id}). 카메라별로 대응점을 지정하세요.`;
+    } catch (e) {
+      $("bulkMsg").textContent = "실패: " + e.message + " (아무것도 등록되지 않았습니다)";
+    } finally {
+      $("bulkSubmit").disabled = $("bulkTest").disabled = false;
+    }
   }
 
   async function testCamera(camId) {
@@ -444,6 +608,17 @@ Views.cams = (() => {
     document.querySelectorAll("#camTools .tag-btn").forEach((b) =>
       b.onclick = () => setMode(b.dataset.mode));
     $("camAdd").onclick = addCamera;
+    $("camBulkOpen").onclick = openBulk;
+    $("camEnableMapped").onclick = enableMapped;
+    $("bulkClose").onclick = closeBulk;
+    $("bulkModal").onclick = (e) => { if (e.target === $("bulkModal")) closeBulk(); };
+    $("bulkParse").onclick = () => {
+      bulkRows = parseBulkLines($("bulkText").value);
+      $("bulkMsg").textContent = bulkRows.length ? "" : "인식된 줄이 없습니다.";
+      renderBulkTable();
+    };
+    $("bulkTest").onclick = testBulk;
+    $("bulkSubmit").onclick = submitBulk;
     // 매핑 층 변경 — 선택 카메라를 다른 층에 매핑 (map_pts 좌표계가 바뀌므로 초기화)
     $("mapFloorSel").onchange = async () => {
       selFloor = $("mapFloorSel").value;
