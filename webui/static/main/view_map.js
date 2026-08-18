@@ -29,7 +29,7 @@ Views.map = (() => {
     el.classList.remove("warn");
     const H = {
       pan: "휠: 줌 · 드래그: 팬 · 도구를 선택해 요소를 그리세요.",
-      scale: "축척: 거리를 아는 두 지점을 클릭하고 실거리(m)를 입력하세요.",
+      scale: "축척: CAD 도면은 자동으로 잡힙니다 — 자동값이 없거나 틀릴 때만 거리를 아는 두 지점을 클릭하고 실거리(m)를 입력하세요.",
       route: "피난경로: 클릭으로 꼭짓점 추가, 드래그로 자유곡선. 더블클릭 또는 [완료]로 종료 (2점 이상).",
       zone: "구역: 꼭짓점을 클릭으로 추가, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
       bottleneck: "병목: 꼭짓점 클릭 + 임계밀도 입력, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
@@ -189,25 +189,33 @@ Views.map = (() => {
     if (draft.inside) mcNumbered(g, [draft.inside], "#3FB950");
   }
 
+  // 축척 우선순위는 백엔드 MapSpec.resolve_m_per_px() 와 같아야 한다 —
+  // CAD 실측(m_per_px)이 먼저, 수동 2점은 그것이 없을 때의 최후 수단.
+  // (예전엔 여기만 2점을 우선해서, 지표는 CAD 축척으로 계산되는데 화면은
+  //  옛 2점 축척을 보여주는 불일치가 났다.)
+  function scaleFromPts(sc) {
+    if (!sc) return null;
+    const d = Math.hypot(sc.p2[0] - sc.p1[0], sc.p2[1] - sc.p1[1]);
+    return d > 0 ? sc.meters / d : null;
+  }
+
   function mPerPx() {
     const m = App.site && App.site.map;
     if (!m) return null;
-    if (m.scale) {
-      const d = Math.hypot(m.scale.p2[0] - m.scale.p1[0], m.scale.p2[1] - m.scale.p1[1]);
-      return d > 0 ? m.scale.meters / d : null;
-    }
-    return m.m_per_px != null ? m.m_per_px : null;
+    if (m.m_per_px != null) return m.m_per_px;
+    return scaleFromPts(m.scale);
   }
 
   function fmtScale() {
     const m = App.site && App.site.map;
     if (!m) return "";
-    if (m.scale) {
-      const d = Math.hypot(m.scale.p2[0] - m.scale.p1[0], m.scale.p2[1] - m.scale.p1[1]);
-      return d > 0 ? `${(m.scale.meters / d).toFixed(4)} m/px` : "?";
+    if (m.m_per_px != null) {
+      if (m.m_per_px === 1.0) return "1 m/px (임시값 — 도면 단위 불명, 축척 2점을 지정하세요)";
+      const width_m = (m.w * m.m_per_px).toFixed(1);
+      return `${m.m_per_px.toFixed(5)} m/px · CAD 도면에서 자동 (가로 ${width_m}m)`;
     }
-    if (m.m_per_px != null) return `${m.m_per_px} m/px${m.m_per_px === 1.0 ? " (임시값 — 축척 2점을 지정하세요)" : " (메타 자동)"}`;
-    return "";
+    const v = scaleFromPts(m.scale);
+    return v ? `${v.toFixed(5)} m/px · 직접 지정한 2점` : "";
   }
 
   function elItem(label, meta, color, onDel) {
