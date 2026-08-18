@@ -385,7 +385,8 @@ window.addEventListener("mouseup", e => {
   if (d.panning) { scheduleRender(0); return; }
   const wx0 = S2WX(d.sx0), wy0 = S2WY(d.sy0), wx1 = S2WX(d.sx1), wy1 = S2WY(d.sy1);
   const moved = Math.hypot(d.sx1 - d.sx0, d.sy1 - d.sy0) > 4;
-  if (!moved) { draw(); return; }
+  // 출발점은 '클릭' 입력이라 이동량이 0이다 — 드래그 최소거리 필터에서 제외한다.
+  if (!moved && mode !== "start") { draw(); return; }
   if (mode === "del") doDelete(Math.min(wx0,wx1), Math.min(wy0,wy1), Math.max(wx0,wx1), Math.max(wy0,wy1));
   else if (mode === "open" || mode === "block") {
     const kind = $("rectChk").checked ? "rect" : "line";
