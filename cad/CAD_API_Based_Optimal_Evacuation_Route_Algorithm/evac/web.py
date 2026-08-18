@@ -575,7 +575,11 @@ async def apply(payload: dict = None):
     #      그 층 map.w/h == 여기 w_px/h_px 로 좌표 정합.
     if applied:
         try:
-            ebody = json.dumps({"routes": routes_px, "replace": "auto",
+            # 맵이 통째로 바뀌므로 경로도 전체 교체한다("all").
+            # "auto"면 수동으로 그린 경로(r1·r2 등)가 남는데, 그 좌표는 옛 맵
+            # px 기준이라 새 맵에서 엉뚱한 위치를 가리킨다 — 구역·병목을 비우는
+            # 것(clear_zones/clear_bottlenecks)과 같은 이유다.
+            ebody = json.dumps({"routes": routes_px, "replace": "all",
                                 "exits": exits_px,
                                 "clear_zones": True,
                                 "clear_bottlenecks": True}).encode()
