@@ -22,7 +22,7 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 
 - **추론 엔진**: `src/` — `inference.py`(PyTorch), `inference_gpu.py`/`inference_trt.py`(TRT 최적화), `build_trt.py`
 - **단일채널 웹 UI**: `webui/` — `server.py`, 속도/밀도/카운팅/뎁스 모듈, RTSP 라이브 (포트 8000)
-- **멀티카메라 시스템**: `system/` — 다채널 RTSP·TRT·4대 지표 세션·2D 맵 UI + **세션 리플레이·지표 재계산(v1.10)** · 간이 로그인 게이트 (포트 8900). `system/README.md` 참조
+- **멀티카메라 시스템**: `system/` — 다채널 RTSP·TRT·4대 지표 세션·2D 맵 UI + **세션 리플레이·지표 재계산(v1.10)** · **건물 드릴(전 층 공유 세션·4대지표 롤업·전 층 리플레이, v1.11)** · 간이 로그인 게이트 (포트 8900). `system/README.md` 참조
 - **트래커**: `tracker/`, `boostracker/`, 외부 의존 `external/`
 
 ## 문서 맵 (docs/)

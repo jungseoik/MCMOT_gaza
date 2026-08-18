@@ -1,4 +1,26 @@
-# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.10)
+# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.11)
+
+> **v1.11 개정 (2026-08-18 — 건물 드릴: 전 층 공유 세션·4대지표 롤업·전 층 리플레이)**
+> 설계: `docs/architecture/06-건물-드릴-세션-4대지표-롤업-설계.md`. 요지: 훈련 1건 =
+> **전 층에 걸친 하나의 드릴**(공유 `t_alarm` → 전 층 동일 `session_id`). 층별 세션은
+> 유지하고 그 위에 건물 오케스트레이션·롤업을 얹는다.
+> - **시작 게이트(D2)**: **참여(카메라 매핑) 전 층에 경보 원점 ≥1개**가 있어야 시작.
+>   미충족 시 `409 {msg, missing_floors:[…]}`. 원점은 **매 드릴마다 UI에서 새로 지정**.
+> - **집계(§3)**: EPFI=전 층 전원 평균, CBS=전 층 병목 합, SEI=전 층 출구 통합분포
+>   재계산, IDR=**구역별 유지**(건물 단일평균 없음). + 추가요약(총 통과·최대혼잡층·층별 개시).
+> - 스키마(`contracts.py`) 신설: `DrillResult{session_id, alarm_ts, floors,
+>   building{epfi_avg,cbs_total,sei,idr_by_floor}, summary{total_passed,max_cbs_floor,
+>   floor_start_ts}, per_floor[{floor_id, result:EvaluationResult}]}`. 저장 스키마(층별
+>   `EvaluationResult`)는 **무개정** — 같은 `session_id`를 전 층에서 모아 조립.
+> - API 신설: **`POST /api/drill/start`**(body `{floor_origins:{floor:[[x,y]…]}, t_alarm?}`)
+>   · **`POST /api/drill/stop`**(→`DrillResult`) · **`GET /api/drill/{id}/result`**(→`DrillResult`)
+>   · **`GET /api/drills`**(이력 요약 — `alarm_ts`·`has_record`) ·
+>   **`GET /api/drill/{id}/export?format=json|csv`** ·
+>   **`POST /api/drill/{id}/replay`**(전 층 `.db`를 같은 오버라이드로 리플레이·재산출 →
+>   `{drill:DrillResult, frames_by_floor, site_by_floor}`. 원본 저장물 불변).
+> - 프론트: 운영 뷰 "🔔 건물 전체 경보 시작"(전 층 원점 게이트·층별 현황 칩·롤업 리포트),
+>   **④ 리플레이 탭 "건물 드릴" 모드**(이력·건물지표·층 선택 2D 재생·임계값 재계산·리포트).
+> - 하위호환: 단일 층 사이트는 참여 1개 층으로 기존과 동일. 층별 `POST /api/session/*` 유지.
 
 > **v1.10 개정 (2026-08-04 — 세션 녹화·리플레이·지표 재계산)**
 > 설계: `docs/architecture/05-세션-녹화-리플레이-지표재계산-설계.md`. 요지: 경보 세션의
