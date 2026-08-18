@@ -160,9 +160,14 @@
         <input type="text" id="site" value="default" style="flex:1" readonly
                title="운영 서버(:8900)가 사용 중인 사이트 이름입니다. 시드(기본 세팅)와는 무관합니다.">
       </div>
-      <div class="note-warn" id="applyTarget">운영 중인 사이트의 현재 층에 반영됩니다.</div>
+      <div class="fieldrow">
+        <label for="floorSel">교체할 층</label>
+        <select id="floorSel" style="flex:1"><option value="">불러오는 중…</option></select>
+        <button id="newFloorBtn" title="운영 서버에 층을 새로 만들고 이 도면을 그 층에 넣습니다">새 층</button>
+      </div>
+      <div class="note-warn" id="applyTarget"></div>
       <button class="primary" id="applyBtn" disabled>저장 &amp; 운영 반영</button>
-      <div class="note-warn">운영 서버(:8900)의 해당 층 도면을 교체합니다.</div>
+      <div class="note-warn">여기서 고른 <b>한 층만</b> 교체됩니다. 다른 층은 그대로 둡니다.</div>
       <div id="applyMsg" class="statline"></div>
     </div>
     <div class="grp">
@@ -584,8 +589,9 @@ $("verifyBtn").onclick = async () => {
 // ── 적용
 $("applyBtn").onclick = async () => {
   // A안 — 저장은 곧 운영 반영. 되돌리기 어려우므로 여기서 한 번 확인한다.
-  const fl = EDIT_FLOOR === "default" ? "기본 층" : `${EDIT_FLOOR} 층`;
-  if (!confirm(`${$("site").value} 사이트 ${fl}의 도면을 교체합니다.\n\n`
+  const floor = EDIT_FLOOR();
+  if (!confirm(`${$("site").value} 사이트 · ${floorLabel(floor)} 층의 도면을 교체합니다.\n\n`
+             + `· 이 층만 바뀝니다 — 다른 층은 그대로입니다\n`
              + `· 피난경로·출입구는 CAD 산출값으로 전부 교체됩니다\n`
              + `  (직접 그린 경로도 함께 지워집니다 — 옛 도면 좌표라 새 도면과 맞지 않음)\n`
              + `· 구역·병목은 초기화되므로 새 도면 위에 다시 지정해야 합니다\n\n`
@@ -596,7 +602,7 @@ $("applyBtn").onclick = async () => {
       body: JSON.stringify({ deleted: [...deleted], openings, shapes, starts, exits }) });
     const r = await fetch("/api/apply", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ site: $("site").value, floor: EDIT_FLOOR,
+      body: JSON.stringify({ site: $("site").value, floor,
                              apply_live: true }) });
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const j = await r.json();
@@ -615,6 +621,7 @@ $("applyBtn").onclick = async () => {
       routeTxt;
     if (window.opener) window.opener.postMessage(
         { type: "evac-floor-applied", site: j.site, floor: j.floor }, "*");
+    loadFloors(j.floor);   // 이 층은 이제 도면 있음 — 목록 상태 갱신
   } catch (e) { $("applyMsg").textContent = "실패: " + e; }
   spin(false); $("applyBtn").disabled = false;
 };
@@ -752,8 +759,73 @@ function toast(msg) {
 function spin(on) { $("spin").style.display = on ? "block" : "none"; }
 const _qs = new URLSearchParams(location.search);
 // (?live=1 은 더 이상 쓰지 않는다 — 저장은 항상 운영 반영)
-// ?floor=<층id> — 이 층 맵으로 저장·반영(다중 도면, :8900 v1.7). 없으면 default.
-const EDIT_FLOOR = _qs.get("floor") || "default";
+
+// ── 교체할 층
+// 층 구성의 원본은 운영서버(:8900)다. 편집기는 목록을 받아 고르게만 하고,
+// 고른 그 한 층에만 반영한다. ?floor= 는 :8900에서 넘어올 때의 초기 선택값.
+let floorList = [];
+const EDIT_FLOOR = () => $("floorSel").value || "default";
+
+function floorLabel(id) {
+  const f = floorList.find(x => x.id === id);
+  if (!f) return id;
+  return f.name ? `${f.name} (${f.id})` : f.id;
+}
+
+function updateApplyTarget() {
+  const id = EDIT_FLOOR();
+  const f = floorList.find(x => x.id === id);
+  const el = $("applyTarget");
+  if (!f) { el.innerHTML = `<span class="warn">운영서버 층 목록을 못 읽었습니다 — `
+                          + `<b>${id}</b> 층으로 반영을 시도합니다.</span>`; return; }
+  const cam = f.camera_count ? ` · 카메라 ${f.camera_count}대` : " · 카메라 없음";
+  el.innerHTML = f.has_map
+    ? `<b>${floorLabel(id)}</b> 의 기존 도면을 이 도면으로 <b>교체</b>합니다${cam}`
+    : `<b>${floorLabel(id)}</b> 는 아직 도면이 없습니다 — 이 도면이 처음 들어갑니다${cam}`;
+}
+
+async function loadFloors(select) {
+  const sel = $("floorSel");
+  try {
+    const j = await (await fetch("/api/system/floors")).json();
+    floorList = j.floors || [];
+    if (!j.ok) throw new Error(j.detail || "운영서버 응답 없음");
+  } catch (e) {
+    floorList = [];
+    sel.innerHTML = `<option value="${_qs.get("floor") || "default"}">`
+                  + `${_qs.get("floor") || "default"} (목록 못 읽음)</option>`;
+    updateApplyTarget();
+    return;
+  }
+  const want = select || sel.value || _qs.get("floor") || "default";
+  sel.innerHTML = floorList.map(f =>
+    `<option value="${f.id}">${f.name ? `${f.name} (${f.id})` : f.id}`
+    + `${f.has_map ? "" : " · 도면 없음"}</option>`).join("");
+  sel.value = floorList.some(f => f.id === want) ? want : (floorList[0]?.id || "default");
+  updateApplyTarget();
+}
+
+$("floorSel").onchange = updateApplyTarget;
+
+$("newFloorBtn").onclick = async () => {
+  const name = prompt("새 층 이름 (예: 16F)");
+  if (name === null) return;
+  const id = prompt("층 id — 영숫자/-/_ 만 (비우면 서버가 floorN 으로 발급)", "");
+  if (id === null) return;
+  $("newFloorBtn").disabled = true;
+  try {
+    const r = await fetch("/api/system/floors", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: id.trim(), name: name.trim() }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.status);
+    await loadFloors(j.floor.id);
+    toast(`층 추가됨 — ${floorLabel(j.floor.id)} (아직 도면 없음)`);
+  } catch (e) { toast("층 추가 실패: " + e.message); }
+  $("newFloorBtn").disabled = false;
+};
+
+loadFloors();
 resize();
 </script>
 </body>
