@@ -287,6 +287,10 @@ def geometry():
         pos += n
     head = json.dumps({"bounds": S["bounds"], "index": index,
                        "deleted": S["deleted"], "openings": S["openings"],
+                       # shapes(뚫기·차단)·starts(출발점)도 함께 — 없으면 프론트가
+                       # 새로고침·업로드 직후 이 편집 상태를 복원하지 못한다.
+                       "shapes": S.get("shapes", []),
+                       "starts": S.get("starts", []),
                        "exits": S["exits"], "name": S["src_name"]}).encode()
     payload = len(head).to_bytes(4, "little") + head + buf.tobytes()
     return Response(payload, media_type="application/octet-stream")
