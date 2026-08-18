@@ -79,7 +79,7 @@ Views.replay = (() => {
   function renderDrillList() {
     const box = $("rpSessList");
     if (!drills.length) {
-      box.innerHTML = `<div class="grow">저장된 건물 드릴 없음 — ③ 운영 뷰에서 [🔔 건물 전체 경보]를 실행하면 이력이 쌓입니다.</div>`;
+      box.innerHTML = `<div class="grow">저장된 건물 훈련 없음 — ③ 운영 뷰에서 [🔔 건물 전체 경보]를 실행하면 이력이 쌓입니다.</div>`;
       return;
     }
     box.innerHTML = drills.map((d) => {
@@ -101,7 +101,7 @@ Views.replay = (() => {
           selId = el.dataset.id; renderDrillList(); clearMetrics();
           setControlsEnabled(false); $("rpReset").disabled = true; $("rpApply").disabled = true;
           $("rpReport").disabled = false;
-          $("rpHint").textContent = "이 드릴은 일부 층 녹화가 없어 재계산·재생이 불가합니다 (요약만).";
+          $("rpHint").textContent = "이 훈련은 일부 층 녹화가 없어 재계산·재생이 불가합니다 (요약만).";
           drill = null;
           return;
         }
@@ -121,11 +121,11 @@ Views.replay = (() => {
     selId = id;
     baseRow = drills.find((d) => d.session_id === id) || null;
     renderDrillList();
-    $("rpHint").textContent = "건물 드릴 재계산·재생 데이터를 불러오는 중…";
+    $("rpHint").textContent = "건물 훈련 재계산·재생 데이터를 불러오는 중…";
     $("rpMsg").textContent = "";
     let resp;
     try { resp = await API.drillReplay(id, { fps: 5 }); }
-    catch (e) { $("rpHint").textContent = "드릴 로드 실패: " + e.message; return; }
+    catch (e) { $("rpHint").textContent = "훈련 로드 실패: " + e.message; return; }
     drill = resp.drill;
     drillFrames = resp.frames_by_floor || {};
     drillSites = resp.site_by_floor || {};
@@ -138,7 +138,7 @@ Views.replay = (() => {
     setControlsEnabled(true);
     $("rpReset").disabled = false; $("rpApply").disabled = false; $("rpReport").disabled = false;
     if (floors.length) loadDrillFloor(floors[0]);
-    $("rpHint").textContent = `건물 드릴 · 참여 ${floors.length}개 층 — 층을 골라 2D 재생, 임계값을 바꿔 [재계산]하면 건물 지표가 갱신됩니다.`;
+    $("rpHint").textContent = `건물 훈련 · 참여 ${floors.length}개 층 — 층을 골라 2D 재생, 임계값을 바꿔 [재계산]하면 건물 지표가 갱신됩니다.`;
   }
 
   // 선택 층의 프레임을 기존 재생 파이프라인(data/site)에 실어 그대로 재생.
@@ -198,7 +198,7 @@ Views.replay = (() => {
     $("rpReset").disabled = true; $("rpApply").disabled = true; $("rpReport").disabled = true;
     clearMetrics();
     $("rpHint").textContent = m === "drill"
-      ? "건물 드릴 이력을 선택하면 전 층 결과를 건물 롤업으로 보여주고, 층을 골라 2D 재생·재계산할 수 있습니다."
+      ? "건물 훈련 이력을 선택하면 전 층 결과를 건물 롤업으로 보여주고, 층을 골라 2D 재생·재계산할 수 있습니다."
       : "좌측에서 경보 세션을 선택하면 그 세션의 이동 기록을 도면 위에 그대로 재생합니다.";
     loadList();
     if (mc) mc.render();

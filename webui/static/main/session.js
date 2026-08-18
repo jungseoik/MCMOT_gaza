@@ -157,7 +157,7 @@ const Session = (() => {
     syncPending();  // 현재 층 원점 배열로 정렬 (드릴: 층별 수집)
     // 드릴(참여 2+층): 층별 원점 지정 현황 — 전 층 지정돼야 시작 가능(●n=지정, ○=미지정).
     const drillStatus = (partCache && partCache.length >= 2)
-      ? `<div class="drill-floorstat" title="참여 각 층에 경보 원점이 지정돼야 건물 드릴을 시작합니다">${
+      ? `<div class="drill-floorstat" title="참여 각 층에 경보 원점이 지정돼야 건물 훈련을 시작합니다">${
           partCache.map((f) => {
             const n = (drillOrigins[f] || []).length;
             const cur = f === curFloor();
@@ -242,7 +242,7 @@ const Session = (() => {
       stoppedId = null; result = null; timeline = []; personSeries = null; drillReport = null;
       renderDev(); switchPanel("sess");
       if (live) startPoll();
-      hint(`건물 드릴 시작 — ${resp.session_id} · 참여 ${resp.floors.length}개 층`);
+      hint(`건물 훈련 시작 — ${resp.session_id} · 참여 ${resp.floors.length}개 층`);
     } catch (e) {
       const d = e.detail;
       if (e.status === 409 && d && d.missing_floors) {
@@ -251,7 +251,7 @@ const Session = (() => {
       } else if (e.status === 409 && d && d.busy_floors) {
         hint(`이미 세션 진행 중인 층: ${d.busy_floors.map((f) => App.floorName(f)).join(", ")} — 먼저 종료하세요.`, true);
       } else {
-        hint("드릴 시작 실패: " + e.message, true);
+        hint("훈련 시작 실패: " + e.message, true);
       }
     }
     updateUI();
@@ -266,9 +266,9 @@ const Session = (() => {
       live = null; addingOrigin = false;
       stopPoll();
       drillReport = roll;
-      hint("건물 드릴 종료 — 롤업 결과가 산출되었습니다.");
+      hint("건물 훈련 종료 — 롤업 결과가 산출되었습니다.");
       showDrillModal(roll);
-    } catch (e) { hint("드릴 종료 실패: " + e.message, true); }
+    } catch (e) { hint("훈련 종료 실패: " + e.message, true); }
     updateUI();
   }
 
@@ -916,7 +916,7 @@ const Session = (() => {
         <td class="t-num">${started}/${(r.zone_metrics || []).length}</td>
       </tr>`;
     }).join("");
-    $("resTitle").textContent = `건물 드릴 롤업 — ${roll.session_id}`;
+    $("resTitle").textContent = `건물 훈련 롤업 — ${roll.session_id}`;
     $("resBody").innerHTML = `
       <div class="resbig">
         <div class="resmet"><span>SEI(건물)</span><b>${b.sei != null ? fmt1(b.sei) : "—"}</b><i>출구 통합분포</i></div>
