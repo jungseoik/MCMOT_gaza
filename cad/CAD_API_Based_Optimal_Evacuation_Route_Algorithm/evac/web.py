@@ -77,6 +77,82 @@ def _exit_pts():
             for (x1, y1, x2, y2) in S.get("exits", [])]
 
 
+def _unit_mm() -> float | None:
+    """현재 유효한 mm 환산 계수 — 도면 선언값 또는 사용자 지정값."""
+    return S.get("unit_mm")
+
+
+def _size_m(bounds, unit_mm):
+    """도면 크기(m). 단위 미확정이면 None — 화면이 '미터'라 단정하지 않게 한다."""
+    if not unit_mm:
+        return None
+    return [round((bounds[2] - bounds[0]) * unit_mm / 1000.0, 1),
+            round((bounds[3] - bounds[1]) * unit_mm / 1000.0, 1)]
+
+
+def _to_m(v: float) -> float:
+    """도면단위 → 미터. 단위 미확정이면 mm 로 가정(표시용 폴백)."""
+    return v * (_unit_mm() or 1.0) / 1000.0
+
+
+def _from_m(m: float) -> float:
+    """미터 → 도면단위."""
+    return m * 1000.0 / (_unit_mm() or 1.0)
+
+
+def _units_info() -> dict:
+    """단위 상태 + 상식 점검. 프론트가 이걸로 경고/입력 UI를 띄운다."""
+    b = S.get("bounds")
+    mm = _unit_mm()
+    info = {"insunits": S.get("insunits"), "unit_name": S.get("unit_name"),
+            "unit_mm": mm, "source": S.get("unit_source"),
+            "resolved": mm is not None, "warn": None}
+    if b and mm:
+        wm = (b[2] - b[0]) * mm / 1000.0
+        hm = (b[3] - b[1]) * mm / 1000.0
+        info["size_m"] = [round(wm, 1), round(hm, 1)]
+        # 단위를 잘못 선언한 도면(실제 m인데 헤더는 mm 등)을 잡는 상식 점검
+        if max(wm, hm) < 3 or max(wm, hm) > 3000:
+            info["warn"] = (f"환산된 도면 크기가 {wm:.1f} × {hm:.1f} m 입니다. "
+                            "단위 설정이 맞는지 확인하세요.")
+    return info
+
+
+@app.get("/api/units")
+def get_units():
+    _require_session()
+    return _units_info()
+
+
+@app.post("/api/units")
+async def set_units(payload: dict):
+    """단위 수동 지정 — 두 방식 중 하나.
+
+    {"unit": "mm"|"cm"|"m"|"inch"|"ft"}          단위 직접 선택
+    {"ref_mm": <도면단위 거리>, "real_m": <실제 m>}  도면 2점 실측 입력
+
+    $INSUNITS 가 없는 도면(=0)에서 쓴다. 지정 전에는 저장·적용을 막는다.
+    """
+    _require_session()
+    named = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "inch": 25.4, "ft": 304.8}
+    if "unit" in payload:
+        u = str(payload["unit"])
+        if u not in named:
+            raise HTTPException(422, f"unit은 {'|'.join(named)} — 받은 값: {u!r}")
+        mm, src, name = named[u], "user", u
+    elif "ref_mm" in payload and "real_m" in payload:
+        ref = float(payload["ref_mm"])          # 도면단위로 잰 두 점 사이 거리
+        real = float(payload["real_m"])         # 그 구간의 실제 거리(m)
+        if ref <= 0 or real <= 0:
+            raise HTTPException(422, "ref_mm·real_m 은 0보다 커야 합니다")
+        mm, src, name = real * 1000.0 / ref, "measure", "실측 2점"
+    else:
+        raise HTTPException(422, "unit 또는 (ref_mm, real_m) 이 필요합니다")
+    with _lock:
+        S["unit_mm"], S["unit_source"], S["unit_name"] = mm, src, name
+    return _units_info()
+
+
 def _norm_shape(sh: dict) -> dict:
     """편집 도형 검증·정규화. 잘못된 값은 422로 막는다."""
     op = str(sh.get("op", "open"))
@@ -151,17 +227,22 @@ async def load(file: UploadFile = File(...)):
     dxf_path = _dwg_to_dxf(src, workdir) if ext == ".dwg" else src
 
     entities, exits, occupants, bounds, _doc = cad.load_dxf_entities(dxf_path)
+    # 도면 단위($INSUNITS) — 없으면 unit_mm=None 으로 두고 사용자에게 묻는다.
+    # 임의로 mm 로 가정하면 m 단위 도면에서 축척이 1000배 틀어진 채 조용히 넘어간다.
+    ins_code, unit_mm, unit_name = cad.read_units(_doc)
     with _lock:
         S.clear()
         S.update(entities=entities, bounds=list(bounds), src_name=name,
                  dxf_path=dxf_path, deleted=[], openings=[], shapes=[],
+                 insunits=ins_code, unit_mm=unit_mm, unit_name=unit_name,
+                 unit_source="dxf" if unit_mm else None,
                  # 도면에 이미 Evac_Exit 가 있으면 그 중점을 초기 Exit(짧은 선)로
                  exits=[(x - 450, y, x + 450, y) for (x, y) in exits])
     n_seg = sum(len(e["segs"]) for e in entities)
     return {"name": name, "bounds": bounds, "entities": len(entities),
             "segments": n_seg, "exits": S["exits"],
-            "size_m": [round((bounds[2] - bounds[0]) / 1000, 1),
-                       round((bounds[3] - bounds[1]) / 1000, 1)]}
+            "units": _units_info(),
+            "size_m": _size_m(bounds, unit_mm)}
 
 
 @app.get("/api/session")
@@ -279,7 +360,7 @@ def distfield_png():
     if not ok:
         raise HTTPException(500, "PNG 인코딩 실패")
     return Response(enc.tobytes(), media_type="image/png",
-                    headers={"X-Max-Dist-M": f"{dmax/1000:.1f}"})
+                    headers={"X-Max-Dist-M": f"{_to_m(dmax):.1f}"})
 
 
 # ───────────────────────────────────────────── 경로 검증
@@ -292,16 +373,16 @@ async def verify(payload: dict = None):
         raise HTTPException(422, "Exit가 없습니다 — Exit 모드로 선을 그어주세요.")
     payload = payload or {}
     n = max(1, int(payload.get("worst_n") or 5))          # 0/빈값 → 경로 0개 방지
-    thr = float(payload.get("threshold_m") or 30.0) * 1000.0
+    thr = _from_m(float(payload.get("threshold_m") or 30.0))
     try:
         an = core.analyze(_obstacles(), exits, S["bounds"], mode="worstn",
                           worst_n=n, cell=FULL_CELL, threshold_mm=thr,
                           shapes=_shapes() or None)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    return {"paths": [{"pts": p["path_m"], "dist_m": round(p["dist_mm"] / 1000, 1),
+    return {"paths": [{"pts": p["path_m"], "dist_m": round(_to_m(p["dist_mm"]), 1),
                        "pass": p["is_pass"]} for p in an.paths],
-            "skipped": an.skipped, "threshold_m": thr / 1000}
+            "skipped": an.skipped, "threshold_m": round(_to_m(thr), 1)}
 
 
 # ───────────────────────────────────────────── 저장 & 적용
@@ -346,6 +427,12 @@ async def apply(payload: dict = None):
     exits = _exit_pts()
     if not exits:
         raise HTTPException(422, "Exit가 없습니다 — 저장 전에 Exit를 지정하세요.")
+    # 단위 미확정 상태로 저장하면 축척(m_per_px)이 틀린 채 :8900 까지 전파되고,
+    # 속도·밀도가 조용히 어긋난다. 여기서 막는다.
+    if not _unit_mm():
+        raise HTTPException(
+            422, "도면 단위가 확인되지 않았습니다($INSUNITS 없음) — "
+                 "단위를 선택하거나 실측 2점으로 축척을 지정한 뒤 저장하세요.")
 
     obs = _obstacles()
     bounds = S["bounds"]
@@ -355,7 +442,7 @@ async def apply(payload: dict = None):
     # 1) map.png (터치업 도면) — 층별 파일명
     map_path = os.path.join(site_dir, map_name)
     w_px, h_px = _render_map_png(obs, bounds, map_path)
-    m_per_px = (bounds[2] - bounds[0]) / 1000.0 / w_px
+    m_per_px = _to_m(bounds[2] - bounds[0]) / w_px   # 도면 실단위 반영
 
     # 2) 거리장 사전계산 (트래킹 좌표 → 실시간 피난거리용)
     #    worst_n을 반영용으로 넉넉히(기본 5) 뽑는다 — dist/grid 는 worst_n과
@@ -432,7 +519,7 @@ async def apply(payload: dict = None):
                 "m_per_px": round(m_per_px, 5),
                 "exits": len(exits_px), "openings": len(S["openings"]),
                 "deleted": len(S["deleted"]), "routes": len(routes_px),
-                "worst_dist_m": round(max((p["dist_mm"] for p in an.paths), default=0) / 1000, 1),
+                "worst_dist_m": round(_to_m(max((p["dist_mm"] for p in an.paths), default=0)), 1),
                 "applied_to_system": False, "routes_applied": False,
                 "elements_applied": False,
                 "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
@@ -481,7 +568,7 @@ async def apply(payload: dict = None):
             "m_per_px": round(m_per_px, 5),
             "exits": len(exits_px), "openings": len(S["openings"]),
             "deleted": len(S["deleted"]), "routes": len(routes_px),
-            "worst_dist_m": round(max((p["dist_mm"] for p in an.paths), default=0) / 1000, 1),
+            "worst_dist_m": round(_to_m(max((p["dist_mm"] for p in an.paths), default=0)), 1),
             "applied_to_system": applied, "routes_applied": elements_applied,
             "elements_applied": elements_applied,
             "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
