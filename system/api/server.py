@@ -105,8 +105,34 @@ class Runtime:
             return DEFAULT_FLOOR_ID
         return next(iter(self.engines), DEFAULT_FLOOR_ID)
 
+    def require_floor(self, floor_id: str | None = None) -> str:
+        """**쓰기용** 층 해석 — 없는 층이면 404.
+
+        resolve_floor()의 default 폴백은 조회에는 알맞지만 쓰기에는 위험하다.
+        오타나 이미 지운 층 id로 맵·공간요소를 밀어 넣으면 조용히 default
+        층을 덮어써서 그 층 설정이 통째로 날아간다(실측: floor=nosuchfloor
+        로 CAD 적용 → 17F가 교체됨). 쓰기는 반드시 이쪽을 쓴다.
+        """
+        fid = floor_id or DEFAULT_FLOOR_ID
+        if fid not in self.engines:
+            raise HTTPException(404, f"층 없음: {fid}")
+        return fid
+
     def engine_for(self, floor_id: str | None = None) -> MetricsEngine | None:
         return self.engines.get(self.resolve_floor(floor_id))
+
+    def guard_session(self, fid: str) -> None:
+        """세션 진행 중인 층의 기하(맵·경로·구역·병목)는 못 바꾸게 막는다.
+
+        도중에 갈아엎으면 같은 세션 안에서 앞뒤 구간이 서로 다른 기하로
+        계산돼 지표를 신뢰할 수 없고, reload_engine 으로 진행 중 세션이
+        통째로 날아간다(실측: 적용 직후 GET /api/session → 404).
+        """
+        eng = self.engines.get(fid)
+        if eng is not None and eng.session_live() is not None:
+            raise HTTPException(
+                409, f"'{fid}' 층에서 평가 세션이 진행 중입니다 — "
+                     "먼저 세션을 종료한 뒤 도면을 적용하세요")
 
     # ------------------------------------------------------------ 설정 접근
     def site(self) -> SiteConfig:
@@ -278,7 +304,8 @@ async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(N
     arr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if arr is None:
         raise HTTPException(422, "이미지 디코드 실패")
-    fid = rt.resolve_floor(floor)
+    fid = rt.require_floor(floor)
+    rt.guard_session(fid)
     path = rt.store.map_path(SITE_ID, fid)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -306,12 +333,25 @@ async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(N
     spec = MapSpec(image=path.name, w=arr.shape[1], h=arr.shape[0],
                    scale=prev_scale, m_per_px=m_per_px,
                    source=src_name, unit=unit_name)
+    # 맵 픽셀 크기가 달라지면 그 층 카메라 매핑(map_pts)은 옛 맵 px 기준이라
+    # 무효다. 남겨두면 사람이 엉뚱한 위치로 투영되는데 화면상 "매핑됨"으로
+    # 보여 알아채기 어렵다 — 구역·병목을 비우는 것과 같은 이유로 해제한다.
+    # 크기가 같으면(같은 도면 재적용 등) 그대로 둔다.
+    prev = fl.map
+    cleared: list[str] = []
+    if prev is not None and (prev.w, prev.h) != (spec.w, spec.h):
+        for cam in rt.cameras():
+            if cfg.floor_id_of_camera(cam) == fid and cam.mapping is not None:
+                cam.mapping = None
+                rt.store.save_camera(SITE_ID, cam)
+                cleared.append(cam.cam_id)
+
     fl.map = spec
     if fid == DEFAULT_FLOOR_ID:
         cfg.map = spec                               # top-level 동기화(재승격 대비)
     rt.store.save_site(cfg)
     rt.reload_engine()
-    return spec
+    return {**spec.model_dump(), "mappings_cleared": cleared}
 
 
 @app.get("/api/site/map")
@@ -350,7 +390,8 @@ async def put_site_routes(request: Request, floor: str = DEFAULT_FLOOR_ID):
         raise HTTPException(422, "replace는 'auto'|'all'")
 
     cfg = rt.site()
-    fid = rt.resolve_floor(floor)
+    fid = rt.require_floor(floor)
+    rt.guard_session(fid)
     fl = cfg.get_floor(fid)
     kept = ([] if mode == "all"
             else [r for r in fl.routes if not r.id.startswith(AUTO_ROUTE_PREFIX)])
@@ -398,7 +439,8 @@ async def put_site_floor_elements(request: Request, floor: str = DEFAULT_FLOOR_I
         raise HTTPException(status_code=422, detail=str(e))
 
     cfg = rt.site()
-    fid = rt.resolve_floor(floor)
+    fid = rt.require_floor(floor)
+    rt.guard_session(fid)
     fl = cfg.get_floor(fid)
 
     if new_routes is not None:

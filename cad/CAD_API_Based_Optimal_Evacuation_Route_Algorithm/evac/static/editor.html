@@ -612,12 +612,17 @@ $("applyBtn").onclick = async () => {
       ? (j.elements_applied
           ? `<br> 피난경로 ${j.routes}개 + 출입구 ${j.exits}개 맵설정 반영 완료`
             + `<br> 구역·병목은 초기화됨 — 새 맵에 다시 지정하세요`
+            + ((j.mappings_cleared || []).length
+                ? `<br><b>⚠ 카메라 매핑 ${j.mappings_cleared.length}대 해제됨</b>`
+                  + ` (${j.mappings_cleared.join(", ")}) — 맵 크기가 바뀌어 옛 좌표가`
+                  + ` 무효입니다. ② 카메라 등록·매핑에서 다시 잡으세요`
+                : "")
           : `<br>⚠ 맵은 반영됐으나 공간요소(경로·출입구) 반영 실패`)
-      : (j.routes ? `<br> 피난경로 ${j.routes}개 + 출입구 ${j.exits}개 산출 (운영 반영은 체크박스 선택 시)` : "");
+      : `<br><b>⚠ 운영서버 반영 실패</b> — ${j.apply_error || "운영서버(:8900) 응답 없음"}`
+        + `<br>파일은 저장됐습니다. 층을 다시 고르고 시도하세요.`;
     $("applyMsg").innerHTML =
       `✔ 저장됨 → <b>${j.saved[0]}</b>${floorTxt}<br>축척 ${j.m_per_px} m/px 자동 · worst ${j.worst_dist_m}m` +
-      (j.applied_to_system ? "<br>✔ 운영서버(:8900) 반영 완료"
-                           : "<br> 파일만 저장됨 (운영 반영은 체크박스 선택 시)") +
+      (j.applied_to_system ? "<br>✔ 운영서버(:8900) 반영 완료" : "") +
       routeTxt;
     if (window.opener) window.opener.postMessage(
         { type: "evac-floor-applied", site: j.site, floor: j.floor }, "*");

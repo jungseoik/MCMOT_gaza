@@ -538,6 +538,8 @@ async def apply(payload: dict = None):
     # 4) 운영 서버(:8900) 반영 — 명시적 opt-in 일 때만. 해당 층(floor)에만 반영.
     applied = False
     elements_applied = False
+    apply_err = None
+    mappings_cleared: list = []
     if not bool(payload.get("apply_live", False)):
         return {"site": site, "floor": floor, "map_px": [w_px, h_px],
                 "m_per_px": round(m_per_px, 5),
@@ -570,8 +572,18 @@ async def apply(payload: dict = None):
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
         with urllib.request.urlopen(req, timeout=5) as r:
             applied = (r.status == 200)
-    except Exception:
+            if applied:
+                # 맵 크기가 바뀌면 :8900 이 그 층 카메라 매핑을 해제한다.
+                # 사용자에게 알려야 재매핑을 잊지 않는다.
+                try:
+                    mappings_cleared = json.load(r).get("mappings_cleared") or []
+                except Exception:
+                    mappings_cleared = []
+    except Exception as e:
         applied = False
+        # 왜 실패했는지 화면에 띄운다 — 예전엔 "파일만 저장됨"만 떠서
+        # 층 이름 오타 같은 걸 알 수 없었다.
+        apply_err = _why(e)
 
     # 4.5) 맵 반영 성공 시에만 그 층의 공간요소를 CAD 기준으로 재세팅.
     #      PUT /api/site/floor-elements?floor= (:8900 v1.9): 피난경로·출입구는
@@ -594,8 +606,9 @@ async def apply(payload: dict = None):
                 headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req2, timeout=5) as r2:
                 elements_applied = (r2.status == 200)
-        except Exception:
+        except Exception as e:
             elements_applied = False
+            apply_err = _why(e)
 
     return {"site": site, "floor": floor, "map_px": [w_px, h_px],
             "m_per_px": round(m_per_px, 5),
@@ -603,7 +616,8 @@ async def apply(payload: dict = None):
             "deleted": len(S["deleted"]), "routes": len(routes_px),
             "worst_dist_m": round(_to_m(max((p["dist_mm"] for p in an.paths), default=0)), 1),
             "applied_to_system": applied, "routes_applied": elements_applied,
-            "elements_applied": elements_applied,
+            "elements_applied": elements_applied, "apply_error": apply_err,
+            "mappings_cleared": mappings_cleared,
             "saved": [os.path.join("data/sites", site, n) for n in saved_names]}
 
 
@@ -614,6 +628,20 @@ def get_floor(site: str):
     if not os.path.isfile(p):
         raise HTTPException(404, "floor.json 없음")
     return FileResponse(p, media_type="application/json")
+
+
+def _why(e: Exception) -> str:
+    """운영서버 호출 실패 사유를 사람이 읽을 문장으로."""
+    detail = None
+    if hasattr(e, "read"):                      # HTTPError — 본문의 detail 우선
+        try:
+            detail = json.loads(e.read()).get("detail")
+        except Exception:
+            detail = None
+    code = getattr(e, "code", None)
+    if detail:
+        return f"운영서버 {code}: {detail}" if code else str(detail)
+    return f"{type(e).__name__}: {e}"
 
 
 # ───────────────────────────────────────────── 층 목록 — 운영서버(:8900) 프록시
