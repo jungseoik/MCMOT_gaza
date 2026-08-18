@@ -223,3 +223,6 @@ field/
 docs/manual/**/*.docx
 docs/manual/**/*.pdf
 docs/manual/**/img/
+
+# 서드파티 모델 clone (비교 실험용, 대용량·외부 코드) — git 제외
+third_party/
