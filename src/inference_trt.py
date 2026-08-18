@@ -92,11 +92,13 @@ class TRTEngine:
 class TRTDetector:
     """YOLOX detector using TensorRT engine."""
 
-    def __init__(self, engine_path: str, num_classes=1, conf_thresh=0.1, nms_thresh=0.7):
+    def __init__(self, engine_path: str, num_classes=1, conf_thresh=0.1, nms_thresh=0.7,
+                 input_size=(896, 1600)):
         self.engine = TRTEngine(engine_path)
         self.num_classes = num_classes
         self.conf_thresh = conf_thresh
         self.nms_thresh = nms_thresh
+        self.input_size = input_size
 
     def detect(self, img_tensor: torch.Tensor):
         """Run detection. Input: (1, 3, H, W) tensor on CUDA.
@@ -107,6 +109,13 @@ class TRTDetector:
         if pred is not None:
             return torch.cat((pred[:, :4], (pred[:, 4] * pred[:, 5])[:, None]), dim=1)
         return None
+
+    def detect_frame(self, frame: np.ndarray):
+        """공통 인터페이스(투트랙) — BGR 프레임 → (dets[N,5] 입력텐서좌표, 스케일기준 텐서).
+        BoostTrack.update가 텐서 shape로 스케일(=letterbox ratio)을 복원한다."""
+        padded, _ = preproc(frame, self.input_size, mean=None, std=None)
+        tensor = torch.from_numpy(padded).unsqueeze(0).cuda()
+        return self.detect(tensor), tensor
 
 
 # ──────────────────────────────────────────────

@@ -27,6 +27,7 @@ from default_settings import GeneralSettings
 from tracker.boost_track import BoostTrack, KalmanBoxTracker
 from src.inference import _get_color
 from src.inference_trt import TRTDetector, TRTReID
+from src.rfdetr_trt import RFDETRTRTDetector
 
 
 
@@ -126,6 +127,8 @@ class BoostTrackGPUInference:
         det_thresh: float = 0.4,
         use_reid: bool = True,
         use_ecc: bool = True,
+        detector: str = "yolox",
+        rfdetr_engine: str = "external/weights/trt/rfdetr_base_fp16.engine",
     ):
         self.input_size = input_size
         self.det_thresh = det_thresh
@@ -134,8 +137,14 @@ class BoostTrackGPUInference:
 
         self._configure_settings()
 
-        # TRT detector
-        self.detector = TRTDetector(yolox_engine)
+        # TRT detector — 투트랙(YOLOX / RF-DETR). 둘 다 detect_frame(frame)->(dets,ref) 공통 인터페이스.
+        if detector == "rfdetr":
+            self.detector = RFDETRTRTDetector(rfdetr_engine)
+        elif detector == "yolox":
+            self.detector = TRTDetector(yolox_engine, input_size=input_size)
+        else:
+            raise ValueError(f"detector는 'yolox'|'rfdetr' — 받은 값: {detector!r}")
+        self.detector_kind = detector
 
         # BoostTrack tracker
         KalmanBoxTracker.count = 0
@@ -212,10 +221,8 @@ class BoostTrackGPUInference:
 
         def _emit(frame):
             nonlocal processed
-            padded, _ = preproc(frame, self.input_size, mean=None, std=None)
-            tensor = torch.from_numpy(padded).unsqueeze(0).cuda()
-            pred = self.detector.detect(tensor)
-            targets = self.tracker.update(pred, tensor, frame, f"inference:{processed + 1}")
+            pred, ref = self.detector.detect_frame(frame)
+            targets = self.tracker.update(pred, ref, frame, f"inference:{processed + 1}")
             if draw and targets.shape[0] > 0 and targets.shape[1] >= 6:
                 vis = self._draw_tracks(frame, targets)
             else:
@@ -313,7 +320,10 @@ def main():
     parser = argparse.ArgumentParser(description="BoostTrack++ GPU-Optimized Inference")
     parser.add_argument("--input", "-i", required=True, help="Input video path")
     parser.add_argument("--output", "-o", required=True, help="Output video path")
+    parser.add_argument("--detector", choices=["yolox", "rfdetr"], default="yolox",
+                        help="검출기 선택(투트랙) — 기존 기본은 yolox")
     parser.add_argument("--yolox_engine", default="external/weights/trt/yolox_mot20_fp16.engine")
+    parser.add_argument("--rfdetr_engine", default="external/weights/trt/rfdetr_base_fp16.engine")
     parser.add_argument("--reid_engine", default="external/weights/trt/fastreid_sbs_s50_fp16.engine")
     parser.add_argument("--det_thresh", type=float, default=0.4)
     parser.add_argument("--no_reid", action="store_true")
@@ -322,7 +332,9 @@ def main():
     args = parser.parse_args()
 
     tracker = BoostTrackGPUInference(
+        detector=args.detector,
         yolox_engine=args.yolox_engine,
+        rfdetr_engine=args.rfdetr_engine,
         reid_engine=args.reid_engine,
         input_size=tuple(args.input_size),
         det_thresh=args.det_thresh,
