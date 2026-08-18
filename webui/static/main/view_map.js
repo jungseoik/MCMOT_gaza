@@ -292,7 +292,10 @@ Views.map = (() => {
     $("graphMeta").textContent = gr.nodes.length
       ? "IDR 최단거리는 이 그래프 위에서 계산 (미지정 시 직선거리 폴백)"
       : "그래프 없음 — IDR은 직선거리 폴백으로 계산";
-    $("mapMeta").textContent = s.map ? `map.png · ${s.map.w}×${s.map.h}px` : "맵 없음 — 업로드하세요";
+    // 파일명은 층마다 다르다(default=map.png, 그 외 map_<층>.png) — 고정 문자열
+    // "map.png"를 쓰면 모든 층이 같은 이미지처럼 보인다.
+    $("mapMeta").textContent = s.map ? `${s.map.image} · ${s.map.w}×${s.map.h}px`
+                                     : "맵 없음 — 업로드하세요";
     $("scaleMeta").textContent = s.map && (s.map.scale || s.map.m_per_px != null)
       ? `축척: ${fmtScale()}` : "축척 미지정";
     // thresholds
