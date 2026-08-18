@@ -142,7 +142,9 @@ Views.replay = (() => {
   }
 
   // 선택 층의 프레임을 기존 재생 파이프라인(data/site)에 실어 그대로 재생.
-  function loadDrillFloor(floor) {
+  // seekAbsTs(선택): 이 절대 시각(초)으로 맞춘다 — 층 전환 시 같은 순간 유지용.
+  // (드릴은 전 층 t_alarm 공유라 절대 ts로 맞추면 다른 층의 '같은 시점'이 보인다.)
+  function loadDrillFloor(floor, seekAbsTs) {
     curDrillFloor = floor;
     $("rpFloorSel").value = floor;
     const st = drillSites[floor] || null;
@@ -151,7 +153,14 @@ Views.replay = (() => {
              meta: { alarm_origins: (st && st.alarm_origins) || [] } };
     prepPlayback();
     setDrillCanvasImage(floor, st);
-    goTo(0);
+    const f = data.frames;
+    if (seekAbsTs != null && f.length) {
+      cursor = Math.max(0, Math.min(duration, seekAbsTs - f[0].ts));
+      $("rpSeek").value = String(frameIndexAt(cursor));
+      updateTimeLabel();
+    } else {
+      goTo(0);
+    }
     if (mc) mc.render();
   }
 
@@ -461,7 +470,13 @@ Views.replay = (() => {
     $("rpReset").onclick = () => { fillThresholds(site && site.thresholds); $("rpMsg").textContent = "원래값으로 되돌림 — [재계산]을 눌러 반영"; };
     $("rpModeSess").onclick = () => setMode("sess");
     $("rpModeDrill").onclick = () => setMode("drill");
-    $("rpFloorSel").onchange = (e) => { pause(); loadDrillFloor(e.target.value); };
+    $("rpFloorSel").onchange = (e) => {
+      // 재생 중 층 전환: 현재 절대 시각을 유지해 다른 층의 같은 순간으로 자연스럽게 전환.
+      // (재생 중이면 그대로 계속 재생, 정지 중이면 그 시점에 멈춰 있음.)
+      const absNow = (data && data.frames && data.frames.length)
+        ? data.frames[0].ts + cursor : null;
+      loadDrillFloor(e.target.value, absNow);
+    };
     $("rpReport").onclick = () => {
       if (drill && window.Session && Session.openDrillReport) Session.openDrillReport(drill);
     };
