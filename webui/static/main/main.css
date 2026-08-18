@@ -180,6 +180,33 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .modalhead{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:20px; }
 .modalbox img{ max-width:100%; border-radius:var(--r-md); display:block; }
 
+/* ---------------- 세션/드릴 결과 모달 ---------------- */
+.resbig{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:12px; }
+.resmet{ display:flex; flex-direction:column; gap:2px; padding:8px 10px;
+  background:var(--bg-3); border:1px solid var(--stroke-3); border-radius:var(--r-sm); }
+.resmet span{ font-size:11px; color:var(--text-3); }
+.resmet b{ font-size:22px; font-family:var(--font-num); color:var(--text-1); }
+.resmet i{ font-size:10px; color:var(--text-3); font-style:normal; }
+.resrow{ display:flex; justify-content:space-between; align-items:center; gap:16px;
+  padding:5px 2px; border-top:1px solid var(--stroke-3); font-size:12px; color:var(--text-2); }
+.resrow b{ color:var(--text-1); }
+.drill-perfloor{ margin-top:12px; }
+.drill-perfloor-h{ font-size:12px; font-weight:700; color:var(--text-2); margin-bottom:6px; }
+.drill-tbl{ width:100%; border-collapse:collapse; font-size:12px; }
+.drill-tbl th{ text-align:right; font-weight:600; color:var(--text-3);
+  padding:4px 8px; border-bottom:1px solid var(--stroke-3); }
+.drill-tbl th:first-child, .drill-tbl td:first-child{ text-align:left; }
+.drill-tbl td{ padding:4px 8px; border-bottom:1px solid var(--stroke-3);
+  text-align:right; color:var(--text-1); font-family:var(--font-num); }
+
+/* 드릴 층별 원점 지정 현황 (●지정/○미지정) */
+.drill-floorstat{ display:flex; flex-wrap:wrap; gap:5px; margin-bottom:6px; }
+.drill-floorstat .dfs{ font-size:11px; padding:1px 7px; border-radius:999px;
+  border:1px solid var(--stroke-3); color:var(--text-3); white-space:nowrap; }
+.drill-floorstat .dfs.ok{ color:#3FB950; border-color:rgba(63,185,80,.5); }
+.drill-floorstat .dfs.miss{ color:#F5A623; border-color:rgba(245,166,35,.5); }
+.drill-floorstat .dfs.cur{ font-weight:700; box-shadow:0 0 0 1px var(--brand,#30DCFB) inset; }
+
 /* ---------------- 카메라 일괄 등록 모달 ---------------- */
 .modalbox.bulk{ width:min(920px,92vw); max-width:none; }
 .bulkstep{ margin-bottom:12px; }

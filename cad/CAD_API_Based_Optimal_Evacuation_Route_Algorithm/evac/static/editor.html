@@ -90,7 +90,9 @@
       <h2>모드</h2>
       <button class="mode on" id="m-pan">✋ 이동/줌 <span style="float:right;color:var(--dim)">휠·드래그</span></button>
       <button class="mode" id="m-del">🧹 삭제 (치수선 등) <span style="float:right;color:var(--dim)">박스</span></button>
-      <button class="mode" id="m-open">🚪 개구부 (문 열기) <span style="float:right;color:var(--dim)">선</span></button>
+      <button class="mode" id="m-open">🚪 개구부 (뚫기) <span style="float:right;color:var(--dim)" id="lbl-open">선</span></button>
+      <button class="mode" id="m-block">🚧 차단 (막기) <span style="float:right;color:var(--dim)" id="lbl-block">선</span></button>
+      <label class="chk" style="margin:2px 0 4px 4px"><input type="checkbox" id="rectChk"> 사각형으로 그리기 (뚫기·차단)</label>
       <button class="mode" id="m-exit">🟦 Exit 지정 <span style="float:right;color:var(--dim)">선</span></button>
       <button id="undoBtn" class="small">↩ 실행취소 <kbd>Ctrl+Z</kbd></button>
     </div>
@@ -141,6 +143,9 @@ let segAlive = null;        // Uint8Array n (삭제 반영)
 let entIndex = [];          // [{h, layer, o, n}]
 let bounds = null;          // [minx,miny,maxx,maxy] mm
 let deleted = new Set(), openings = [], exits = [];
+// 편집 도형 — {op:"open"|"block", kind:"line"|"rect", pts:[x1,y1,x2,y2], w}
+// 뚫기/막기 모두 여기에 쌓인다. 적용 순서(open→block)는 서버가 보장.
+let shapes = [];
 let undoStack = [];         // {type, data}
 let verifyPaths = null;
 let connImg = null;         // 연결성 오버레이 Image
@@ -236,11 +241,30 @@ function draw() {
     ctx.drawImage(heatImg, W2SX(x1), W2SY(y2),
                   (x2 - x1) * view.s, (y2 - y1) * view.s);
   }
-  // 개구부
+  // 개구부(구형식) + 편집 도형 — 뚫기는 청록, 차단은 빨강
   ctx.lineCap = "round";
   for (const [x1, y1, x2, y2] of openings) {
-    ctx.strokeStyle = "rgba(34,197,94,.85)"; ctx.lineWidth = Math.max(4, 900 * view.s);
+    ctx.strokeStyle = "rgba(6,182,212,.85)"; ctx.lineWidth = Math.max(4, 900 * view.s);
     ctx.beginPath(); ctx.moveTo(W2SX(x1), W2SY(y1)); ctx.lineTo(W2SX(x2), W2SY(y2)); ctx.stroke();
+  }
+  for (const sh of shapes) {
+    const open = sh.op === "open";
+    const col = open ? "6,182,212" : "220,38,38";
+    const [x1, y1, x2, y2] = sh.pts;
+    if (sh.kind === "rect") {
+      const sx = W2SX(Math.min(x1,x2)), sy = W2SY(Math.max(y1,y2));
+      const sw = Math.abs(x2-x1) * view.s, shh = Math.abs(y2-y1) * view.s;
+      ctx.fillStyle = `rgba(${col},.22)`; ctx.fillRect(sx, sy, sw, shh);
+      ctx.strokeStyle = `rgba(${col},.95)`; ctx.lineWidth = 2;
+      ctx.setLineDash(open ? [] : [7, 4]);
+      ctx.strokeRect(sx, sy, sw, shh); ctx.setLineDash([]);
+    } else {
+      ctx.strokeStyle = `rgba(${col},.85)`;
+      ctx.lineWidth = Math.max(4, (sh.w || 900) * view.s);
+      ctx.setLineDash(open ? [] : [10, 6]);
+      ctx.beginPath(); ctx.moveTo(W2SX(x1), W2SY(y1)); ctx.lineTo(W2SX(x2), W2SY(y2));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
   }
   // Exit
   for (const [x1, y1, x2, y2] of exits) {
@@ -270,10 +294,20 @@ function draw() {
       ctx.strokeStyle = "#ef4444"; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5;
       ctx.strokeRect(drag.sx0, drag.sy0, drag.sx1 - drag.sx0, drag.sy1 - drag.sy0);
       ctx.setLineDash([]);
+    } else if ((mode === "open" || mode === "block") && $("rectChk").checked) {
+      const col = mode === "open" ? "6,182,212" : "220,38,38";
+      ctx.fillStyle = `rgba(${col},.22)`; ctx.strokeStyle = `rgba(${col},.95)`;
+      ctx.lineWidth = 2; ctx.setLineDash(mode === "open" ? [] : [7, 4]);
+      const x = Math.min(drag.sx0, drag.sx1), y = Math.min(drag.sy0, drag.sy1);
+      const w = Math.abs(drag.sx1 - drag.sx0), h = Math.abs(drag.sy1 - drag.sy0);
+      ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
     } else {
-      ctx.strokeStyle = mode === "open" ? "rgba(34,197,94,.9)" : "#1d4ed8";
-      ctx.lineWidth = mode === "open" ? Math.max(4, 900 * view.s) : 5;
-      ctx.beginPath(); ctx.moveTo(drag.sx0, drag.sy0); ctx.lineTo(drag.sx1, drag.sy1); ctx.stroke();
+      ctx.strokeStyle = mode === "open" ? "rgba(6,182,212,.9)"
+                      : mode === "block" ? "rgba(220,38,38,.9)" : "#1d4ed8";
+      ctx.lineWidth = (mode === "open" || mode === "block") ? Math.max(4, 900 * view.s) : 5;
+      ctx.setLineDash(mode === "block" ? [10, 6] : []);
+      ctx.beginPath(); ctx.moveTo(drag.sx0, drag.sy0); ctx.lineTo(drag.sx1, drag.sy1);
+      ctx.stroke(); ctx.setLineDash([]);
     }
   }
 }
@@ -314,7 +348,12 @@ window.addEventListener("mouseup", e => {
   const moved = Math.hypot(d.sx1 - d.sx0, d.sy1 - d.sy0) > 4;
   if (!moved) { draw(); return; }
   if (mode === "del") doDelete(Math.min(wx0,wx1), Math.min(wy0,wy1), Math.max(wx0,wx1), Math.max(wy0,wy1));
-  else if (mode === "open") { openings.push([wx0, wy0, wx1, wy1]); undoStack.push({t:"open"}); afterEdit(); }
+  else if (mode === "open" || mode === "block") {
+    const kind = $("rectChk").checked ? "rect" : "line";
+    const sh = { op: mode, kind, pts: [wx0, wy0, wx1, wy1] };
+    if (kind === "line") sh.w = 900;
+    shapes.push(sh); undoStack.push({ t: "shape" }); afterEdit();
+  }
   else if (mode === "exit") { exits.push([wx0, wy0, wx1, wy1]); undoStack.push({t:"exit"}); stepDone(3); afterEdit(); }
 });
 
@@ -349,6 +388,7 @@ function undo() {
     }
     afterEdit(true);
   } else if (op.t === "open") { openings.pop(); afterEdit(); }
+  else if (op.t === "shape") { shapes.pop(); afterEdit(); }
   else if (op.t === "exit") { exits.pop(); afterEdit(); }
 }
 $("undoBtn").onclick = undo;
@@ -364,7 +404,7 @@ function afterEdit(geomChanged = false) {
   clearTimeout(editSyncTimer);
   editSyncTimer = setTimeout(() => fetch("/api/edits", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deleted: [...deleted], openings, exits })
+    body: JSON.stringify({ deleted: [...deleted], openings, shapes, exits })
   }).then(() => {
     if ($("connChk").checked) refreshConn();
     if ($("heatChk").checked) refreshHeat(); else heatImg = null;
@@ -399,7 +439,7 @@ async function refreshHeat() {
   spin(true);
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted: [...deleted], openings, exits }) });
+      body: JSON.stringify({ deleted: [...deleted], openings, shapes, exits }) });
     const r = await fetch("/api/distfield.png?t=" + Date.now());
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const dmax = r.headers.get("X-Max-Dist-M");
@@ -415,19 +455,39 @@ $("heatChk").onchange = () => { if ($("heatChk").checked) refreshHeat(); else { 
 // ── 검증
 $("verifyBtn").onclick = async () => {
   if (!exits.length) { toast("먼저 Exit를 지정하세요 (🟦 모드)"); return; }
+  // 입력칸을 비우면 +"" === 0 이 되어 경로가 0개 나온다 — 보정하고 칸에 되돌려 쓴다
+  let wn = Math.max(1, Math.round(+$("wn").value || 5));
+  let thr = +$("thr").value > 0 ? +$("thr").value : 30;
+  $("wn").value = wn; $("thr").value = thr;
+
   spin(true); $("verifyBtn").disabled = true;
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted: [...deleted], openings, exits }) });
+      body: JSON.stringify({ deleted: [...deleted], openings, shapes, exits }) });
     const r = await fetch("/api/verify", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ worst_n: +$("wn").value, threshold_m: +$("thr").value }) });
+      body: JSON.stringify({ worst_n: wn, threshold_m: thr }) });
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const j = await r.json();
     verifyPaths = j.paths;
     stepDone(4);
     updateStats();
-    toast(`worst ${j.paths.length}개 경로 · 최장 ${Math.max(...j.paths.map(p => p.dist_m))}m`);
+
+    if (!j.paths.length) {
+      // 조용히 비는 것을 막는다 — 원인을 짚어준다
+      const why = j.skipped
+        ? `도달 가능한 지점이 없습니다 (건너뜀 ${j.skipped}개). 차단으로 고립됐는지, Exit가 벽 안에 있는지 확인하세요.`
+        : "산출된 경로가 없습니다. Exit 위치와 차단 범위를 확인하세요.";
+      toast("경로 0개 — " + why);
+    } else {
+      // 검증했는데 '경로 표시'가 꺼져 있으면 화면에 안 나와 혼동된다 — 자동으로 켠다
+      if (!$("pathChk").checked) { $("pathChk").checked = true; }
+      const longest = Math.max(...j.paths.map(p => p.dist_m));
+      const fail = j.paths.filter(p => !p.pass).length;
+      toast(`worst ${j.paths.length}개 · 최장 ${longest}m`
+            + (fail ? ` · 기준(${j.threshold_m}m) 초과 ${fail}개` : " · 전부 기준 이내")
+            + (j.skipped ? ` · 건너뜀 ${j.skipped}개` : ""));
+    }
     draw();
   } catch (e) { toast("검증 실패: " + e); }
   spin(false); $("verifyBtn").disabled = false;
@@ -438,7 +498,7 @@ $("applyBtn").onclick = async () => {
   spin(true); $("applyBtn").disabled = true; $("applyMsg").textContent = "저장 중…(수십 초)";
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted: [...deleted], openings, exits }) });
+      body: JSON.stringify({ deleted: [...deleted], openings, shapes, exits }) });
     const r = await fetch("/api/apply", { method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ site: $("site").value, floor: EDIT_FLOOR,
@@ -465,6 +525,35 @@ $("applyBtn").onclick = async () => {
 };
 
 // ── 업로드
+// 서버 세션의 도면·편집 상태를 화면에 적용 (업로드 직후 / 새로고침 복원 공용)
+async function applyGeometry(meta) {
+  const g = await fetch("/api/geometry");
+  if (!g.ok) throw new Error((await g.json()).detail || g.status);
+  const buf = await g.arrayBuffer();
+  const hlen = new DataView(buf).getUint32(0, true);
+  const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hlen)));
+  segs = new Float32Array(buf.slice(4 + hlen));
+  entIndex = head.index;
+  bounds = head.bounds;
+  deleted = new Set(head.deleted);
+  shapes = head.shapes || [];
+  openings = head.openings; exits = head.exits;
+  segAlive = new Uint8Array(segs.length / 4).fill(1);
+  for (const h of deleted) {
+    const ent = entIndex.find(e => e.h === h);
+    if (ent) segAlive.fill(0, ent.o, ent.o + ent.n);
+  }
+  if (meta) {
+    $("fileName").textContent =
+      `${meta.name} · ${meta.size_m[0]}×${meta.size_m[1]} m · 요소 ${meta.entities.toLocaleString()}`;
+  }
+  $("dropzone").classList.add("hidden");
+  stepDone(1);
+  if (exits.length) stepDone(3);
+  fitView(); renderBase(); updateStats(); draw();
+  $("applyBtn").disabled = exits.length === 0;
+}
+
 async function upload(file) {
   spin(true);
   $("dropzone").querySelector(".box").innerHTML = "<b>변환·파싱 중…</b><br>DWG는 수십 초 걸릴 수 있습니다";
@@ -473,25 +562,7 @@ async function upload(file) {
     const r = await fetch("/api/load", { method: "POST", body: fd });
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const meta = await r.json();
-    const g = await fetch("/api/geometry");
-    const buf = await g.arrayBuffer();
-    const hlen = new DataView(buf).getUint32(0, true);
-    const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hlen)));
-    segs = new Float32Array(buf.slice(4 + hlen));
-    entIndex = head.index;
-    bounds = head.bounds;
-    deleted = new Set(head.deleted);
-    openings = head.openings; exits = head.exits;
-    segAlive = new Uint8Array(segs.length / 4).fill(1);
-    for (const h of deleted) {
-      const ent = entIndex.find(e => e.h === h);
-      if (ent) segAlive.fill(0, ent.o, ent.o + ent.n);
-    }
-    $("fileName").textContent = `${meta.name} · ${meta.size_m[0]}×${meta.size_m[1]} m · 요소 ${meta.entities.toLocaleString()}`;
-    $("dropzone").classList.add("hidden");
-    stepDone(1);
-    fitView(); renderBase(); updateStats(); draw();
-    $("applyBtn").disabled = exits.length === 0;
+    await applyGeometry(meta);
     toast("도면 로드 완료 — 연결성 오버레이를 켜고 고립된 방(주황)의 문을 🚪로 여세요");
   } catch (e) {
     $("dropzone").querySelector(".box").innerHTML =
@@ -505,7 +576,7 @@ $("fi").onchange = e => e.target.files[0] && upload(e.target.files[0]);
 document.addEventListener("drop", e => e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]));
 
 // ── 모드/유틸
-for (const id of ["pan", "del", "open", "exit"]) {
+for (const id of ["pan", "del", "open", "block", "exit"]) {
   $("m-" + id).onclick = () => {
     mode = id;
     document.querySelectorAll(".mode").forEach(b => b.classList.remove("on"));
@@ -513,10 +584,18 @@ for (const id of ["pan", "del", "open", "exit"]) {
     cv.style.cursor = id === "pan" ? "grab" : "crosshair";
   };
 }
+// 경로 표시 토글 — 핸들러가 없어 체크해도 다시 안 그려지던 문제
+$("pathChk").onchange = () => draw();
+$("rectChk").onchange = () => {
+  const t = $("rectChk").checked ? "사각형" : "선";
+  $("lbl-open").textContent = t; $("lbl-block").textContent = t;
+  draw();
+};
 function updateStats() {
   if (!bounds) return;
   $("stats").innerHTML =
-    `삭제 <b>${deleted.size}</b>개 · 개구부 <b>${openings.length}</b>개 · Exit <b>${exits.length}</b>개` +
+    `삭제 <b>${deleted.size}</b>개 · 뚫기 <b>${openings.length + shapes.filter(s=>s.op==="open").length}</b>개`
+    + ` · 차단 <b>${shapes.filter(s=>s.op==="block").length}</b>개 · Exit <b>${exits.length}</b>개` +
     (verifyPaths ? `<br>검증 경로 <b>${verifyPaths.length}</b>개` : "");
 }
 function stepDone(n) {

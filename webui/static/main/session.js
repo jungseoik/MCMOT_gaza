@@ -14,6 +14,11 @@ const Session = (() => {
   let addingOrigin = false;    // + 추가 모드: 맵 클릭 → pendingOrigins에 추가
   let pendingOrigins = [];    // [[x,y], ...] — 세션 시작 전 경보 발생원 목록 (세션 한 회용)
   let pendingInited = false;  // _initPending 1회 수행 여부 — clear 후 재로드 방지
+  // 건물 드릴(ADR 06) — 층별 원점을 층을 가로질러 모은다. pendingOrigins는 현재 층 별칭.
+  let drillOrigins = {};      // {floor_id: [[x,y],...]} — 참여 층별 이번 드릴용 경보 원점
+  let drillActive = false;    // 드릴 진행중(전 층 공유 세션)
+  let drillReport = null;     // 마지막 드릴 롤업 결과(리포트 재열람용)
+  let partCache = null;       // 참여(카메라 매핑) 층 id[] 캐시 — 원점 현황 표시용
   let pollT = null;
   let stoppedId = null;    // stop 직후 지연 SSE 스냅샷 무시용
   let onMapRender = null;  // 맵 canvas 다시 그리기 콜백
@@ -24,10 +29,17 @@ const Session = (() => {
     try { live = await API.getSession(); } catch (e) { live = null; }
     try { result = await API.getSessionResult(); } catch (e) { result = null; }
     try { timeline = await API.getSessionTimeline(); } catch (e) { timeline = []; }
+    syncPending();  // 현재 층 드릴 원점 별칭 정렬
+    // 리로드 대비: 진행중 세션이 저장된 드릴 키와 일치하면 드릴 모드 복원
+    try {
+      const dk = sessionStorage.getItem("macs_drill");
+      drillActive = !!(dk && live && live.session_id === dk);
+    } catch (e) { /* sessionStorage 불가 시 무시 */ }
     if (live) { startPoll(); switchPanel("sess"); }
     else if (result) switchPanel("sess");
     if (result) loadSeries();
     updateUI();
+    if (drillCapable()) refreshParts();  // 층별 원점 현황 표시(비동기, 완료 시 재렌더)
   }
 
   /** SSE MapState 수신 시 view_live가 호출. */
@@ -78,7 +90,8 @@ const Session = (() => {
     $("sessStopBtn").onclick = stop;
     $("alarmAddBtn").onclick = toggleAdding;
     $("alarmClearBtn").onclick = () => {
-      pendingOrigins = [];
+      drillOrigins[curFloor()] = [];
+      syncPending();
       addingOrigin = false;
       renderAlarmPanel();
       hint("");
@@ -89,11 +102,39 @@ const Session = (() => {
     $("resultModal").onclick = (e) => {
       if (e.target === $("resultModal")) $("resultModal").classList.add("hidden");
     };
-    $("resReopen").onclick = () => { if (result) showResultModal(); };
+    $("resReopen").onclick = () => {
+      if (drillReport) showDrillModal(drillReport);
+      else if (result) showResultModal();
+    };
   }
 
   function _initPending() {
     pendingInited = true;  // App.site 미사용 — 운영뷰 패널에서만 관리
+  }
+
+  // 건물 드릴 헬퍼 ------------------------------------------------
+  const curFloor = () =>
+    (typeof App !== "undefined" && App.currentFloor) || "default";
+
+  // pendingOrigins를 현재 층의 drillOrigins 배열로 정렬(별칭). 층 전환 시 그 층 원점 표시.
+  function syncPending() {
+    const f = curFloor();
+    if (!drillOrigins[f]) drillOrigins[f] = [];
+    pendingOrigins = drillOrigins[f];
+  }
+
+  // 드릴 가능 사이트(층 2개 이상) — 버튼 비활성 게이트는 onBtn에서 전 층 검사.
+  const drillCapable = () =>
+    typeof App !== "undefined" && App.site &&
+    (App.site.floors || []).length >= 2;
+
+  // 참여(카메라 매핑) 층 캐시 갱신 후 패널 재렌더 — 원점 지정 현황 표시용.
+  async function refreshParts() {
+    try {
+      const cams = await API.getCameras();
+      partCache = [...new Set(cams.filter((c) => c.mapping).map((c) => c.floor_id || "default"))];
+    } catch (e) { partCache = null; }
+    renderAlarmPanel();
   }
 
   function toggleAdding() {
@@ -107,17 +148,27 @@ const Session = (() => {
     const setup = $("alarmSetup");
     const list = $("alarmOriginList");
     if (!setup || !list) return;
-    const isLive = !!live;
+    const isLive = !!live || drillActive;  // 드릴 중엔 어느 층에서든 종료 버튼 노출
     setup.classList.toggle("hidden", isLive);
     $("sessStopBtn").classList.toggle("hidden", !isLive);
     if (isLive) return;
 
     _initPending();
-    list.innerHTML = pendingOrigins.length
+    syncPending();  // 현재 층 원점 배열로 정렬 (드릴: 층별 수집)
+    // 드릴(참여 2+층): 층별 원점 지정 현황 — 전 층 지정돼야 시작 가능(●n=지정, ○=미지정).
+    const drillStatus = (partCache && partCache.length >= 2)
+      ? `<div class="drill-floorstat" title="참여 각 층에 경보 원점이 지정돼야 건물 드릴을 시작합니다">${
+          partCache.map((f) => {
+            const n = (drillOrigins[f] || []).length;
+            const cur = f === curFloor();
+            return `<span class="dfs ${n ? "ok" : "miss"}${cur ? " cur" : ""}">${App.floorName(f)} ${n ? "●" + n : "○"}</span>`;
+          }).join("")}</div>`
+      : "";
+    list.innerHTML = drillStatus + (pendingOrigins.length
       ? pendingOrigins.map((o, i) =>
           `<span class="alarm-chip">경보원 ${i + 1}<button class="alarm-chip-x" data-idx="${i}">×</button></span>`
         ).join("")
-      : `<span class="alarm-none">없음 — [+ 추가] 또는 맵설정에서 지정</span>`;
+      : `<span class="alarm-none">없음 — [+ 추가] 또는 맵설정에서 지정</span>`);
 
     list.querySelectorAll(".alarm-chip-x").forEach((btn) => {
       btn.onclick = () => {
@@ -126,7 +177,8 @@ const Session = (() => {
       };
     });
 
-    $("sessBtn").disabled = pendingOrigins.length === 0;
+    // 드릴 사이트(층 2+)는 버튼 항상 활성 — 전 층 원점 게이트는 onBtn에서 검사·안내.
+    $("sessBtn").disabled = drillCapable() ? false : (pendingOrigins.length === 0);
     if (onMapRender) onMapRender();
   }
 
@@ -141,9 +193,26 @@ const Session = (() => {
     updateUI();
   }
 
-  function onBtn() {
-    if (live) return;
-    _initPending();
+  async function onBtn() {
+    if (live || drillActive) return;
+    // 참여 층 = 카메라가 매핑된 층(추적이 실제로 일어나는 층). 2개 이상이면 건물 드릴.
+    let cams = [];
+    try { cams = await API.getCameras(); } catch (e) { /* 폴백: 단일 층 */ }
+    const parts = [...new Set(cams.filter((c) => c.mapping)
+      .map((c) => c.floor_id || "default"))];
+
+    if (parts.length >= 2) {
+      const missing = parts.filter((f) => !(drillOrigins[f] && drillOrigins[f].length));
+      if (missing.length) {
+        const names = missing.map((f) => App.floorName(f)).join(", ");
+        hint(`경보 발생원 미지정 층: ${names} — 해당 층으로 이동해 경보 위치를 지정하세요.`, true);
+        return;
+      }
+      startDrill(parts);
+      return;
+    }
+    // 단일 층(참여 층 ≤1) — 기존 층별 세션.
+    syncPending();
     if (!pendingOrigins.length) { hint("경보 발생원을 먼저 추가하세요.", true); return; }
     _startWithOrigins(pendingOrigins.slice());
   }
@@ -151,13 +220,60 @@ const Session = (() => {
   /** 맵 클릭 훅 (view_live) — addingOrigin 모드면 경보원 추가 후 true 반환. */
   function placeAlarm(p) {
     if (!addingOrigin) return false;
+    syncPending();  // 현재 층 배열에 추가 (드릴: 층별 수집)
     pendingOrigins.push([p.x, p.y]);
     renderAlarmPanel();
     hint(`경보원 ${pendingOrigins.length}개 추가됨 — 계속 클릭하거나 [🔔 경보 시작]을 누르세요.`);
     return true;
   }
 
+  // ---- 건물 드릴 시작/종료 (ADR 06) --------------------------------
+  async function startDrill(parts) {
+    addingOrigin = false;
+    const payload = {};
+    parts.forEach((f) => { payload[f] = (drillOrigins[f] || []).map((o) => [o[0], o[1]]); });
+    try {
+      const resp = await API.drillStart(payload);
+      drillActive = true;
+      try { sessionStorage.setItem("macs_drill", resp.session_id); } catch (e) { /* noop */ }
+      // 현재 층이 참여 층이면 그 층 세션을 live로 표시(폴링). 아니면 live 없음(다른 층에서 진행).
+      const mine = resp.floors.find((f) => f.floor_id === curFloor());
+      live = mine ? mine.session : null;
+      stoppedId = null; result = null; timeline = []; personSeries = null; drillReport = null;
+      renderDev(); switchPanel("sess");
+      if (live) startPoll();
+      hint(`건물 드릴 시작 — ${resp.session_id} · 참여 ${resp.floors.length}개 층`);
+    } catch (e) {
+      const d = e.detail;
+      if (e.status === 409 && d && d.missing_floors) {
+        const names = d.missing_floors.map((f) => App.floorName(f)).join(", ");
+        hint(`경보 발생원 미지정 층: ${names} — 해당 층으로 이동해 경보 위치를 지정하세요.`, true);
+      } else if (e.status === 409 && d && d.busy_floors) {
+        hint(`이미 세션 진행 중인 층: ${d.busy_floors.map((f) => App.floorName(f)).join(", ")} — 먼저 종료하세요.`, true);
+      } else {
+        hint("드릴 시작 실패: " + e.message, true);
+      }
+    }
+    updateUI();
+  }
+
+  async function stopDrill() {
+    try {
+      const roll = await API.drillStop();
+      drillActive = false;
+      try { sessionStorage.removeItem("macs_drill"); } catch (e) { /* noop */ }
+      stoppedId = live && live.session_id;
+      live = null; addingOrigin = false;
+      stopPoll();
+      drillReport = roll;
+      hint("건물 드릴 종료 — 롤업 결과가 산출되었습니다.");
+      showDrillModal(roll);
+    } catch (e) { hint("드릴 종료 실패: " + e.message, true); }
+    updateUI();
+  }
+
   async function stop() {
+    if (drillActive) return stopDrill();
     try {
       result = await API.stopSession();
       stoppedId = live && live.session_id;
@@ -186,7 +302,7 @@ const Session = (() => {
 
   function setBtn() {
     const b = $("sessBtn");
-    b.textContent = "🔔 경보 시작";
+    b.textContent = drillCapable() ? "🔔 건물 전체 경보 시작" : "🔔 경보 시작";
     b.classList.remove("stop");
   }
 
@@ -772,6 +888,53 @@ const Session = (() => {
       ${row("추적 객체", `${r.person_metrics.length}개`)}
       ${row("설정 버전", `calibration v${r.calibration_version} · config v${r.config_version}`)}
     `;
+    $("resultModal").classList.remove("hidden");
+  }
+
+  /** 건물 드릴 롤업 리포트 (ADR 06 §3) — 건물 4대지표 + 추가요약 + 층별 상세. */
+  function showDrillModal(roll) {
+    if (!roll) return;
+    const b = roll.building || {}, s = roll.summary || {};
+    const fname = (f) => (typeof App !== "undefined" ? App.floorName(f) : f);
+    // IDR — 구역별 유지(건물 단일평균 없음). 전 층 구역 개시 집계만 표시.
+    let zStarted = 0, zTot = 0;
+    Object.values(b.idr_by_floor || {}).forEach((zs) =>
+      (zs || []).forEach((z) => { zTot++; if (z.status === "started") zStarted++; }));
+    const row = (k, v) => `<div class="resrow"><span>${k}</span><b class="t-num">${v}</b></div>`;
+    const startTxt = Object.entries(s.floor_start_ts || {})
+      .map(([f, ts]) => `${fname(f)} ${ts != null ? hhmmss(ts) : "—"}`).join(" · ") || "—";
+    const perFloor = (roll.per_floor || []).map((pf) => {
+      const r = pf.result || {};
+      const passed = (r.exit_metrics || []).reduce((a, e) => a + (e.actual_count || 0), 0);
+      const started = (r.zone_metrics || []).filter((z) => z.status === "started").length;
+      return `<tr>
+        <td>${fname(pf.floor_id)}</td>
+        <td class="t-num">${r.sei != null ? fmt1(r.sei) : "—"}</td>
+        <td class="t-num">${r.epfi_avg != null ? fmt1(r.epfi_avg) : "—"}</td>
+        <td class="t-num">${fmt1(r.cbs_total || 0)}</td>
+        <td class="t-num">${passed}</td>
+        <td class="t-num">${started}/${(r.zone_metrics || []).length}</td>
+      </tr>`;
+    }).join("");
+    $("resTitle").textContent = `건물 드릴 롤업 — ${roll.session_id}`;
+    $("resBody").innerHTML = `
+      <div class="resbig">
+        <div class="resmet"><span>SEI(건물)</span><b>${b.sei != null ? fmt1(b.sei) : "—"}</b><i>출구 통합분포</i></div>
+        <div class="resmet"><span>EPFI 평균</span><b>${b.epfi_avg != null ? fmt1(b.epfi_avg) : "—"}</b><i>전 층 전원</i></div>
+        <div class="resmet"><span>CBS 합</span><b>${fmt1(b.cbs_total || 0)}</b><i>전 층 병목</i></div>
+        <div class="resmet"><span>IDR 개시</span><b>${zStarted}/${zTot}</b><i>구역별(전 층)</i></div>
+      </div>
+      ${row("참여 층", (roll.floors || []).map(fname).join(", "))}
+      ${row("총 통과 인원", `${s.total_passed != null ? s.total_passed : 0}명`)}
+      ${row("최대 혼잡 층", s.max_cbs_floor ? fname(s.max_cbs_floor) : "—")}
+      ${row("층별 개시시각", startTxt)}
+      <div class="drill-perfloor">
+        <div class="drill-perfloor-h">층별 상세</div>
+        <table class="drill-tbl">
+          <thead><tr><th>층</th><th>SEI</th><th>EPFI</th><th>CBS</th><th>통과</th><th>IDR개시</th></tr></thead>
+          <tbody>${perFloor}</tbody>
+        </table>
+      </div>`;
     $("resultModal").classList.remove("hidden");
   }
 

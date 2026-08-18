@@ -88,6 +88,114 @@ def carve_free(grid, lines, minx, miny, cell, width=900.0):
     return grid
 
 
+# ───────────────────────────────────────────── 편집 도형(뚫기·막기)
+def _shape_mask(shape, minx, miny, cell, cols, rows):
+    """편집 도형 → (슬라이스, bool 마스크). 범위 밖이면 None.
+
+    kind: line(선분 주변 w/2) · rect(대각 2점) · poly(N점 다각형).
+    rect는 poly의 특수형이지만 슬라이싱만으로 끝나 훨씬 빠르므로 따로 둔다.
+    """
+    kind = shape.get("kind", "line")
+    pts = [float(v) for v in shape.get("pts", [])]
+    if kind == "line":
+        if len(pts) < 4:
+            return None
+        x1, y1, x2, y2 = pts[:4]
+        r = float(shape.get("w", 900.0)) / 2.0
+        bx1, by1, bx2, by2 = (min(x1, x2) - r, min(y1, y2) - r,
+                              max(x1, x2) + r, max(y1, y2) + r)
+    elif kind == "rect":
+        if len(pts) < 4:
+            return None
+        x1, y1, x2, y2 = pts[:4]
+        bx1, by1, bx2, by2 = min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
+    elif kind == "poly":
+        if len(pts) < 6:
+            return None
+        xs, ys = pts[0::2], pts[1::2]
+        bx1, by1, bx2, by2 = min(xs), min(ys), max(xs), max(ys)
+    else:
+        return None
+
+    c1 = max(0, int(math.floor((bx1 - minx) / cell)))
+    r1 = max(0, int(math.floor((by1 - miny) / cell)))
+    c2 = min(cols - 1, int(math.floor((bx2 - minx) / cell)))
+    r2 = min(rows - 1, int(math.floor((by2 - miny) / cell)))
+    if c2 < c1 or r2 < r1:
+        return None
+    sl = (slice(c1, c2 + 1), slice(r1, r2 + 1))
+
+    if kind == "rect":                       # bbox 전체가 곧 사각형
+        return sl, True
+
+    cc = minx + (np.arange(c1, c2 + 1) + 0.5) * cell
+    rr = miny + (np.arange(r1, r2 + 1) + 0.5) * cell
+    PX, PY = np.meshgrid(cc, rr, indexing="ij")
+
+    if kind == "line":
+        x1, y1, x2, y2 = pts[:4]
+        r = float(shape.get("w", 900.0)) / 2.0
+        dx, dy = x2 - x1, y2 - y1
+        lensq = dx * dx + dy * dy
+        if lensq < 1e-10:
+            d = np.hypot(PX - x1, PY - y1)
+        else:
+            t = np.clip(((PX - x1) * dx + (PY - y1) * dy) / lensq, 0.0, 1.0)
+            d = np.hypot(PX - (x1 + t * dx), PY - (y1 + t * dy))
+        return sl, (d < r)
+
+    # poly — ray casting (짝수/홀수 규칙)
+    xs, ys = np.array(pts[0::2]), np.array(pts[1::2])
+    inside = np.zeros(PX.shape, dtype=bool)
+    n = len(xs)
+    for i in range(n):
+        j = (i - 1) % n
+        cond = ((ys[i] > PY) != (ys[j] > PY))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            xint = (xs[j] - xs[i]) * (PY - ys[i]) / (ys[j] - ys[i]) + xs[i]
+        inside ^= cond & (PX < xint)
+    return sl, inside
+
+
+def apply_shapes(grid, shapes, minx, miny, cell):
+    """편집 도형을 격자에 적용 — in-place.
+
+    op="open"  → 통행 가능(False)으로 뚫는다 (carve_free의 일반화).
+    op="block" → 통행 불가(True)로 막는다  (그 대칭 연산).
+
+    **open을 먼저, block을 나중에** 적용한다. 그래야 "문은 뚫려 있으나 지금은
+    잠김/적치물로 막힘" 같은 현장 상황을 표현할 수 있다. 순서를 바꾸면 뚫기가
+    항상 이겨 차단이 무의미해진다.
+
+    도면 원본(엔티티)은 건드리지 않는다 — 통행 판정 격자에만 반영되므로
+    map.png 그림과 CAD 파일은 그대로다.
+    """
+    if not shapes:
+        return grid
+    cols, rows = grid.shape
+    for op, value in (("open", False), ("block", True)):
+        for sh in shapes:
+            if sh.get("op", "open") != op:
+                continue
+            m = _shape_mask(sh, minx, miny, cell, cols, rows)
+            if m is None:
+                continue
+            sl, mask = m
+            if mask is True:                 # rect — 슬라이스 전체
+                grid[sl] = value
+            elif value:
+                grid[sl] |= mask
+            else:
+                grid[sl] &= ~mask
+    return grid
+
+
+def legacy_openings_to_shapes(openings, width=900.0):
+    """구 형식 openings([[x1,y1,x2,y2], ...]) → shapes 승격."""
+    return [{"op": "open", "kind": "line", "pts": list(map(float, o)), "w": width}
+            for o in (openings or [])]
+
+
 # ───────────────────────────────────────────── 멀티소스 다익스트라 (scipy)
 def run_dijkstra(grid, exit_cells, cell):
     """모든 exit_cells 를 dist=0 으로 동시 시드. 8방향(직교 cell, 대각 cell·√2).
@@ -213,7 +321,7 @@ class Analysis:
 def analyze(obstacles, exits, bounds, *, starts=None, mode="occupant",
             worst_n=5, cell=CELL_SIZE, clearance=CLEARANCE,
             threshold_mm=30000.0, max_cells=30_000_000,
-            openings=None, opening_width=900.0):
+            openings=None, opening_width=900.0, shapes=None):
     """
     피난경로 산출 (재사용 진입점).
 
@@ -236,6 +344,11 @@ def analyze(obstacles, exits, bounds, *, starts=None, mode="occupant",
                                clearance, exit_cells)
     if openings:
         carve_free(grid, openings, minx, miny, cell, width=opening_width)
+    if shapes:                       # 뚫기·막기 편집 도형 (open → block 순)
+        apply_shapes(grid, shapes, minx, miny, cell)
+        for (c, r) in exit_cells:    # Exit는 막히면 안 된다 — 항상 통행 가능
+            if 0 <= c < cols and 0 <= r < rows:
+                grid[c, r] = False
     dist, pred, inv_c, inv_r, idx = run_dijkstra(grid, exit_cells, cell)
 
     if mode == "occupant":
@@ -292,7 +405,7 @@ def _worst_seeds(dist, grid, bounds, cell, n):
 
 
 def connectivity(obstacles, bounds, cell=CELL_SIZE, clearance=CLEARANCE,
-                 openings=None, opening_width=900.0):
+                 openings=None, opening_width=900.0, shapes=None):
     """보행공간 연결성 진단(도면 품질 점검용). 반환 dict."""
     from scipy.ndimage import label
     minx, miny, maxx, maxy = bounds
@@ -300,6 +413,8 @@ def connectivity(obstacles, bounds, cell=CELL_SIZE, clearance=CLEARANCE,
     grid = build_obstacle_grid(obstacles, minx, miny, cols, rows, cell, clearance, ())
     if openings:
         carve_free(grid, openings, minx, miny, cell, width=opening_width)
+    if shapes:
+        apply_shapes(grid, shapes, minx, miny, cell)
     free = ~grid
     lab, n = label(free)
     sizes = np.bincount(lab.ravel()); sizes[0] = 0

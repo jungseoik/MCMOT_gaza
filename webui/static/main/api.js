@@ -9,8 +9,12 @@ const API = {
     if (!r.ok) {
       let d = "";
       try { d = (await r.json()).detail || ""; } catch (e) { /* ignore */ }
-      const err = new Error(d || `HTTP ${r.status}`);
+      // detail이 객체({missing_floors} 등)면 message는 상태코드로, 원본은 err.detail로.
+      const msg = (typeof d === "string" && d) ? d
+        : (d && typeof d === "object" && d.msg) ? d.msg : `HTTP ${r.status}`;
+      const err = new Error(msg);
       err.status = r.status;
+      err.detail = d;
       throw err;
     }
     return r.json();
@@ -74,6 +78,13 @@ const API = {
     return API._post("/api/session/start?" + API._fq(floor), body);
   },
   stopSession: (floor) => API._post("/api/session/stop?" + API._fq(floor)),
+
+  // ---- 건물 드릴 (전 층 세션, ADR 06) — 층별 아님(사이트 전역)
+  drillStart: (floorOrigins, t_alarm) => API._post("/api/drill/start",
+    { floor_origins: floorOrigins, ...(t_alarm != null ? { t_alarm } : {}) }),
+  drillStop: () => API._post("/api/drill/stop"),
+  drillResult: (id) => API._j(`/api/drill/${encodeURIComponent(id)}/result`),
+  getDrills: () => API._j("/api/drills"),
   getSession: (floor) => API._j("/api/session?" + API._fq(floor)),
   getSessionResult: (floor) => API._j("/api/session/result?" + API._fq(floor)),
   getSessionTimeline: (floor) => API._j("/api/session/timeline?" + API._fq(floor)),

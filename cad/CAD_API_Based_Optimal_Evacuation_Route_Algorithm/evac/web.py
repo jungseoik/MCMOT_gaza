@@ -50,7 +50,17 @@ S = {}                    # 세션(단일): entities, exits0, bounds, edits...
 def _edits():
     return {"deleted": S.get("deleted", []),
             "openings": S.get("openings", []),
+            "shapes": S.get("shapes", []),
             "exits": S.get("exits", [])}
+
+
+def _shapes():
+    """격자에 적용할 편집 도형 — 구형식 openings(선)를 승격해 합친다.
+
+    op=open(뚫기) / block(막기) × kind=line|rect|poly. 적용 순서(open→block)는
+    core.apply_shapes 가 보장한다. 편집기 내부 전용 — :8900 으로 넘기지 않는다."""
+    return (core.legacy_openings_to_shapes(S.get("openings"), OPENING_W)
+            + list(S.get("shapes") or []))
 
 
 def _obstacles():
@@ -65,6 +75,24 @@ def _exit_pts():
     """Exit 선 중점 리스트 (mm)."""
     return [((x1 + x2) / 2.0, (y1 + y2) / 2.0)
             for (x1, y1, x2, y2) in S.get("exits", [])]
+
+
+def _norm_shape(sh: dict) -> dict:
+    """편집 도형 검증·정규화. 잘못된 값은 422로 막는다."""
+    op = str(sh.get("op", "open"))
+    kind = str(sh.get("kind", "line"))
+    if op not in ("open", "block"):
+        raise HTTPException(422, f"op은 open|block — 받은 값: {op!r}")
+    if kind not in ("line", "rect", "poly"):
+        raise HTTPException(422, f"kind는 line|rect|poly — 받은 값: {kind!r}")
+    pts = [float(v) for v in sh.get("pts", [])]
+    need = 6 if kind == "poly" else 4
+    if len(pts) < need or len(pts) % 2:
+        raise HTTPException(422, f"{kind}는 좌표 {need}개 이상(짝수) 필요")
+    out = {"op": op, "kind": kind, "pts": pts}
+    if kind == "line":
+        out["w"] = max(1.0, float(sh.get("w", OPENING_W)))
+    return out
 
 
 def _require_session():
@@ -126,7 +154,7 @@ async def load(file: UploadFile = File(...)):
     with _lock:
         S.clear()
         S.update(entities=entities, bounds=list(bounds), src_name=name,
-                 dxf_path=dxf_path, deleted=[], openings=[],
+                 dxf_path=dxf_path, deleted=[], openings=[], shapes=[],
                  # 도면에 이미 Evac_Exit 가 있으면 그 중점을 초기 Exit(짧은 선)로
                  exits=[(x - 450, y, x + 450, y) for (x, y) in exits])
     n_seg = sum(len(e["segs"]) for e in entities)
@@ -134,6 +162,23 @@ async def load(file: UploadFile = File(...)):
             "segments": n_seg, "exits": S["exits"],
             "size_m": [round((bounds[2] - bounds[0]) / 1000, 1),
                        round((bounds[3] - bounds[1]) / 1000, 1)]}
+
+
+@app.get("/api/session")
+def session_state():
+    """세션 존재 여부·요약 — 페이지 새로고침 복원용(가벼운 조회).
+
+    편집기 세션은 서버 메모리에만 있어(S), 브라우저를 새로 열면 화면이 비어
+    보인다. 프론트가 이 응답으로 복원 여부를 판단한다."""
+    if "entities" not in S:
+        return {"loaded": False}
+    e = _edits()
+    return {"loaded": True,
+            "name": S.get("src_name", ""),
+            "entities": len(S.get("entities", [])),
+            "bounds": S.get("bounds"),
+            "deleted": len(e["deleted"]), "openings": len(e["openings"]),
+            "shapes": len(e["shapes"]), "exits": len(e["exits"])}
 
 
 @app.get("/api/geometry")
@@ -170,6 +215,7 @@ async def set_edits(payload: dict):
         S["deleted"] = [str(h) for h in payload.get("deleted", [])]
         S["openings"] = [list(map(float, o)) for o in payload.get("openings", [])]
         S["exits"] = [list(map(float, e)) for e in payload.get("exits", [])]
+        S["shapes"] = [_norm_shape(sh) for sh in payload.get("shapes", [])]
     return _edits()
 
 
@@ -181,8 +227,7 @@ def connectivity_png():
     obs = _obstacles()
     bounds = S["bounds"]
     conn = core.connectivity(obs, bounds, cell=PREVIEW_CELL,
-                             openings=S.get("openings") or None,
-                             opening_width=OPENING_W)
+                             shapes=_shapes() or None)
     lab, main = conn["labels"], conn["main"]
     img = np.zeros((*lab.shape, 4), np.uint8)          # (cols, rows, RGBA)
     img[lab > 0] = (255, 170, 60, 110)                 # 고립: 주황
@@ -212,8 +257,7 @@ def distfield_png():
     bounds = S["bounds"]
     try:
         an = core.analyze(obs, exits, bounds, mode="worstn", worst_n=1,
-                          cell=PREVIEW_CELL, openings=S.get("openings") or None,
-                          opening_width=OPENING_W)
+                          cell=PREVIEW_CELL, shapes=_shapes() or None)
     except ValueError as e:
         raise HTTPException(422, str(e))
     dist = an.dist
@@ -247,13 +291,12 @@ async def verify(payload: dict = None):
     if not exits:
         raise HTTPException(422, "Exit가 없습니다 — Exit 모드로 선을 그어주세요.")
     payload = payload or {}
-    n = int(payload.get("worst_n", 5))
-    thr = float(payload.get("threshold_m", 30.0)) * 1000.0
+    n = max(1, int(payload.get("worst_n") or 5))          # 0/빈값 → 경로 0개 방지
+    thr = float(payload.get("threshold_m") or 30.0) * 1000.0
     try:
         an = core.analyze(_obstacles(), exits, S["bounds"], mode="worstn",
                           worst_n=n, cell=FULL_CELL, threshold_mm=thr,
-                          openings=S.get("openings") or None,
-                          opening_width=OPENING_W)
+                          shapes=_shapes() or None)
     except ValueError as e:
         raise HTTPException(422, str(e))
     return {"paths": [{"pts": p["path_m"], "dist_m": round(p["dist_mm"] / 1000, 1),
@@ -320,8 +363,7 @@ async def apply(payload: dict = None):
     #    an.paths 만 EPFI 기준경로(routes) 반영에 재사용한다.
     route_n = int(payload.get("route_n", 5))
     an = core.analyze(obs, exits, bounds, mode="worstn", worst_n=route_n,
-                      cell=FULL_CELL, openings=S.get("openings") or None,
-                      opening_width=OPENING_W)
+                      cell=FULL_CELL, shapes=_shapes() or None)
     np.savez_compressed(os.path.join(site_dir, "evac_distfield.npz"),
                         dist=an.dist.astype(np.float32), grid=an.grid,
                         bounds=np.array(bounds), cell=FULL_CELL)
