@@ -30,6 +30,8 @@
   .mode .hint-r { margin-left:auto; color:var(--dim); font-size:11px; font-weight:400; }
   .sub-chk { margin:-2px 0 2px 18px; font-size:12px; }
   .note-warn { font-size:11px; color:var(--dim); line-height:1.45; margin-top:2px; }
+  .dim { color:var(--dim); }
+  .warn { color:var(--warn); }
   .fieldrow { display:flex; gap:6px; align-items:center; }
   .fieldrow > label { font-size:12px; color:var(--dim); white-space:nowrap; }
   .fieldrow > input, .fieldrow > select { min-width:0; }
@@ -154,9 +156,11 @@
     <div class="grp">
       <h2>적용</h2>
       <div class="fieldrow">
-        <label for="site">site</label>
-        <input type="text" id="site" value="default" style="flex:1">
+        <label for="site">대상 사이트</label>
+        <input type="text" id="site" value="default" style="flex:1" readonly
+               title="운영 서버(:8900)가 사용 중인 사이트 이름입니다. 시드(기본 세팅)와는 무관합니다.">
       </div>
+      <div class="note-warn" id="applyTarget">운영 중인 사이트의 현재 층에 반영됩니다.</div>
       <button class="primary" id="applyBtn" disabled>저장 &amp; 운영 반영</button>
       <div class="note-warn">운영 서버(:8900)의 해당 층 도면을 교체합니다.</div>
       <div id="applyMsg" class="statline"></div>
@@ -183,6 +187,9 @@ let deleted = new Set(), openings = [], exits = [];
 // 뚫기/막기 모두 여기에 쌓인다. 적용 순서(open→block)는 서버가 보장.
 let shapes = [];
 let starts = [];   // occupant 모드 출발점 [[x,y], ...] (도면단위)
+let units = null;  // 도면 단위 상태 — applyGeometry 에서 먼저 대입되므로
+                   // 선언이 아래에 있으면 TDZ 로 죽는다(선언 위치 주의)
+const MAP_PX = 2000;   // 저장 시 map.png 렌더 폭 (evac/web.py _render_map_png)
 let undoStack = [];         // {type, data}
 let verifyPaths = null;
 let connImg = null;         // 연결성 오버레이 Image
@@ -632,7 +639,9 @@ async function applyGeometry(meta) {
   }
   if (meta) {
     $("fileName").textContent =
-      `${meta.name} · ${meta.size_m[0]}×${meta.size_m[1]} m · 요소 ${meta.entities.toLocaleString()}`;
+      // size_m 은 단위 미확정 도면에서 null 이다 — 그대로 인덱싱하면 로드가 실패한다
+      `${meta.name} · ${meta.size_m ? `${meta.size_m[0]}×${meta.size_m[1]} m · ` : ""}`
+      + `요소 ${meta.entities.toLocaleString()}`;
   }
   $("dropzone").classList.add("hidden");
   stepDone(1);
@@ -675,20 +684,22 @@ for (const id of ["pan", "del", "open", "block", "exit", "measure", "start"]) {
   };
 }
 // ── 도면 단위
-let units = null;
 function renderUnits() {
   const el = $("unitState"), fix = $("unitFix");
   if (!units) { el.textContent = "도면 없음"; fix.classList.add("hidden"); return; }
   const src = { dxf: "도면 선언", user: "수동 선택", measure: "실측 2점" }[units.source] || "";
   if (units.resolved) {
-    el.innerHTML = `단위 <b>${units.unit_name}</b> <span style="color:var(--dim)">(${src})</span>`
-      + (units.size_m ? `<br>도면 크기 ${units.size_m[0]} × ${units.size_m[1]} m` : "")
-      + (units.warn ? `<br><span style="color:var(--warn)">⚠ ${units.warn}</span>` : "");
+    // 저장 시 :8900 에 넘어갈 축척을 미리 보여준다(적용 후에야 알 수 있으면 늦다)
+    const mpp = units.size_m && MAP_PX
+      ? ` · 축척 ${(units.size_m[0] / MAP_PX).toFixed(5)} m/px` : "";
+    el.innerHTML = `단위 <b>${units.unit_name}</b> <span class="dim">(${src})</span>`
+      + (units.size_m ? `<br>도면 크기 ${units.size_m[0]} × ${units.size_m[1]} m${mpp}` : "")
+      + (units.warn ? `<br><span class="warn">⚠ ${units.warn}</span>` : "");
     // 선언값이 있어도 바꿀 수 있게 열어둔다(잘못 선언된 도면 대응)
     fix.classList.remove("hidden");
   } else {
-    el.innerHTML = `<span style="color:var(--warn)">⚠ 도면에 단위 정보가 없습니다"</span>`
-      .replace('"', '') + `<br>단위를 지정해야 저장·적용할 수 있습니다.`;
+    el.innerHTML = '<span class="warn">⚠ 도면에 단위 정보가 없습니다</span>'
+      + '<br>단위를 지정해야 저장·적용할 수 있습니다.';
     fix.classList.remove("hidden");
   }
   $("applyBtn").disabled = !(exits.length && units.resolved);
