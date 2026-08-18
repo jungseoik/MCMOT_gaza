@@ -153,6 +153,13 @@ class Runtime:
             logger.exception("reset: ingest start 실패")
         return True
 
+    def participating_floors(self) -> list[str]:
+        """드릴 참여 층 = 매핑(호모그래피)된 카메라가 ≥1개 있는 층 (추적이 실제로
+        이뤄지는 층). 카메라 없는 층(예: 지상1층)은 제외. floors 순서 유지."""
+        site, cams = self.site(), self.cameras()
+        have = {site.floor_id_of_camera(c) for c in cams if c.mapping is not None}
+        return [fl.id for fl in site.floors if fl.id in have]
+
     # ------------------------------------------------------------ 수명주기
     def startup(self) -> None:
         self.reload_engine()          # 층별 엔진 생성 + cam→floor 캐시 구성
@@ -783,6 +790,134 @@ def session_stop(floor: str = DEFAULT_FLOOR_ID):
     _save_session(result, eng.session_timeline(),
                   eng.session_person_series(), floor_id=fid)
     return result
+
+
+# ================================================================ 건물 드릴 (전 층 세션 — ADR 06)
+def _floor_result(session_id: str, floor_id: str):
+    """그 층의 EvaluationResult(dict) — 진행중이면 live, 아니면 저장본."""
+    eng = rt.engine_for(floor_id)
+    res = eng.session_result() if eng else None
+    if res is not None and res.session_id == session_id:
+        return res.model_dump()
+    saved = _load_saved(session_id, floor_id)
+    return saved["result"] if saved else None
+
+
+def _drill_rollup(session_id: str) -> dict:
+    """전 층 결과를 session_id로 모아 건물 롤업 (ADR 06 §3): EPFI 전원평균·CBS 합·
+    SEI 통합분포·IDR 구역별 나열 + 추가 요약(총 통과·최대혼잡층·층별 개시시각)."""
+    floors = [(f, r) for f in rt.participating_floors()
+              if (r := _floor_result(session_id, f)) is not None]
+    epfis = [pm["epfi"] for _f, r in floors for pm in r.get("person_metrics", [])
+             if pm.get("epfi") is not None]
+    epfi_avg = sum(epfis) / len(epfis) if epfis else None
+    cbs_total = sum(r.get("cbs_total", 0.0) for _f, r in floors)
+    pairs = [(em.get("actual_count", 0), em["design_capacity"])
+             for _f, r in floors for em in r.get("exit_metrics", [])
+             if em.get("design_capacity")]
+    sum_e = sum(e for e, _c in pairs); sum_c = sum(c for _e, c in pairs)
+    sei = None
+    if pairs and sum_e > 0 and sum_c > 0:
+        sei = (1.0 - 0.5 * sum(abs(e / sum_e - c / sum_c) for e, c in pairs)) * 100.0
+    total_passed = sum(em.get("actual_count", 0)
+                       for _f, r in floors for em in r.get("exit_metrics", []))
+    max_cbs_floor = (max(floors, key=lambda fr: fr[1].get("cbs_total", 0.0))[0]
+                     if floors else None)
+    floor_start = {}
+    for f, r in floors:
+        starts = [z["evacuation_start_at"] for z in r.get("zone_metrics", [])
+                  if z.get("evacuation_start_at") is not None]
+        floor_start[f] = min(starts) if starts else None
+    return {
+        "session_id": session_id,
+        "floors": [f for f, _r in floors],
+        "building": {"epfi_avg": epfi_avg, "cbs_total": round(cbs_total, 4), "sei": sei,
+                     "idr_by_floor": {f: r.get("zone_metrics", []) for f, r in floors}},
+        "summary": {"total_passed": total_passed, "max_cbs_floor": max_cbs_floor,
+                    "floor_start_ts": floor_start},
+        "per_floor": [{"floor_id": f, "result": r} for f, r in floors],
+    }
+
+
+@app.post("/api/drill/start")
+async def drill_start(request: Request):
+    """건물 드릴 시작 — 참여(카메라 매핑) 전 층에 경보 원점이 지정돼야 시작.
+    body {floor_origins:{floor_id:[[x,y],…]}, t_alarm?}. 공유 t_alarm으로 전 층 동시 개시."""
+    import time as _t
+    body = await request.json()
+    floor_origins = body.get("floor_origins") or {}
+    part = rt.participating_floors()
+    if not part:
+        raise HTTPException(409, "카메라 매핑된 층이 없습니다 — 드릴 불가")
+    missing = [f for f in part if not floor_origins.get(f)]
+    if missing:
+        raise HTTPException(409, {"msg": "경보 발생원 미지정 층 — 각 층에 경보 위치를 지정하세요",
+                                  "missing_floors": missing})
+    busy = [f for f in part if (rt.engine_for(f) and rt.engine_for(f).session_live() is not None)]
+    if busy:
+        raise HTTPException(409, {"msg": "이미 세션 진행 중인 층 — 먼저 종료하세요", "busy_floors": busy})
+    t_alarm = float(body["t_alarm"]) if body.get("t_alarm") is not None else _t.time()
+    floors = []
+    for f in part:
+        eng = rt.engine_for(f)
+        live = eng.start_session(t_alarm=t_alarm,
+                                 alarm_origins=[tuple(o) for o in floor_origins[f]])
+        if SESSION_RECORD:
+            try:
+                _attach_recorder(eng, f, live)
+            except Exception:
+                logger.exception("드릴 녹화 부착 실패: %s", f)
+        floors.append({"floor_id": f, "session": live.model_dump()})
+    return {"session_id": floors[0]["session"]["session_id"], "alarm_ts": t_alarm,
+            "floors": floors}
+
+
+@app.post("/api/drill/stop")
+def drill_stop():
+    """건물 드릴 종료 — 참여 전 층 세션 일괄 finalize·저장 후 롤업 반환."""
+    sid = None
+    for f in rt.participating_floors():
+        eng = rt.engine_for(f)
+        if eng is None or eng.session_live() is None:
+            continue
+        result = eng.stop_session()
+        rec = eng.detach_recorder()
+        if rec is not None:
+            try:
+                rec.close()
+            except Exception:
+                logger.exception("드릴 녹화 종료 실패: %s", f)
+        _save_session(result, eng.session_timeline(), eng.session_person_series(), floor_id=f)
+        sid = result.session_id
+    if sid is None:
+        raise HTTPException(404, "진행 중인 드릴 없음")
+    return _drill_rollup(sid)
+
+
+@app.get("/api/drill/{session_id}/result")
+def drill_result(session_id: str):
+    roll = _drill_rollup(session_id)
+    if not roll["per_floor"]:
+        raise HTTPException(404, f"드릴 결과 없음: {session_id}")
+    return roll
+
+
+@app.get("/api/drills")
+def drills_list():
+    """드릴 이력 — 참여 층 전부에 공통 존재하는 session_id 기준(건물 롤업 요약)."""
+    part = rt.participating_floors()
+    ids = None
+    for f in part:
+        fids = {p.stem for p in _sessions_dir(f).glob("*.json")}
+        ids = fids if ids is None else (ids & fids)
+    out = []
+    for sid in sorted(ids or [], reverse=True):
+        roll = _drill_rollup(sid)
+        b = roll["building"]
+        out.append({"session_id": sid, "floors": roll["floors"], "epfi_avg": b["epfi_avg"],
+                    "cbs_total": b["cbs_total"], "sei": b["sei"],
+                    "total_passed": roll["summary"]["total_passed"]})
+    return out
 
 
 @app.get("/api/session")
