@@ -284,11 +284,17 @@ async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(N
     path.write_bytes(data)
 
     m_per_px = None
+    src_name = unit_name = None
     if meta:  # cad-convert 메타 JSON — m_per_px 자동 (계약 A-6)
         try:
-            m_per_px = float(json.loads(meta).get("m_per_px"))
+            mj = json.loads(meta)
+            m_per_px = float(mj.get("m_per_px"))
         except (ValueError, TypeError, json.JSONDecodeError):
             raise HTTPException(422, "meta JSON에서 m_per_px를 읽지 못함")
+        # 출처(표시 전용) — 없으면 None. 있으면 UI가 "무엇에서 나온 축척인지"
+        # 보여줘 불필요한 수동 2점 재측정을 막는다.
+        src_name = mj.get("source") or None
+        unit_name = mj.get("unit") or None
 
     cfg = rt.site()
     fl = cfg.get_floor(fid)
@@ -298,7 +304,8 @@ async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(N
     # 나중에 m_per_px가 지워질 때 조용히 틀린 축척으로 폴백한다.
     prev_scale = None if m_per_px is not None else (fl.map.scale if fl.map else None)
     spec = MapSpec(image=path.name, w=arr.shape[1], h=arr.shape[0],
-                   scale=prev_scale, m_per_px=m_per_px)
+                   scale=prev_scale, m_per_px=m_per_px,
+                   source=src_name, unit=unit_name)
     fl.map = spec
     if fid == DEFAULT_FLOOR_ID:
         cfg.map = spec                               # top-level 동기화(재승격 대비)

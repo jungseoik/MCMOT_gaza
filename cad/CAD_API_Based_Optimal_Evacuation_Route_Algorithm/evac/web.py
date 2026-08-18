@@ -553,7 +553,12 @@ async def apply(payload: dict = None):
         boundary = "evacfloor"
         with open(map_path, "rb") as f:
             img = f.read()
-        meta = json.dumps({"m_per_px": m_per_px})
+        # 출처도 함께 넘긴다 — :8900 이 "이 축척이 어느 도면·어느 단위에서
+        # 나왔는지" 표시할 수 있어야 수동 2점 재측정 충동을 줄인다.
+        ui = _units_info()
+        meta = json.dumps({"m_per_px": m_per_px,
+                           "source": S["src_name"],
+                           "unit": ui.get("unit_name")})
         body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"meta\"\r\n\r\n"
                 f"{meta}\r\n--{boundary}\r\nContent-Disposition: form-data; "
                 f"name=\"image\"; filename=\"map.png\"\r\nContent-Type: image/png\r\n\r\n"
