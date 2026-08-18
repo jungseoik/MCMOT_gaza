@@ -609,3 +609,44 @@ def get_floor(site: str):
     if not os.path.isfile(p):
         raise HTTPException(404, "floor.json 없음")
     return FileResponse(p, media_type="application/json")
+
+
+# ───────────────────────────────────────────── 층 목록 — 운영서버(:8900) 프록시
+# 편집기는 "어느 층을 교체할지"를 사용자가 고르게 한다. 층 구성의 원본은
+# :8900 이므로 여기서 만들지 않고 그대로 중계한다(편집기는 사본을 갖지 않음).
+def _system_json(path: str, *, data: bytes | None = None, method: str = "GET"):
+    import urllib.request
+    req = urllib.request.Request(
+        SYSTEM_API + path, data=data, method=method,
+        headers={"Content-Type": "application/json"} if data else {})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        return json.load(r)
+
+
+@app.get("/api/system/floors")
+def system_floors():
+    """운영서버의 층 목록. 서버가 꺼져 있으면 목록 대신 사유를 돌려준다
+    (편집기 자체는 오프라인에서도 도면 편집이 가능해야 하므로 500 금지)."""
+    try:
+        return {"ok": True, "floors": _system_json("/api/floors")}
+    except Exception as e:
+        return {"ok": False, "detail": f"{type(e).__name__}: {e}", "floors": []}
+
+
+@app.post("/api/system/floors")
+async def system_add_floor(payload: dict = None):
+    """층 추가 — body {id?, name?}. 실패 사유는 그대로 올려보낸다."""
+    body = payload or {}
+    try:
+        return {"ok": True,
+                "floor": _system_json("/api/floors",
+                                      data=json.dumps(body).encode(),
+                                      method="POST")}
+    except Exception as e:
+        detail = f"{type(e).__name__}: {e}"
+        if hasattr(e, "read"):          # HTTPError — :8900 의 사유를 그대로
+            try:
+                detail = json.loads(e.read()).get("detail", detail)
+            except Exception:
+                pass
+        raise HTTPException(502, detail)
