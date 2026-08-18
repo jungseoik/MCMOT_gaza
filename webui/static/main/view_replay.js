@@ -17,7 +17,8 @@ Views.replay = (() => {
   let site = null;          // 세션 당시 공간요소 (배경 렌더)
 
   // 건물 드릴 모드(Phase 2·3) — 전 층 공유 세션 이력·재계산
-  let mode = "sess";        // "sess"(층별 세션) | "drill"(건물 드릴)
+  let mode = "sess";        // "sess"(개별 층 세션) | "drill"(건물 훈련)
+  let modeAuto = false;     // 최초 진입 시 사이트에 맞는 기본 모드 1회 자동 설정
   let drills = [];          // 드릴 이력 [{session_id, alarm_ts, floors, epfi_avg, ..., has_record}]
   let drill = null;         // 선택 드릴의 재산출 DrillResult
   let drillFrames = {};     // {floor: frames[]} — 층별 2D 재생 프레임
@@ -46,6 +47,12 @@ Views.replay = (() => {
     }
     try {
       sessions = await API.getSessions();
+      // 훈련(건물)에 속한 층별 세션은 '개별 층' 목록에서 제외 — 같은 이벤트 중복 노출 방지.
+      // (진짜 단독 단일-층 세션만 남긴다.)
+      try {
+        const dids = new Set((await API.getDrills()).map((d) => d.session_id));
+        sessions = sessions.filter((s) => !dids.has(s.session_id));
+      } catch (e) { /* 훈련 조회 실패 시 원본 유지 */ }
     } catch (e) { sessions = []; }
     renderList();
     $("rpConn").textContent = `${sessions.length}건`;
@@ -485,6 +492,17 @@ Views.replay = (() => {
   function enter() {
     init();
     active = true;
+    // 다층 사이트는 '건물 훈련'이 기본(실사용 단위). 최초 1회만 자동 설정 —
+    // 이후 사용자가 '개별 층'을 고르면 그대로 존중.
+    if (!modeAuto) {
+      modeAuto = true;
+      const multi = App.site && (App.site.floors || []).length >= 2;
+      mode = multi ? "drill" : "sess";
+      $("rpModeDrill").classList.toggle("on", mode === "drill");
+      $("rpModeSess").classList.toggle("on", mode === "sess");
+      $("rpFloorWrap").classList.toggle("hidden", mode !== "drill");
+      $("rpReport").classList.toggle("hidden", mode !== "drill");
+    }
     setCanvasImage();
     loadList();
     if (selId && mode === "sess") {                // 재진입 시 선택 유지(세션 모드)
