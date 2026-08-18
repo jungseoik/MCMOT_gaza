@@ -20,6 +20,7 @@
 | 2026-07-19 | [DeepStream-전환-유사도-검증](DeepStream-전환-유사도-검증.md) | 기존 vs DS 경로 e2e 단계별 출력 유사도 실측 → **채택 가능** 판정 |
 | 2026-07-20 | [DeepStream-한계처리량-실측](DeepStream-한계처리량-실측.md) | 1GPU 스윕: **16ch@5fps 한계**·총 79fps 포화(ffmpeg 대비 4배)·1fps≈54ch. 워커 분할·b32 엔진 실험 결과 이득 없음(기각) → 최종 병목=워커 프로세스의 프레임당 직렬 단가(~12.6ms, 검출 커널+트래킹 CPU 혼합) |
 | 2026-07-20 | [DeepStream-webui-통합검증](DeepStream-webui-통합검증.md) | 운영 webui(:8900) DS 모드 E2E 7항목 **전부 통과** — 2D맵·지표·채널증설 fps 가시성·세션·재접속·롤백 |
+| 2026-08-18 | [RF-DETR-TRT-변환-사용법](RF-DETR-TRT-변환-사용법.md) | 현장 exit 화각(고소·어안·문앞) 검출 개선 실험 — **RF-DETR base를 파인튜닝 없이 TRT fp16 변환**해 YOLOX/YOLO26x와 비교. RF-DETR TRT: 32M·107MB·**197fps**·exit 3/3 정확(YOLOX보다 작고 빠르고 정확). 격리 venv·2단계(검출/추적) 재사용 절차 |
 
 ## 읽는 순서 (새로 합류 시)
 1. 무엇을 만들어야 하나 → [북극성 요구사항](../requirements/CCTV-영상분석-엔진-필수추출정보.md)
