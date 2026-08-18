@@ -74,7 +74,9 @@ def _transcode_h264(path):
         os.remove(tmp)
 
 
-def process(model, src_path, out_path, max_panel_w=MAX_PANEL_W, reference_vec=None):
+def process(model, src_path, out_path, max_panel_w=MAX_PANEL_W, reference_vec=None,
+            left_only=False):
+    """left_only=True 면 원본 해상도로 좌측 ID-추적 오버레이만 저장(2D맵·다운스케일 없음)."""
     est = writer = None
     pw = ph = 0
     fps = 25.0
@@ -82,25 +84,35 @@ def process(model, src_path, out_path, max_panel_w=MAX_PANEL_W, reference_vec=No
         if est is None:
             fps = item["fps"] or 25.0
             W, H = item["width"], item["height"]
-            scale = min(1.0, max_panel_w / W)
-            pw, ph = _even(W * scale), _even(H * scale)
             est = SpeedEstimator(fps, frame_size=(W, H), reference_vec=reference_vec)
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(str(out_path), fourcc, fps, (2 * pw, ph))
-            print(f"  {W}x{H}@{fps:.1f} -> panel {pw}x{ph}, total {item['total']} frames")
+            if left_only:
+                pw, ph = _even(W), _even(H)          # 원본 해상도 그대로
+                writer = cv2.VideoWriter(str(out_path), fourcc, fps, (pw, ph))
+                print(f"  {W}x{H}@{fps:.1f} -> overlay-only {pw}x{ph}, total {item['total']} frames")
+            else:
+                scale = min(1.0, max_panel_w / W)
+                pw, ph = _even(W * scale), _even(H * scale)
+                writer = cv2.VideoWriter(str(out_path), fourcc, fps, (2 * pw, ph))
+                print(f"  {W}x{H}@{fps:.1f} -> panel {pw}x{ph}, total {item['total']} frames")
 
         t = item["index"] / fps
         present = est.update(t, item["targets"])
-        m = est.metrics(present)
 
         left = annotate(item["frame"], item["targets"], present, est)
-        left = cv2.resize(left, (pw, ph), interpolation=cv2.INTER_AREA)
-        _label(left, "ID TRACKING")
-        right = render_map(m, pw, ph)
-
-        combo = np.hstack([left, right])
-        cv2.line(combo, (pw, 0), (pw, ph), (90, 90, 90), 2, cv2.LINE_AA)
-        writer.write(combo)
+        if left_only:
+            if (left.shape[1], left.shape[0]) != (pw, ph):
+                left = cv2.resize(left, (pw, ph), interpolation=cv2.INTER_AREA)
+            _label(left, "ID TRACKING")
+            writer.write(left)
+        else:
+            m = est.metrics(present)
+            left = cv2.resize(left, (pw, ph), interpolation=cv2.INTER_AREA)
+            _label(left, "ID TRACKING")
+            right = render_map(m, pw, ph)
+            combo = np.hstack([left, right])
+            cv2.line(combo, (pw, 0), (pw, ph), (90, 90, 90), 2, cv2.LINE_AA)
+            writer.write(combo)
 
         if item["index"] % 100 == 0:
             print(f"    frame {item['index']}/{item['total']}")
@@ -130,6 +142,8 @@ def main():
     ap.add_argument("--max-width", type=int, default=MAX_PANEL_W, help="per-panel max width px")
     ap.add_argument("--align", default=None,
                     help="alignment ref vector 'tx,ty,hx,hy' in ORIGINAL px (tail->head)")
+    ap.add_argument("--left-only", action="store_true",
+                    help="원본 해상도로 좌측 ID-추적 오버레이만 저장(2D맵 패널·다운스케일 없음)")
     args = ap.parse_args()
 
     ref_vec = None
@@ -147,10 +161,11 @@ def main():
     print("[concat_viz] loading TRT model ...")
     model = BoostTrackGPUInference()
     for src_path in inputs:
-        out_path = out_dir / f"{src_path.stem}_concat.mp4"
+        suffix = "_track" if args.left_only else "_concat"
+        out_path = out_dir / f"{src_path.stem}{suffix}.mp4"
         print(f"[concat_viz] {src_path.name}")
         process(model, src_path, out_path, max_panel_w=args.max_width,
-                reference_vec=ref_vec)
+                reference_vec=ref_vec, left_only=args.left_only)
     print(f"[concat_viz] done -> {out_dir}")
 
 
