@@ -51,6 +51,7 @@ def _edits():
     return {"deleted": S.get("deleted", []),
             "openings": S.get("openings", []),
             "shapes": S.get("shapes", []),
+            "starts": S.get("starts", []),
             "exits": S.get("exits", [])}
 
 
@@ -227,6 +228,8 @@ async def load(file: UploadFile = File(...)):
     dxf_path = _dwg_to_dxf(src, workdir) if ext == ".dwg" else src
 
     entities, exits, occupants, bounds, _doc = cad.load_dxf_entities(dxf_path)
+    # Evac_Occupant 레이어(폴리라인 꼭짓점 등) → occupant 모드 출발점 초기값.
+    # 원본 매크로의 occupant 명령과 같은 입력이다.
     # 도면 단위($INSUNITS) — 없으면 unit_mm=None 으로 두고 사용자에게 묻는다.
     # 임의로 mm 로 가정하면 m 단위 도면에서 축척이 1000배 틀어진 채 조용히 넘어간다.
     ins_code, unit_mm, unit_name = cad.read_units(_doc)
@@ -236,6 +239,7 @@ async def load(file: UploadFile = File(...)):
                  dxf_path=dxf_path, deleted=[], openings=[], shapes=[],
                  insunits=ins_code, unit_mm=unit_mm, unit_name=unit_name,
                  unit_source="dxf" if unit_mm else None,
+                 starts=[[float(x), float(y)] for (x, y) in occupants],
                  # 도면에 이미 Evac_Exit 가 있으면 그 중점을 초기 Exit(짧은 선)로
                  exits=[(x - 450, y, x + 450, y) for (x, y) in exits])
     n_seg = sum(len(e["segs"]) for e in entities)
@@ -259,7 +263,8 @@ def session_state():
             "entities": len(S.get("entities", [])),
             "bounds": S.get("bounds"),
             "deleted": len(e["deleted"]), "openings": len(e["openings"]),
-            "shapes": len(e["shapes"]), "exits": len(e["exits"])}
+            "shapes": len(e["shapes"]), "exits": len(e["exits"]),
+            "starts": len(e["starts"])}
 
 
 @app.get("/api/geometry")
@@ -297,6 +302,8 @@ async def set_edits(payload: dict):
         S["openings"] = [list(map(float, o)) for o in payload.get("openings", [])]
         S["exits"] = [list(map(float, e)) for e in payload.get("exits", [])]
         S["shapes"] = [_norm_shape(sh) for sh in payload.get("shapes", [])]
+        S["starts"] = [[float(p[0]), float(p[1])]
+                       for p in payload.get("starts", []) if len(p) >= 2]
     return _edits()
 
 
@@ -374,15 +381,28 @@ async def verify(payload: dict = None):
     payload = payload or {}
     n = max(1, int(payload.get("worst_n") or 5))          # 0/빈값 → 경로 0개 방지
     thr = _from_m(float(payload.get("threshold_m") or 30.0))
+    # 모드 — worstn(자동으로 가장 먼 N곳) | occupant(사용자가 찍은 출발점)
+    # 두 모드는 거리장을 공유하고 "어디서 역추적할지"만 다르다.
+    mode = str(payload.get("mode") or "worstn")
+    if mode not in ("worstn", "occupant"):
+        raise HTTPException(422, f"mode는 worstn|occupant — 받은 값: {mode!r}")
+    starts = S.get("starts") or []
+    if mode == "occupant" and not starts:
+        raise HTTPException(422, "출발점이 없습니다 — 🧍 출발점 모드로 찍거나 "
+                                 "DXF에 Evac_Occupant 레이어를 넣으세요.")
     try:
-        an = core.analyze(_obstacles(), exits, S["bounds"], mode="worstn",
+        an = core.analyze(_obstacles(), exits, S["bounds"], mode=mode,
+                          starts=[tuple(p) for p in starts] if mode == "occupant" else None,
                           worst_n=n, cell=FULL_CELL, threshold_mm=thr,
                           shapes=_shapes() or None)
     except ValueError as e:
         raise HTTPException(422, str(e))
     return {"paths": [{"pts": p["path_m"], "dist_m": round(_to_m(p["dist_mm"]), 1),
                        "pass": p["is_pass"]} for p in an.paths],
-            "skipped": an.skipped, "threshold_m": round(_to_m(thr), 1)}
+            "skipped": an.skipped, "threshold_m": round(_to_m(thr), 1),
+            "mode": mode, "starts": len(starts),
+            "dropped": [{"xy": list(d["start_m"]), "reason": d["reason"]}
+                        for d in getattr(an, "dropped", [])]}
 
 
 # ───────────────────────────────────────────── 저장 & 적용

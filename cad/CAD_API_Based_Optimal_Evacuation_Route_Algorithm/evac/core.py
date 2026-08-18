@@ -360,22 +360,29 @@ def analyze(obstacles, exits, bounds, *, starts=None, mode="occupant",
 
     paths = []
     skipped = 0
+    # 버려진 출발점의 이유 — occupant 모드에서 사용자가 아무 데나 찍을 수 있어
+    # "왜 경로가 안 나왔는지"를 돌려줘야 한다(조용히 사라지면 원인을 알 수 없다).
+    dropped = []
     for (wx, wy) in seeds:
         oc, or_ = world_to_grid(wx, wy, minx, miny, cell)
         best = nearest_reachable(grid, dist, oc, or_, clearance, cell)
         if best is None:
             skipped += 1
+            dropped.append({"start_m": (wx, wy), "reason": "unreachable"})
             continue
         bc, br = best
         d_mm = float(dist[bc, br])
         cells = trace_path(pred, inv_c, inv_r, grid, idx[bc, br])
         if len(cells) < 2:
+            # Exit 셀 위(또는 바로 옆)라 역추적 경로가 1칸 이하 — 이미 출구다
+            skipped += 1
+            dropped.append({"start_m": (wx, wy), "reason": "at_exit"})
             continue
         path_m = [grid_to_world(c, r, minx, miny, cell) for c, r in cells]
         paths.append({"path_m": path_m, "dist_mm": d_mm,
                       "is_pass": d_mm <= threshold_mm,
                       "start_m": (wx, wy)})
-    return Analysis(paths=paths, grid=grid, dist=dist, bounds=bounds,
+    return Analysis(paths=paths, dropped=dropped, grid=grid, dist=dist, bounds=bounds,
                     cols=cols, rows=rows, cell=cell, clearance=clearance,
                     n_free=int((~grid).sum()), n_wall=int(grid.sum()),
                     skipped=skipped)

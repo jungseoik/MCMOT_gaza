@@ -94,6 +94,7 @@
       <button class="mode" id="m-block">🚧 차단 (막기) <span style="float:right;color:var(--dim)" id="lbl-block">선</span></button>
       <label class="chk" style="margin:2px 0 4px 4px"><input type="checkbox" id="rectChk"> 사각형으로 그리기 (뚫기·차단)</label>
       <button class="mode" id="m-exit">🟦 Exit 지정 <span style="float:right;color:var(--dim)">선</span></button>
+      <button class="mode" id="m-start">🧍 출발점 지정 <span style="float:right;color:var(--dim)">클릭</span></button>
       <button id="undoBtn" class="small">↩ 실행취소 <kbd>Ctrl+Z</kbd></button>
     </div>
     <div class="grp">
@@ -125,7 +126,14 @@
         <span style="font-size:12px;color:var(--dim)">worst</span>
         <input type="number" id="wn" value="5" style="width:56px">
       </div>
-      <button id="verifyBtn">🔍 경로 검증 (worst-N)</button>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+        <span style="font-size:12px;color:var(--dim)">출발점</span>
+        <select id="modeSel" style="flex:1">
+          <option value="worstn">자동 (가장 먼 worst-N)</option>
+          <option value="occupant">내가 찍은 출발점</option>
+        </select>
+      </div>
+      <button id="verifyBtn">🔍 경로 검증</button>
       <label class="chk"><input type="checkbox" id="pathChk" checked> 경로 표시</label>
       <label class="chk"><input type="checkbox" id="heatChk"> 거리 열지도 (모든 지점→최근접 Exit)</label>
       <div id="heatStat" style="font-size:12px;color:var(--dim)"></div>
@@ -162,6 +170,7 @@ let deleted = new Set(), openings = [], exits = [];
 // 편집 도형 — {op:"open"|"block", kind:"line"|"rect", pts:[x1,y1,x2,y2], w}
 // 뚫기/막기 모두 여기에 쌓인다. 적용 순서(open→block)는 서버가 보장.
 let shapes = [];
+let starts = [];   // occupant 모드 출발점 [[x,y], ...] (도면단위)
 let undoStack = [];         // {type, data}
 let verifyPaths = null;
 let connImg = null;         // 연결성 오버레이 Image
@@ -282,6 +291,13 @@ function draw() {
       ctx.stroke(); ctx.setLineDash([]);
     }
   }
+  // 출발점 (occupant)
+  for (const [x, y] of starts) {
+    const sx = W2SX(x), sy = W2SY(y);
+    ctx.fillStyle = "#8b5cf6";
+    ctx.beginPath(); ctx.arc(sx, sy, 6, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+  }
   // Exit
   for (const [x1, y1, x2, y2] of exits) {
     ctx.strokeStyle = "#1d4ed8"; ctx.lineWidth = 5;
@@ -378,6 +394,12 @@ window.addEventListener("mouseup", e => {
     shapes.push(sh); undoStack.push({ t: "shape" }); afterEdit();
   }
   else if (mode === "exit") { exits.push([wx0, wy0, wx1, wy1]); undoStack.push({t:"exit"}); stepDone(3); afterEdit(); }
+  else if (mode === "start") {
+    // 클릭(짧은 드래그 포함) 지점을 출발점으로 — occupant 모드 입력
+    starts.push([wx1, wy1]);
+    undoStack.push({ t: "start" });
+    afterEdit();
+  }
   else if (mode === "measure") {
     // 도면단위로 잰 두 점 사이 거리 + 사용자가 아는 실제 거리 → 환산 계수
     const ref = Math.hypot(wx1 - wx0, wy1 - wy0);
@@ -423,6 +445,7 @@ function undo() {
     afterEdit(true);
   } else if (op.t === "open") { openings.pop(); afterEdit(); }
   else if (op.t === "shape") { shapes.pop(); afterEdit(); }
+  else if (op.t === "start") { starts.pop(); afterEdit(); }
   else if (op.t === "exit") { exits.pop(); afterEdit(); }
 }
 $("undoBtn").onclick = undo;
@@ -438,7 +461,7 @@ function afterEdit(geomChanged = false) {
   clearTimeout(editSyncTimer);
   editSyncTimer = setTimeout(() => fetch("/api/edits", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deleted: [...deleted], openings, shapes, exits })
+    body: JSON.stringify({ deleted: [...deleted], openings, shapes, starts, exits })
   }).then(() => {
     if ($("connChk").checked) refreshConn();
     if ($("heatChk").checked) refreshHeat(); else heatImg = null;
@@ -473,7 +496,7 @@ async function refreshHeat() {
   spin(true);
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted: [...deleted], openings, shapes, exits }) });
+      body: JSON.stringify({ deleted: [...deleted], openings, shapes, starts, exits }) });
     const r = await fetch("/api/distfield.png?t=" + Date.now());
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const dmax = r.headers.get("X-Max-Dist-M");
@@ -497,10 +520,11 @@ $("verifyBtn").onclick = async () => {
   spin(true); $("verifyBtn").disabled = true;
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted: [...deleted], openings, shapes, exits }) });
+      body: JSON.stringify({ deleted: [...deleted], openings, shapes, starts, exits }) });
     const r = await fetch("/api/verify", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ worst_n: wn, threshold_m: thr }) });
+      body: JSON.stringify({ worst_n: wn, threshold_m: thr,
+                             mode: $("modeSel").value }) });
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const j = await r.json();
     verifyPaths = j.paths;
@@ -518,9 +542,19 @@ $("verifyBtn").onclick = async () => {
       if (!$("pathChk").checked) { $("pathChk").checked = true; }
       const longest = Math.max(...j.paths.map(p => p.dist_m));
       const fail = j.paths.filter(p => !p.pass).length;
-      toast(`worst ${j.paths.length}개 · 최장 ${longest}m`
+      const head = j.mode === "occupant"
+        ? `지정 출발점 ${j.paths.length}개` : `worst ${j.paths.length}개`;
+      // 버려진 출발점은 사유까지 알려준다 — 조용히 사라지면 원인을 알 수 없다
+      let drop = "";
+      if (j.dropped && j.dropped.length) {
+        const un = j.dropped.filter(d => d.reason === "unreachable").length;
+        const at = j.dropped.filter(d => d.reason === "at_exit").length;
+        drop = " · 제외 " + [un ? `${un}개(벽 안·도달불가)` : "",
+                             at ? `${at}개(이미 출구)` : ""].filter(Boolean).join("·");
+      }
+      toast(`${head} · 최장 ${longest}m`
             + (fail ? ` · 기준(${j.threshold_m}m) 초과 ${fail}개` : " · 전부 기준 이내")
-            + (j.skipped ? ` · 건너뜀 ${j.skipped}개` : ""));
+            + drop);
     }
     draw();
   } catch (e) { toast("검증 실패: " + e); }
@@ -532,7 +566,7 @@ $("applyBtn").onclick = async () => {
   spin(true); $("applyBtn").disabled = true; $("applyMsg").textContent = "저장 중…(수십 초)";
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted: [...deleted], openings, shapes, exits }) });
+      body: JSON.stringify({ deleted: [...deleted], openings, shapes, starts, exits }) });
     const r = await fetch("/api/apply", { method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ site: $("site").value, floor: EDIT_FLOOR,
@@ -571,6 +605,7 @@ async function applyGeometry(meta) {
   bounds = head.bounds;
   deleted = new Set(head.deleted);
   shapes = head.shapes || [];
+  starts = head.starts || [];
   openings = head.openings; exits = head.exits;
   segAlive = new Uint8Array(segs.length / 4).fill(1);
   for (const h of deleted) {
@@ -613,7 +648,7 @@ $("fi").onchange = e => e.target.files[0] && upload(e.target.files[0]);
 document.addEventListener("drop", e => e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]));
 
 // ── 모드/유틸
-for (const id of ["pan", "del", "open", "block", "exit", "measure"]) {
+for (const id of ["pan", "del", "open", "block", "exit", "measure", "start"]) {
   $("m-" + id).onclick = () => {
     mode = id;
     document.querySelectorAll(".mode").forEach(b => b.classList.remove("on"));
@@ -658,6 +693,11 @@ $("unitSel").onchange = () => {
 
 // 경로 표시 토글 — 핸들러가 없어 체크해도 다시 안 그려지던 문제
 $("pathChk").onchange = () => draw();
+$("modeSel").onchange = () => {
+  const occ = $("modeSel").value === "occupant";
+  $("wn").disabled = occ;                    // worst 개수는 자동 모드에서만 쓴다
+  if (occ && !starts.length) toast("🧍 출발점 모드로 도면을 클릭해 출발점을 찍으세요");
+};
 $("rectChk").onchange = () => {
   const t = $("rectChk").checked ? "사각형" : "선";
   $("lbl-open").textContent = t; $("lbl-block").textContent = t;
@@ -667,7 +707,8 @@ function updateStats() {
   if (!bounds) return;
   $("stats").innerHTML =
     `삭제 <b>${deleted.size}</b>개 · 뚫기 <b>${openings.length + shapes.filter(s=>s.op==="open").length}</b>개`
-    + ` · 차단 <b>${shapes.filter(s=>s.op==="block").length}</b>개 · Exit <b>${exits.length}</b>개` +
+    + ` · 차단 <b>${shapes.filter(s=>s.op==="block").length}</b>개 · Exit <b>${exits.length}</b>개`
+    + ` · 출발점 <b>${starts.length}</b>개` +
     (verifyPaths ? `<br>검증 경로 <b>${verifyPaths.length}</b>개` : "");
 }
 function stepDone(n) {
