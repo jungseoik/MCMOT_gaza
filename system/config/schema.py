@@ -43,6 +43,10 @@ class MapSpec(BaseModel):
     h: int = Field(gt=0)
     scale: MapScale | None = None      # 수동 축척(2점)
     m_per_px: float | None = None      # cad-convert 메타 자동 시 직접 지정
+    # 출처(표시 전용) — 자동 축척을 어디서 얻었는지 사용자가 확인할 수 있게.
+    # 이게 없으면 "이 숫자를 믿어도 되나" 싶어 불필요한 2점 축척을 다시 긋게 된다.
+    source: str | None = None          # 원본 도면 파일명 (예: 17F_v2.dwg)
+    unit: str | None = None            # 도면 단위 ($INSUNITS, 예: "mm")
 
     def resolve_m_per_px(self) -> float | None:
         if self.m_per_px is not None:

@@ -139,10 +139,27 @@ Views.map = (() => {
   }
 
   function applyScale() {
+    const mm = App.site.map;
     const m = parseFloat($("scaleMeters").value);
     if (!(m > 0)) { hint("실거리(m)를 올바르게 입력하세요.", true); draft.pts = []; return; }
-    App.site.map.scale = { p1: draft.pts[0], p2: draft.pts[1], meters: m };
-    App.site.map.m_per_px = null;                    // 수동 축척이 placeholder를 대체
+    const d = Math.hypot(draft.pts[1][0] - draft.pts[0][0],
+                         draft.pts[1][1] - draft.pts[0][1]);
+    const manual = d > 0 ? m / d : null;
+    // CAD 실측값을 덮어쓰는 건 되돌리기 어렵다(다시 얻으려면 CAD 재적용).
+    // 두 값을 나란히 보여주고 확인받는다.
+    if (mm.m_per_px != null && manual) {
+      const diff = (manual / mm.m_per_px - 1) * 100;
+      const ok = confirm(
+        `이 층은 CAD 도면에서 축척이 자동으로 잡혀 있습니다.\n\n`
+        + `  CAD 자동   ${mm.m_per_px.toFixed(5)} m/px`
+        + `${mm.source ? `  (${mm.source}${mm.unit ? ` · ${mm.unit}` : ""})` : ""}\n`
+        + `  직접 지정  ${manual.toFixed(5)} m/px   (${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%)\n\n`
+        + `직접 지정한 값으로 바꾸면 CAD 자동값은 버려집니다.\n`
+        + `(되돌리려면 CAD 도면을 다시 적용해야 합니다)\n\n계속할까요?`);
+      if (!ok) { draft.pts = []; setTool("pan"); hint("축척을 그대로 두었습니다."); return; }
+    }
+    mm.scale = { p1: draft.pts[0], p2: draft.pts[1], meters: m };
+    mm.m_per_px = null;                              // 수동 축척이 자동값을 대체
     setTool("pan");
     hint(`축척 설정됨 — 저장하려면 [사이트 저장]. (${fmtScale()})`);
   }
@@ -306,6 +323,11 @@ Views.map = (() => {
                                      : "맵 없음 — 업로드하세요";
     $("scaleMeta").textContent = s.map && (s.map.scale || s.map.m_per_px != null)
       ? `축척: ${fmtScale()}` : "축척 미지정";
+    // 출처 — 자동 축척이 어디서 나온 값인지 (없으면 줄 자체를 숨긴다)
+    const prov = s.map && s.map.source
+      ? `${s.map.source}${s.map.unit ? ` · 도면 단위 ${s.map.unit}` : ""}` : "";
+    $("mapProv").textContent = prov;
+    $("mapProv").classList.toggle("hidden", !prov);
     // thresholds
     const t = s.thresholds || {};
     $("thV").value = t.v_th; $("thA").value = t.a_th; $("thR").value = t.r_th;
