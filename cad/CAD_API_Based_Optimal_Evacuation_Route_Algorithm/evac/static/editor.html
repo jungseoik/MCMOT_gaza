@@ -102,6 +102,22 @@
       <div id="connStat"></div>
     </div>
     <div class="grp">
+      <h2>도면 단위</h2>
+      <div id="unitState" style="font-size:12px;color:var(--dim)">도면 없음</div>
+      <div id="unitFix" class="hidden">
+        <select id="unitSel" style="width:100%;margin-bottom:4px">
+          <option value="">— 단위 선택 —</option>
+          <option value="mm">밀리미터 (mm)</option>
+          <option value="cm">센티미터 (cm)</option>
+          <option value="m">미터 (m)</option>
+          <option value="inch">인치 (inch)</option>
+          <option value="ft">피트 (ft)</option>
+        </select>
+        <button class="mode" id="m-measure" style="width:100%">📏 실측 2점으로 지정 <span style="float:right;color:var(--dim)">선</span></button>
+        <div id="measureHint" style="font-size:11px;color:var(--dim);margin-top:3px"></div>
+      </div>
+    </div>
+    <div class="grp">
       <h2>검증</h2>
       <div style="display:flex;gap:6px;align-items:center">
         <span style="font-size:12px;color:var(--dim)">기준거리(m)</span>
@@ -301,6 +317,13 @@ function draw() {
       const x = Math.min(drag.sx0, drag.sx1), y = Math.min(drag.sy0, drag.sy1);
       const w = Math.abs(drag.sx1 - drag.sx0), h = Math.abs(drag.sy1 - drag.sy0);
       ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+    } else if (mode === "measure") {
+      ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(drag.sx0, drag.sy0); ctx.lineTo(drag.sx1, drag.sy1);
+      ctx.stroke(); ctx.setLineDash([]);
+      const d = Math.hypot(S2WX(drag.sx1) - S2WX(drag.sx0), S2WY(drag.sy1) - S2WY(drag.sy0));
+      ctx.fillStyle = "#f59e0b"; ctx.font = "bold 12px sans-serif";
+      ctx.fillText(`${d.toFixed(0)} 도면단위`, drag.sx1 + 8, drag.sy1 - 6);
     } else {
       ctx.strokeStyle = mode === "open" ? "rgba(6,182,212,.9)"
                       : mode === "block" ? "rgba(220,38,38,.9)" : "#1d4ed8";
@@ -355,6 +378,17 @@ window.addEventListener("mouseup", e => {
     shapes.push(sh); undoStack.push({ t: "shape" }); afterEdit();
   }
   else if (mode === "exit") { exits.push([wx0, wy0, wx1, wy1]); undoStack.push({t:"exit"}); stepDone(3); afterEdit(); }
+  else if (mode === "measure") {
+    // 도면단위로 잰 두 점 사이 거리 + 사용자가 아는 실제 거리 → 환산 계수
+    const ref = Math.hypot(wx1 - wx0, wy1 - wy0);
+    if (ref <= 0) { toast("두 점이 같습니다 — 다시 그으세요"); return; }
+    $("measureHint").textContent = `측정 길이 ${ref.toFixed(0)} 도면단위`;
+    const ans = prompt(`이 구간의 실제 거리를 미터로 입력하세요.\n(도면단위 ${ref.toFixed(0)})`, "10");
+    if (ans === null) return;
+    const real = parseFloat(ans);
+    if (!(real > 0)) { toast("0보다 큰 값을 입력하세요"); return; }
+    setUnits({ ref_mm: ref, real_m: real });
+  }
 });
 
 function doDelete(x1, y1, x2, y2) {
@@ -471,7 +505,7 @@ $("verifyBtn").onclick = async () => {
     const j = await r.json();
     verifyPaths = j.paths;
     stepDone(4);
-    updateStats();
+    updateStats(); renderUnits();
 
     if (!j.paths.length) {
       // 조용히 비는 것을 막는다 — 원인을 짚어준다
@@ -551,7 +585,10 @@ async function applyGeometry(meta) {
   stepDone(1);
   if (exits.length) stepDone(3);
   fitView(); renderBase(); updateStats(); draw();
-  $("applyBtn").disabled = exits.length === 0;
+  try {
+    units = await (await fetch("/api/units")).json();
+  } catch (e) { units = null; }
+  renderUnits();          // applyBtn 활성 여부도 여기서 정한다(단위 미확정이면 잠금)
 }
 
 async function upload(file) {
@@ -576,7 +613,7 @@ $("fi").onchange = e => e.target.files[0] && upload(e.target.files[0]);
 document.addEventListener("drop", e => e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]));
 
 // ── 모드/유틸
-for (const id of ["pan", "del", "open", "block", "exit"]) {
+for (const id of ["pan", "del", "open", "block", "exit", "measure"]) {
   $("m-" + id).onclick = () => {
     mode = id;
     document.querySelectorAll(".mode").forEach(b => b.classList.remove("on"));
@@ -584,6 +621,41 @@ for (const id of ["pan", "del", "open", "block", "exit"]) {
     cv.style.cursor = id === "pan" ? "grab" : "crosshair";
   };
 }
+// ── 도면 단위
+let units = null;
+function renderUnits() {
+  const el = $("unitState"), fix = $("unitFix");
+  if (!units) { el.textContent = "도면 없음"; fix.classList.add("hidden"); return; }
+  const src = { dxf: "도면 선언", user: "수동 선택", measure: "실측 2점" }[units.source] || "";
+  if (units.resolved) {
+    el.innerHTML = `단위 <b>${units.unit_name}</b> <span style="color:var(--dim)">(${src})</span>`
+      + (units.size_m ? `<br>도면 크기 ${units.size_m[0]} × ${units.size_m[1]} m` : "")
+      + (units.warn ? `<br><span style="color:var(--warn)">⚠ ${units.warn}</span>` : "");
+    // 선언값이 있어도 바꿀 수 있게 열어둔다(잘못 선언된 도면 대응)
+    fix.classList.remove("hidden");
+  } else {
+    el.innerHTML = `<span style="color:var(--warn)">⚠ 도면에 단위 정보가 없습니다"</span>`
+      .replace('"', '') + `<br>단위를 지정해야 저장·적용할 수 있습니다.`;
+    fix.classList.remove("hidden");
+  }
+  $("applyBtn").disabled = !(exits.length && units.resolved);
+}
+
+async function setUnits(body) {
+  try {
+    const r = await fetch("/api/units", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    units = await r.json();
+    renderUnits(); updateStats();
+    toast(`단위 적용 — ${units.unit_name} (도면 ${units.size_m ? units.size_m.join(" × ") + " m" : "?"})`);
+  } catch (e) { toast("단위 지정 실패: " + e); }
+}
+
+$("unitSel").onchange = () => {
+  if ($("unitSel").value) setUnits({ unit: $("unitSel").value });
+};
+
 // 경로 표시 토글 — 핸들러가 없어 체크해도 다시 안 그려지던 문제
 $("pathChk").onchange = () => draw();
 $("rectChk").onchange = () => {

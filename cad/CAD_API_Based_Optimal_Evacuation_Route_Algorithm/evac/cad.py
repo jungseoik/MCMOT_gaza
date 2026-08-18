@@ -113,6 +113,36 @@ def _bounds(doc, obstacles, exits, occupants):
     return (xs.min(), ys.min(), xs.max(), ys.max())
 
 
+# ── 도면 단위 ($INSUNITS) ────────────────────────────────────────────────
+# 이 모듈의 좌표는 전부 **mm** 로 통일한다(코어·web·프론트 전체 전제).
+# 도면이 다른 단위면 로드 시점에 mm 로 환산해 흡수하므로, 하위 코드는
+# 단위를 몰라도 된다.
+INSUNITS_MM = {          # $INSUNITS 코드 → mm 환산 계수
+    1: 25.4,             # 인치
+    2: 304.8,            # 피트
+    4: 1.0,              # mm
+    5: 10.0,             # cm
+    6: 1000.0,           # m
+    7: 1_000_000.0,      # km
+}
+INSUNITS_NAME = {0: "미지정", 1: "인치", 2: "피트", 4: "mm", 5: "cm",
+                 6: "m", 7: "km"}
+
+
+def read_units(doc):
+    """도면 단위 판독 → (insunits 코드, mm환산계수 or None, 표시명).
+
+    계수가 None 이면 도면이 단위를 선언하지 않은 것($INSUNITS=0/없음)이라
+    사용자에게 물어야 한다. 임의로 mm 로 가정하면 m 단위 도면에서 축척이
+    1000배 어긋난 채 조용히 넘어간다.
+    """
+    try:
+        code = int(doc.header.get("$INSUNITS", 0) or 0)
+    except (TypeError, ValueError):
+        code = 0
+    return code, INSUNITS_MM.get(code), INSUNITS_NAME.get(code, f"코드{code}")
+
+
 def load_dxf_entities(path):
     """DXF → 엔티티 단위 지오메트리(웹 편집기용 — 엔티티별 삭제 지원).
 

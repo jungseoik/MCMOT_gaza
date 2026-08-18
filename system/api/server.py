@@ -292,7 +292,11 @@ async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(N
 
     cfg = rt.site()
     fl = cfg.get_floor(fid)
-    prev_scale = fl.map.scale if fl.map else None    # 재업로드 시 기존 축척 유지
+    # 재업로드 시 기존 2점 축척 유지 — 단, **CAD 실측 축척(m_per_px)이 함께 오면
+    # 버린다**. 옛 2점은 이전 맵의 px 좌표에서 찍은 값이라 새 맵과 무관하고
+    # (구역·병목을 비우는 것과 같은 이유), 남겨두면 UI에 엉뚱한 위치로 표시되며
+    # 나중에 m_per_px가 지워질 때 조용히 틀린 축척으로 폴백한다.
+    prev_scale = None if m_per_px is not None else (fl.map.scale if fl.map else None)
     spec = MapSpec(image=path.name, w=arr.shape[1], h=arr.shape[0],
                    scale=prev_scale, m_per_px=m_per_px)
     fl.map = spec
