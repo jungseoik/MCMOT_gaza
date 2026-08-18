@@ -454,6 +454,23 @@ Views.map = (() => {
     $("floorRenameBtn").onclick = renameFloor;
     $("floorNameInp").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); renameFloor(); } };
     $("siteSave").onclick = save;
+    $("siteReset").onclick = async () => {
+      if (!confirm("현재 사이트 설정을 커밋된 디폴트(seed)로 되돌립니다.\n\n"
+        + "· 지금까지 바꾼 카메라·경로·구역·병목·매핑이 전부 사라지고\n"
+        + "  기본값(3개 층 · cam01~03)으로 복원됩니다.\n"
+        + "· 세션 녹화본은 보존됩니다.\n\n정말 초기화할까요?")) return;
+      $("mapSaveMsg").textContent = "디폴트로 초기화 중… (인제스트 재기동)";
+      try {
+        await API.resetSeed();
+        await App.reloadCameras();
+        await App.reloadSite();
+        refresh();
+        $("mapSaveMsg").textContent = `디폴트로 초기화됨 · v${App.site.version}`;
+        setTimeout(() => { $("mapSaveMsg").textContent = ""; }, 5000);
+      } catch (e) {
+        $("mapSaveMsg").textContent = "초기화 실패: " + e.message;
+      }
+    };
     $("mapUpload").onchange = (e) => { if (e.target.files.length) upload(e.target.files); };
     // CAD 도면 편집기(:8910, 별도 서비스) — 새 창에서 터치업·Exit 지정 후 [저장 & 적용]하면
     // postMessage('evac-floor-applied')로 돌아와 아래 리스너가 맵을 자동 갱신한다.

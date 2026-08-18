@@ -65,6 +65,33 @@ class SiteStore:
         shutil.copytree(seed, self.site_dir(site_id), dirs_exist_ok=True)
         return True
 
+    def reset_from_seed(self, site_id: str,
+                        seed_root: str | Path = "data/seed") -> bool:
+        """현재 사이트를 seed(커밋된 디폴트)로 **강제 복원**한다 — 실험 후 원복용.
+
+        bootstrap과 달리 이미 site.json이 있어도 덮어쓴다. 설정(site.json·맵·카메라·
+        floor.json·distfield)만 seed 기준으로 교체하고, **세션 녹화본(sessions/)은 보존**한다.
+        seed에 없는 추가 카메라·맵(층)은 제거된다(정확히 seed 상태로 수렴)."""
+        seed = Path(seed_root) / site_id
+        if not (seed / "site.json").is_file():
+            return False
+        site = self.site_dir(site_id)
+        site.mkdir(parents=True, exist_ok=True)
+        cam_dir = site / "cameras"          # 카메라 전면 교체(추가분 제거)
+        if cam_dir.exists():
+            shutil.rmtree(cam_dir)
+        for p in site.glob("map*.png"):     # 기존 맵 png 제거(추가 층 맵 정리)
+            p.unlink()
+        for item in seed.iterdir():          # seed 복사 — sessions는 건드리지 않음
+            if item.name == "sessions":
+                continue
+            dst = site / item.name
+            if item.is_dir():
+                shutil.copytree(item, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dst)
+        return True
+
     # ------------------------------------------------------------ 사이트
     def list_sites(self) -> list[str]:
         if not self.root.is_dir():

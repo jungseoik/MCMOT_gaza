@@ -137,6 +137,22 @@ class Runtime:
                 else:
                     eng.reload(view, floor_cams)
 
+    def reset_to_seed(self) -> bool:
+        """사이트를 커밋된 디폴트(seed)로 복원 + 인제스트/엔진 재적용.
+        카메라가 seed 기준으로 바뀌므로 ingest를 재기동한다(세션 녹화본은 보존)."""
+        if not self.store.reset_from_seed(SITE_ID):
+            return False
+        try:
+            self.ingest.stop()
+        except Exception:
+            logger.exception("reset: ingest stop 실패(무시하고 진행)")
+        self.reload_engine()
+        try:
+            self.ingest.start(self.cameras())
+        except Exception:
+            logger.exception("reset: ingest start 실패")
+        return True
+
     # ------------------------------------------------------------ 수명주기
     def startup(self) -> None:
         self.reload_engine()          # 층별 엔진 생성 + cam→floor 캐시 구성
@@ -219,6 +235,15 @@ def get_site():
     if cfg is None:
         raise HTTPException(404, "사이트 미설정")
     return cfg
+
+
+@app.post("/api/site/reset-seed")
+def site_reset_seed():
+    """현재 사이트를 커밋된 디폴트(seed)로 초기화 — 실험 설정 원복.
+    설정(층·맵·카메라·매핑·공간요소·임계값)만 복원, 세션 녹화본은 보존."""
+    if not rt.reset_to_seed():
+        raise HTTPException(404, "seed 없음 — 복원 불가")
+    return rt.site()
 
 
 @app.put("/api/site")

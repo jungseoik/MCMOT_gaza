@@ -32,6 +32,7 @@ const API = {
   // ---- site
   getSite: () => API._j("/api/site"),
   putSite: (cfg) => API._put("/api/site", cfg),
+  resetSeed: () => API._post("/api/site/reset-seed"),
   uploadMap(file, meta, floor) {
     const fd = new FormData();
     fd.append("image", file);
