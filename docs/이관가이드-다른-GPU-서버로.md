@@ -88,6 +88,10 @@ CUDA_VISIBLE_DEVICES=<빈GPU> conda run -n boosttrack python docs/reports/bench/
 # (a) 호스트 conda용 엔진 → external/weights/trt/   (단일영상/webui 경로)
 CUDA_VISIBLE_DEVICES=<빈GPU> conda run -n boosttrack python -m src.build_trt --fp16
 
+# (a-2) RF-DETR 검출기(투트랙, 선택) → external/weights/trt/rfdetr_base_fp16.engine
+#   ONNX(HF)만 있으면 rfdetr 라이브러리 없이 엔진만 재빌드된다.
+CUDA_VISIBLE_DEVICES=<빈GPU> bash tools/setup_rfdetr.sh
+
 # (b) DeepStream 컨테이너용 엔진 → external/weights/trt_ds/  (멀티카메라 경로)
 docker build -t macs-deepstream:9.0 system/ingest_ds/docker    # 이미지 먼저
 docker run --rm --gpus device=<빈GPU> -v "$PWD:/workspace" -w /workspace macs-deepstream:9.0 bash -c '

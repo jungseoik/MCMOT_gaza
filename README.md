@@ -63,14 +63,28 @@ $ python -m src.build_trt --fp16
 $ python -m src.inference_gpu -i video.mp4 -o output.mp4
 ```
 
+### 검출기 투트랙 (YOLOX ↔ RF-DETR)
+검출기만 갈아끼울 수 있다(트래커 BoostTrack++·ReID 백엔드는 동일). RF-DETR은
+파인튜닝 없이 상용 사전학습(COCO)을 TRT fp16으로 쓰며, 고소·어안 등 어려운 화각에서
+YOLOX보다 잘 잡는다. 자세한 근거·설계는 [docs/reports/RF-DETR-TRT-변환-사용법](docs/reports/RF-DETR-TRT-변환-사용법.md).
+```bash
+# RF-DETR 엔진 준비(모델 다운로드→ONNX→TRT fp16, 1회). HF ONNX가 있으면 fetch만으로도 됨:
+$ bash tools/fetch_assets.sh --onnx   # (선택) HF에서 rfdetr-base.onnx 받기
+$ bash tools/setup_rfdetr.sh          # 엔진 빌드 → external/weights/trt/rfdetr_base_fp16.engine
+
+# 검출기 선택 실행
+$ python -m src.inference_gpu -i video.mp4 -o out.mp4 --detector rfdetr --det_thresh 0.15 --no_ecc
+```
+
 ### 공통 옵션
 | 인자 | 기본값 | 설명 |
 |------|--------|------|
 | `--input`, `-i` | (필수) | 입력 비디오 경로 |
 | `--output`, `-o` | (필수) | 출력 비디오 경로 |
-| `--det_thresh` | 0.4 | 탐지 신뢰도 임계값 |
+| `--detector` | yolox | 검출기 선택: `yolox` \| `rfdetr` (투트랙) |
+| `--det_thresh` | 0.4 | 탐지 신뢰도 임계값 (RF-DETR 권장 0.15) |
 | `--no_reid` | false | ReID 외형 특징 비활성화 |
-| `--no_ecc` | false | 카메라 모션 보정 비활성화 |
+| `--no_ecc` | false | 카메라 모션 보정 비활성화 (고정 CCTV·RF-DETR 권장) |
 
 ### Python API
 ```python
@@ -79,9 +93,9 @@ from src.inference import BoostTrackInference
 tracker = BoostTrackInference(det_thresh=0.4)
 result = tracker.run("input.mp4", "output.mp4")
 
-# 고속
+# 고속 (검출기 투트랙 — "yolox"(기본) | "rfdetr")
 from src.inference_gpu import BoostTrackGPUInference
-tracker = BoostTrackGPUInference()
+tracker = BoostTrackGPUInference(detector="yolox")            # 또는 detector="rfdetr"
 result = tracker.run("input.mp4", "output.mp4")
 ```
 

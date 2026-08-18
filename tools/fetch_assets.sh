@@ -87,6 +87,8 @@ if [ "$DO_ONNX" -eq 1 ]; then
   echo "== ONNX (TRT 엔진 재빌드 원천 — backseollgi/MCMOT) =="
   fetch "backseollgi/MCMOT" model "onnx/yolox_mot20_dynamic.onnx" "external/weights/trt/yolox_mot20_dynamic.onnx" || RC=1
   fetch "backseollgi/MCMOT" model "onnx/fastreid_sbs_s50.onnx"    "external/weights/trt/fastreid_sbs_s50.onnx"    || RC=1
+  # RF-DETR(투트랙 검출기) — 이 ONNX가 있으면 tools/setup_rfdetr.sh가 rfdetr venv 없이 엔진만 빌드.
+  fetch "backseollgi/MCMOT" model "onnx/rfdetr-base.onnx"         "external/weights/onnx/rfdetr-base.onnx"        || RC=1
 fi
 
 if [ "$DO_CAD" -eq 1 ]; then

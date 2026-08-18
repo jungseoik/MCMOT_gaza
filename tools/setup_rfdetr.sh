@@ -19,8 +19,14 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
 mkdir -p third_party external/weights/onnx external/weights/trt
 
-# 1) 격리 venv + rfdetr(엔진 빌드용, 1회) --------------------------------------
-if [ ! -x "$VENV/bin/python" ]; then
+# ONNX가 이미 있으면(예: bash tools/fetch_assets.sh --onnx 로 HF에서 받은 경우)
+# rfdetr venv/export를 통째로 건너뛰고 3)엔진 빌드로 직행한다.
+if [ -f "$ONNX" ]; then
+  echo "[setup_rfdetr] ONNX 존재 → venv/export 생략 ($ONNX)"
+fi
+
+# 1) 격리 venv + rfdetr(엔진 빌드용, ONNX 없을 때만) ---------------------------
+if [ ! -f "$ONNX" ] && [ ! -x "$VENV/bin/python" ]; then
   echo "[setup_rfdetr] 격리 venv 생성 + rfdetr 설치…"
   python3 -m venv "$VENV"
   "$VENV/bin/pip" install -U pip -q
