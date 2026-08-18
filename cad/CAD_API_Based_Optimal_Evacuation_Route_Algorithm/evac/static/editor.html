@@ -586,8 +586,10 @@ $("applyBtn").onclick = async () => {
   // A안 — 저장은 곧 운영 반영. 되돌리기 어려우므로 여기서 한 번 확인한다.
   const fl = EDIT_FLOOR === "default" ? "기본 층" : `${EDIT_FLOOR} 층`;
   if (!confirm(`${$("site").value} 사이트 ${fl}의 도면을 교체합니다.\n\n`
-             + `· 기존 구역·병목은 새 도면 기준으로 초기화됩니다\n`
-             + `· 피난경로·출입구는 CAD 산출값으로 대체됩니다\n\n계속할까요?`)) return;
+             + `· 피난경로·출입구는 CAD 산출값으로 전부 교체됩니다\n`
+             + `  (직접 그린 경로도 함께 지워집니다 — 옛 도면 좌표라 새 도면과 맞지 않음)\n`
+             + `· 구역·병목은 초기화되므로 새 도면 위에 다시 지정해야 합니다\n\n`
+             + `계속할까요?`)) return;
   spin(true); $("applyBtn").disabled = true; $("applyMsg").textContent = "저장 중…(수십 초)";
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
