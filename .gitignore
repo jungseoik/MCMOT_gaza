@@ -217,3 +217,9 @@ data/backups/
 # 실제 현장 CCTV 원본 (개인정보·대용량) — HF backseollgi/MCMOT/field/ 에 보관, git 제외
 field/
 제일제당센터 영상/
+
+# 사용 가이드 산출물 — HF backseollgi/MCMOT/manual/ 에 보관, git 제외
+# (원고.md·README.md 는 git 소관 — 편집 원본이므로 변경 추적이 필요)
+docs/manual/**/*.docx
+docs/manual/**/*.pdf
+docs/manual/**/img/

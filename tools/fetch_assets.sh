@@ -22,6 +22,7 @@
 #   bash tools/fetch_assets.sh --onnx         # ONNX만
 #   bash tools/fetch_assets.sh --cad          # CAD 원본만
 #   bash tools/fetch_assets.sh --field        # 현장 화재대피훈련 영상만(1F·16F, 450MB·비공개)
+#   bash tools/fetch_assets.sh --manual       # 사용 가이드 docx·pdf·스크린샷(버전별, ~45MB)
 #   bash tools/fetch_assets.sh --force        # 이미 있어도 다시 받기
 #   HF_TOKEN=hf_xxx bash tools/fetch_assets.sh   # MCMOT(비공개) 접근용
 set -euo pipefail
@@ -29,14 +30,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; FORCE=0; ANY=0
+DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; DO_MANUAL=0; FORCE=0; ANY=0
 for a in "$@"; do
   case "$a" in
     --weights) DO_WEIGHTS=1; ANY=1 ;;
     --onnx)    DO_ONNX=1;    ANY=1 ;;
     --cad)     DO_CAD=1;     ANY=1 ;;
     --field)   DO_FIELD=1;   ANY=1 ;;
-    --all)     DO_WEIGHTS=1; DO_ONNX=1; DO_CAD=1; ANY=1 ;;   # field는 무거워서 --all 제외(명시 --field)
+    --manual)  DO_MANUAL=1;  ANY=1 ;;
+    --all)     DO_WEIGHTS=1; DO_ONNX=1; DO_CAD=1; ANY=1 ;;   # field·manual은 무거워서 --all 제외
     --force)   FORCE=1 ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "알 수 없는 인자: $a" >&2; exit 2 ;;
@@ -102,6 +104,22 @@ if [ "$DO_FIELD" -eq 1 ]; then
     echo "  ↓ field/** → ./field/  ($(du -sh field 2>/dev/null | cut -f1))"
   else
     echo "  [실패] field — 비공개 MCMOT 접근 토큰(HF_TOKEN) 필요" >&2; RC=1
+  fi
+fi
+
+if [ "$DO_MANUAL" -eq 1 ]; then
+  echo "== 사용 가이드 (backseollgi/MCMOT/manual — docx·pdf·스크린샷) =="
+  # 버전 폴더째 다운로드 → docs/manual/<버전>/ (git 무시). 원고.md·README.md는 git 소관.
+  TMPD="$(mktemp -d)"
+  trap 'rm -rf "$TMPD"' EXIT
+  if "$HF_BIN" download backseollgi/MCMOT --repo-type model \
+       --include "manual/**" --local-dir "$TMPD" >/dev/null 2>&1 \
+     && [ -d "$TMPD/manual" ]; then
+    mkdir -p docs/manual
+    cp -r "$TMPD/manual/." docs/manual/
+    echo "  ↓ manual/** → docs/manual/  ($(du -sh docs/manual 2>/dev/null | cut -f1))"
+  else
+    echo "  [실패] manual — 비공개 MCMOT 접근 토큰(HF_TOKEN) 필요" >&2; RC=1
   fi
 fi
 
