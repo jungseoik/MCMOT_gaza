@@ -11,6 +11,7 @@ Views.map = (() => {
   let draft = null;              // {pts:[[x,y],...], inside:[x,y]|null}
   let inited = false;
   let scaleSnapOn = false;       // 축척 2점 수평·수직 스냅 토글
+  let gridOn = false;            // 미터 격자·스케일바 표시 (표시 전용, 저장 안 됨)
 
   // ------------------------------------------------------------ 도구
   function setTool(t) {
@@ -177,8 +178,15 @@ Views.map = (() => {
 
   // ------------------------------------------------------------ 렌더
   function overlay(g) {
+    const mpp = gridOn ? mPerPx() : null;
+    if (mpp) drawScaleGrid(g, mpp);               // 요소보다 아래(배경 쪽)
     drawSiteElements(g, App.site, { showScale: true });
     drawGraph(g, App.site.graph, { sel: tool === "graph" ? graphSel : null });
+    drawDraft(g);
+    if (mpp) drawScaleBar(g, mpp);                // 스케일바는 항상 맨 위
+  }
+
+  function drawDraft(g) {
     if (!draft || !draft.pts.length) return;
     const { ctx } = g;
     const col = MC_COLORS[tool] || "#fff";
@@ -518,6 +526,12 @@ Views.map = (() => {
       if (App.site.map && App.site.map.scale && m > 0) {
         App.site.map.scale.meters = m; refresh();
       }
+    };
+    $("gridToggle").onclick = () => {
+      gridOn = !gridOn;
+      $("gridToggle").classList.toggle("on", gridOn);
+      if (!mPerPx()) hint("축척이 없어 격자를 그릴 수 없습니다 — CAD 적용 또는 [축척 2점].", true);
+      if (mc) mc.render();
     };
     $("scaleSnap").onclick = () => {
       scaleSnapOn = !scaleSnapOn;

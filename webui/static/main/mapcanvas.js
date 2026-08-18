@@ -155,6 +155,134 @@ class MapCanvas {
   destroy() { this._ro.disconnect(); }
 }
 
+/* ================================ 미터 격자 · 스케일바 (축척 오버레이)
+ *
+ * 도면 위에 실거리 감각을 주는 오버레이. 이미지에 굽지 않고 매번 그린다 —
+ * 지금 실제로 쓰는 m_per_px 에서 직접 산출하므로 축척이 바뀌면 같이 바뀌고,
+ * 체크박스로 끌 수 있으며, CAD를 거치지 않은 맵(2점 축척)에서도 동작한다.
+ * (예전 *_scale.png 는 격자·축을 이미지에 구워 넣어 가장자리 10%가 여백이
+ *  됐고, 그 탓에 이미지 폭 기준 자동축척이 11% 틀려 2점 보정이 필요했다.)
+ */
+
+const MC_GRID_STEPS_M = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
+
+/** 화면에서 최소 minPx 이상 벌어지는 가장 촘촘한 격자 간격(m). */
+function mcGridStepM(mPerPx, s, minPx = 64) {
+  for (const st of MC_GRID_STEPS_M) if (st / mPerPx * s >= minPx) return st;
+  return MC_GRID_STEPS_M[MC_GRID_STEPS_M.length - 1];
+}
+
+function mcFmtM(v) {
+  // 격자 좌표는 px 누산으로 얻으므로 50.000000001 같은 값이 섞인다.
+  // 반올림 없이 v % 1 로 판정하면 "60" 옆에 "50.0"이 찍힌다.
+  const r = Math.round(v * 100) / 100;
+  return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1);
+}
+
+/**
+ * g      : opts.draw 가 받는 {ctx, TX, TY, s, mc}
+ * mPerPx : 맵 px → m. null 이면 아무것도 안 그린다.
+ * 눈금 원점은 좌하단(남서코너) — CAD 도면 관례이자 예전 *_scale.png 와 동일.
+ */
+function drawScaleGrid(g, mPerPx, opts = {}) {
+  if (!mPerPx || !(mPerPx > 0)) return;
+  const { ctx, TX, TY, s, mc } = g;
+  const W = mc.w, H = mc.h;                     // 맵 원본 px
+  const step = mcGridStepM(mPerPx, s);
+  const stepPx = step / mPerPx;                 // 맵 px 단위 간격
+  const x0 = TX(0), y0 = TY(0), x1 = TX(W), y1 = TY(H);
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
+
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = opts.color || "rgba(90,160,255,.30)";
+  ctx.beginPath();
+  for (let px = 0; px <= W + 0.5; px += stepPx) {
+    const X = Math.round(TX(px)) + 0.5;
+    ctx.moveTo(X, y0); ctx.lineTo(X, y1);
+  }
+  for (let py = H; py >= -0.5; py -= stepPx) {   // 아래(남)에서 위로
+    const Y = Math.round(TY(py)) + 0.5;
+    ctx.moveTo(x0, Y); ctx.lineTo(x1, Y);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // 라벨은 격자선보다 살짝 넓은 영역에 그린다 — 도면 경계에 딱 맞춰 자르면
+  // 0m 같은 첫 눈금 글자가 반쯤 잘린다.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0 - 16, y0 - 16, (x1 - x0) + 32, (y1 - y0) + 32);
+  ctx.clip();
+
+  // 눈금 숫자 — 도면이 흰 평면도일 수도, 어두운 이미지일 수도 있으므로
+  // 흰 테두리(halo) + 진한 파랑으로 양쪽 다 읽히게 한다.
+  ctx.font = "600 11px ui-monospace,SFMono-Regular,Menlo,monospace";
+  ctx.textBaseline = "bottom";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(255,255,255,.85)";
+  ctx.fillStyle = opts.textColor || "#1f6feb";
+  const label = (t, X, Y) => { ctx.strokeText(t, X, Y); ctx.fillText(t, X, Y); };
+  const everyN = (step / mPerPx * s) < 96 ? 2 : 1;
+  // 눈금은 화면 가장자리에 붙인다 — 도면 끝에 고정하면 줌인했을 때 화면 밖으로
+  // 나가 좌표를 못 읽는다. X는 위쪽 · Y는 왼쪽에 두어 좌하단 스케일바와 겹치지
+  // 않게 한다.
+  const labY = Math.max(y0 + 13, 13);
+  const labX = Math.max(x0 + 3, 4);
+  let i = 0;
+  ctx.textAlign = "center";
+  for (let px = 0; px <= W + 0.5; px += stepPx, i++) {
+    if (i % everyN) continue;
+    label(mcFmtM(px * mPerPx), TX(px), labY);
+  }
+  i = 0;
+  ctx.textAlign = "left";
+  const barBand = mc.ch - 34;          // 좌하단 스케일바 자리는 비워둔다
+  for (let py = H; py >= -0.5; py -= stepPx, i++) {
+    if (i % everyN) continue;
+    const Y = TY(py) - 2;
+    if (Y > barBand && labX < 340) continue;
+    label(mcFmtM((H - py) * mPerPx), labX, Y);
+  }
+  ctx.restore();
+}
+
+/** 좌하단 스케일바 — 화면 고정(줌과 무관하게 항상 읽히는 크기). */
+function drawScaleBar(g, mPerPx) {
+  if (!mPerPx || !(mPerPx > 0)) return;
+  const { ctx, mc } = g;
+  const target = 160;                                    // 목표 길이(화면 px)
+  let len = MC_GRID_STEPS_M[0];
+  for (const st of MC_GRID_STEPS_M) {                    // 목표에 가장 가까운 값
+    if (st / mPerPx * mc.s <= target) len = st; else break;
+  }
+  const barPx = len / mPerPx * mc.s;
+  const x = 14, y = mc.ch - 18;
+
+  ctx.save();
+  ctx.font = "12px ui-monospace,SFMono-Regular,Menlo,monospace";
+  const label = `${mcFmtM(len)} m`;
+  const wBox = barPx + 20 + ctx.measureText(label).width;
+  ctx.fillStyle = "rgba(13,13,13,.72)";
+  ctx.fillRect(x - 8, y - 20, wBox, 30);
+
+  ctx.strokeStyle = "#e6e6e6"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + barPx, y); ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let k = 0; k <= 4; k++) {                         // 4등분 눈금
+    const tx = Math.round(x + barPx * k / 4) + 0.5;
+    ctx.moveTo(tx, y - 5); ctx.lineTo(tx, y + 1);
+  }
+  ctx.stroke();
+  ctx.fillStyle = "#e6e6e6"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.fillText(label, x + barPx + 8, y + 4);
+  ctx.restore();
+}
+
+
 /* ================================ 공용 드로잉 헬퍼 (인자는 맵 원본 px) */
 
 const MC_COLORS = {
