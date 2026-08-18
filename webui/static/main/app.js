@@ -153,6 +153,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   }, 1000);
   document.querySelectorAll(".vbtn").forEach((b) =>
     b.onclick = () => App.switchView(b.dataset.view));
+  // 결과/드릴 롤업 모달 닫기 — 전역 바인딩(④ 리플레이에서 ③ 운영뷰를 안 거쳐도 닫히게).
+  // (Session.init에도 있지만 그 init은 운영뷰 진입 시에만 실행되므로 여기서 보장.)
+  const resModal = document.getElementById("resultModal");
+  const resClose = document.getElementById("resClose");
+  if (resClose) resClose.onclick = () => resModal.classList.add("hidden");
+  if (resModal) resModal.onclick = (e) => {
+    if (e.target === resModal) resModal.classList.add("hidden");
+  };
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && resModal && !resModal.classList.contains("hidden"))
+      resModal.classList.add("hidden");
+  });
   const sel = document.getElementById("floorSel");
   if (sel) sel.onchange = () => App.setFloor(sel.value);
   await Promise.all([App.reloadCameras()]);
