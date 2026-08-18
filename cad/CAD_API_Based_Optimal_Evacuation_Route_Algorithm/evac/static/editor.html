@@ -23,6 +23,19 @@
   aside { width:280px; background:var(--panel); border-left:1px solid var(--line);
           padding:14px; display:flex; flex-direction:column; gap:12px; overflow-y:auto; }
   .grp { display:flex; flex-direction:column; gap:6px; }
+  /* 모드 버튼 — 이모지 대신 색 점으로 구분(폰트에 없는 이모지가 □로 깨짐) */
+  .mode { display:flex; align-items:center; gap:7px; }
+  .mode .dot { width:9px; height:9px; border-radius:2px; flex:0 0 auto; }
+  .mode .sub { color:var(--dim); font-size:11px; font-weight:400; }
+  .mode .hint-r { margin-left:auto; color:var(--dim); font-size:11px; font-weight:400; }
+  .sub-chk { margin:-2px 0 2px 18px; font-size:12px; }
+  .note-warn { font-size:11px; color:var(--dim); line-height:1.45; margin-top:2px; }
+  .fieldrow { display:flex; gap:6px; align-items:center; }
+  .fieldrow > label { font-size:12px; color:var(--dim); white-space:nowrap; }
+  .fieldrow > input, .fieldrow > select { min-width:0; }
+  .fieldrow .unit { font-size:11px; color:var(--dim); margin-left:-2px; }
+  .statline { font-size:12px; color:var(--dim); line-height:1.5; word-break:keep-all; }
+  #stats { font-size:12px; color:var(--dim); line-height:1.6; }
   .grp h2 { font-size:12px; color:var(--dim); margin:0 0 2px; font-weight:600;
             text-transform:uppercase; letter-spacing:.04em; }
   button { background:#262c36; color:var(--fg); border:1px solid var(--line);
@@ -88,14 +101,14 @@
   <aside>
     <div class="grp">
       <h2>모드</h2>
-      <button class="mode on" id="m-pan">✋ 이동/줌 <span style="float:right;color:var(--dim)">휠·드래그</span></button>
-      <button class="mode" id="m-del">🧹 삭제 (치수선 등) <span style="float:right;color:var(--dim)">박스</span></button>
-      <button class="mode" id="m-open">🚪 개구부 (뚫기) <span style="float:right;color:var(--dim)" id="lbl-open">선</span></button>
-      <button class="mode" id="m-block">🚧 차단 (막기) <span style="float:right;color:var(--dim)" id="lbl-block">선</span></button>
-      <label class="chk" style="margin:2px 0 4px 4px"><input type="checkbox" id="rectChk"> 사각형으로 그리기 (뚫기·차단)</label>
-      <button class="mode" id="m-exit">🟦 Exit 지정 <span style="float:right;color:var(--dim)">선</span></button>
-      <button class="mode" id="m-start">🧍 출발점 지정 <span style="float:right;color:var(--dim)">클릭</span></button>
-      <button id="undoBtn" class="small">↩ 실행취소 <kbd>Ctrl+Z</kbd></button>
+      <button class="mode on" id="m-pan">이동 / 줌 <span class="hint-r">휠 · 드래그</span></button>
+      <button class="mode" id="m-del">삭제 <span class="sub">치수선 등</span><span class="hint-r">박스</span></button>
+      <button class="mode" id="m-open"><i class="dot" style="background:#06b6d4"></i>개구부 뚫기 <span class="hint-r" id="lbl-open">선</span></button>
+      <button class="mode" id="m-block"><i class="dot" style="background:#dc2626"></i>공간 차단 <span class="hint-r" id="lbl-block">선</span></button>
+      <label class="chk sub-chk"><input type="checkbox" id="rectChk"> 사각형으로 그리기</label>
+      <button class="mode" id="m-exit"><i class="dot" style="background:#1d4ed8"></i>Exit 지정 <span class="hint-r">선</span></button>
+      <button class="mode" id="m-start"><i class="dot" style="background:#8b5cf6"></i>출발점 지정 <span class="hint-r">클릭</span></button>
+      <button id="undoBtn" class="small">실행취소 <kbd>Ctrl+Z</kbd></button>
     </div>
     <div class="grp">
       <h2>보기</h2>
@@ -104,9 +117,9 @@
     </div>
     <div class="grp">
       <h2>도면 단위</h2>
-      <div id="unitState" style="font-size:12px;color:var(--dim)">도면 없음</div>
+      <div id="unitState" class="statline">도면 없음</div>
       <div id="unitFix" class="hidden">
-        <select id="unitSel" style="width:100%;margin-bottom:4px">
+        <select id="unitSel" style="width:100%;margin-bottom:5px">
           <option value="">— 단위 선택 —</option>
           <option value="mm">밀리미터 (mm)</option>
           <option value="cm">센티미터 (cm)</option>
@@ -114,40 +127,39 @@
           <option value="inch">인치 (inch)</option>
           <option value="ft">피트 (ft)</option>
         </select>
-        <button class="mode" id="m-measure" style="width:100%">📏 실측 2점으로 지정 <span style="float:right;color:var(--dim)">선</span></button>
-        <div id="measureHint" style="font-size:11px;color:var(--dim);margin-top:3px"></div>
+        <button class="mode" id="m-measure">실측 2점으로 지정 <span class="hint-r">선</span></button>
+        <div id="measureHint" class="note-warn"></div>
       </div>
     </div>
     <div class="grp">
       <h2>검증</h2>
-      <div style="display:flex;gap:6px;align-items:center">
-        <span style="font-size:12px;color:var(--dim)">기준거리(m)</span>
-        <input type="number" id="thr" value="30" style="width:70px">
-        <span style="font-size:12px;color:var(--dim)">worst</span>
-        <input type="number" id="wn" value="5" style="width:56px">
+      <div class="fieldrow">
+        <label for="thr">기준거리</label>
+        <input type="number" id="thr" value="30" style="width:58px"><span class="unit">m</span>
+        <label for="wn" style="margin-left:auto">worst</label>
+        <input type="number" id="wn" value="5" style="width:48px">
       </div>
-      <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
-        <span style="font-size:12px;color:var(--dim)">출발점</span>
+      <div class="fieldrow">
+        <label for="modeSel">출발점</label>
         <select id="modeSel" style="flex:1">
-          <option value="worstn">자동 (가장 먼 worst-N)</option>
-          <option value="occupant">내가 찍은 출발점</option>
+          <option value="worstn">자동 (가장 먼 곳)</option>
+          <option value="occupant">내가 찍은 점</option>
         </select>
       </div>
-      <button id="verifyBtn">🔍 경로 검증</button>
+      <button id="verifyBtn">경로 검증</button>
       <label class="chk"><input type="checkbox" id="pathChk" checked> 경로 표시</label>
       <label class="chk"><input type="checkbox" id="heatChk"> 거리 열지도 (모든 지점→최근접 Exit)</label>
-      <div id="heatStat" style="font-size:12px;color:var(--dim)"></div>
+      <div id="heatStat" class="statline"></div>
     </div>
     <div class="grp">
       <h2>적용</h2>
-      <div style="display:flex;gap:6px;align-items:center">
-        <span style="font-size:12px;color:var(--dim)">site</span>
-        <input type="text" id="site" value="default">
+      <div class="fieldrow">
+        <label for="site">site</label>
+        <input type="text" id="site" value="default" style="flex:1">
       </div>
-      <label class="chk"><input type="checkbox" id="liveChk">
-        운영 서버(:8900) 맵 즉시 교체 <span style="color:var(--warn)">⚠ 운영 맵 덮어씀</span></label>
-      <button class="primary" id="applyBtn" disabled>💾 저장 &amp; 적용</button>
-      <div id="applyMsg" style="font-size:12px;color:var(--dim)"></div>
+      <button class="primary" id="applyBtn" disabled>저장 &amp; 운영 반영</button>
+      <div class="note-warn">운영 서버(:8900)의 해당 층 도면을 교체합니다.</div>
+      <div id="applyMsg" class="statline"></div>
     </div>
     <div class="grp">
       <h2>상태</h2>
@@ -493,7 +505,7 @@ $("connChk").onchange = () => { if ($("connChk").checked) refreshConn(); else dr
 
 // ── 거리 열지도 (전체 거리장: 모든 지점의 최근접 Exit 피난거리)
 async function refreshHeat() {
-  if (!exits.length) { toast("먼저 Exit를 지정하세요 (🟦 모드)"); $("heatChk").checked = false; return; }
+  if (!exits.length) { toast("먼저 Exit를 지정하세요 (Exit 지정 모드)"); $("heatChk").checked = false; return; }
   spin(true);
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -512,7 +524,7 @@ $("heatChk").onchange = () => { if ($("heatChk").checked) refreshHeat(); else { 
 
 // ── 검증
 $("verifyBtn").onclick = async () => {
-  if (!exits.length) { toast("먼저 Exit를 지정하세요 (🟦 모드)"); return; }
+  if (!exits.length) { toast("먼저 Exit를 지정하세요 (Exit 지정 모드)"); return; }
   // 입력칸을 비우면 +"" === 0 이 되어 경로가 0개 나온다 — 보정하고 칸에 되돌려 쓴다
   let wn = Math.max(1, Math.round(+$("wn").value || 5));
   let thr = +$("thr").value > 0 ? +$("thr").value : 30;
@@ -564,6 +576,11 @@ $("verifyBtn").onclick = async () => {
 
 // ── 적용
 $("applyBtn").onclick = async () => {
+  // A안 — 저장은 곧 운영 반영. 되돌리기 어려우므로 여기서 한 번 확인한다.
+  const fl = EDIT_FLOOR === "default" ? "기본 층" : `${EDIT_FLOOR} 층`;
+  if (!confirm(`${$("site").value} 사이트 ${fl}의 도면을 교체합니다.\n\n`
+             + `· 기존 구역·병목은 새 도면 기준으로 초기화됩니다\n`
+             + `· 피난경로·출입구는 CAD 산출값으로 대체됩니다\n\n계속할까요?`)) return;
   spin(true); $("applyBtn").disabled = true; $("applyMsg").textContent = "저장 중…(수십 초)";
   try {
     await fetch("/api/edits", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -571,21 +588,21 @@ $("applyBtn").onclick = async () => {
     const r = await fetch("/api/apply", { method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ site: $("site").value, floor: EDIT_FLOOR,
-                             apply_live: $("liveChk").checked }) });
+                             apply_live: true }) });
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const j = await r.json();
     stepDone(5);
     const floorTxt = j.floor && j.floor !== "default" ? ` · 층 <b>${j.floor}</b>` : "";
     const routeTxt = j.applied_to_system
       ? (j.elements_applied
-          ? `<br>🧭 피난경로 ${j.routes}개 + 출입구 ${j.exits}개 맵설정 반영 완료`
-            + `<br>🧹 구역·병목은 초기화됨 — 새 맵에 다시 지정하세요`
-          : `<br>⚠️ 맵은 반영됐으나 공간요소(경로·출입구) 반영 실패`)
-      : (j.routes ? `<br>🧭 피난경로 ${j.routes}개 + 출입구 ${j.exits}개 산출 (운영 반영은 체크박스 선택 시)` : "");
+          ? `<br> 피난경로 ${j.routes}개 + 출입구 ${j.exits}개 맵설정 반영 완료`
+            + `<br> 구역·병목은 초기화됨 — 새 맵에 다시 지정하세요`
+          : `<br>⚠ 맵은 반영됐으나 공간요소(경로·출입구) 반영 실패`)
+      : (j.routes ? `<br> 피난경로 ${j.routes}개 + 출입구 ${j.exits}개 산출 (운영 반영은 체크박스 선택 시)` : "");
     $("applyMsg").innerHTML =
-      `✅ 저장됨 → <b>${j.saved[0]}</b>${floorTxt}<br>축척 ${j.m_per_px} m/px 자동 · worst ${j.worst_dist_m}m` +
-      (j.applied_to_system ? "<br>✅ 운영서버(:8900) 반영 완료"
-                           : "<br>💾 파일만 저장됨 (운영 반영은 체크박스 선택 시)") +
+      `✔ 저장됨 → <b>${j.saved[0]}</b>${floorTxt}<br>축척 ${j.m_per_px} m/px 자동 · worst ${j.worst_dist_m}m` +
+      (j.applied_to_system ? "<br>✔ 운영서버(:8900) 반영 완료"
+                           : "<br> 파일만 저장됨 (운영 반영은 체크박스 선택 시)") +
       routeTxt;
     if (window.opener) window.opener.postMessage(
         { type: "evac-floor-applied", site: j.site, floor: j.floor }, "*");
@@ -636,7 +653,7 @@ async function upload(file) {
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     const meta = await r.json();
     await applyGeometry(meta);
-    toast("도면 로드 완료 — 연결성 오버레이를 켜고 고립된 방(주황)의 문을 🚪로 여세요");
+    toast("도면 로드 완료 — 연결성 오버레이를 켜고 고립된 방(주황)의 문을 개구부 뚫기로 여세요");
   } catch (e) {
     $("dropzone").querySelector(".box").innerHTML =
       `<b style="color:#ef4444">로드 실패</b><br>${e.message || e}<br><br>
@@ -697,7 +714,7 @@ $("pathChk").onchange = () => draw();
 $("modeSel").onchange = () => {
   const occ = $("modeSel").value === "occupant";
   $("wn").disabled = occ;                    // worst 개수는 자동 모드에서만 쓴다
-  if (occ && !starts.length) toast("🧍 출발점 모드로 도면을 클릭해 출발점을 찍으세요");
+  if (occ && !starts.length) toast("출발점 모드로 도면을 클릭해 출발점을 찍으세요");
 };
 $("rectChk").onchange = () => {
   const t = $("rectChk").checked ? "사각형" : "선";
@@ -720,9 +737,8 @@ function toast(msg) {
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 3200);
 }
 function spin(on) { $("spin").style.display = on ? "block" : "none"; }
-// 운영 웹(:8900) 맵설정 버튼 경유(?live=1)면 "운영 반영" 기본 ON — 사용자가 끌 수 있음
 const _qs = new URLSearchParams(location.search);
-if (_qs.get("live") === "1") $("liveChk").checked = true;
+// (?live=1 은 더 이상 쓰지 않는다 — 저장은 항상 운영 반영)
 // ?floor=<층id> — 이 층 맵으로 저장·반영(다중 도면, :8900 v1.7). 없으면 default.
 const EDIT_FLOOR = _qs.get("floor") || "default";
 resize();
