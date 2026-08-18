@@ -30,6 +30,18 @@
   .mode .hint-r { margin-left:auto; color:var(--dim); font-size:11px; font-weight:400; }
   .sub-chk { margin:-2px 0 2px 18px; font-size:12px; }
   .note-warn { font-size:11px; color:var(--dim); line-height:1.45; margin-top:2px; }
+  .itemlist { max-height:230px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
+  .itemrow { display:flex; align-items:center; gap:6px; font-size:12px;
+             padding:3px 4px; border-radius:4px; cursor:default; }
+  .itemrow:hover { background:rgba(255,255,255,.07); }
+  .itemrow .sw { width:9px; height:9px; border-radius:2px; flex:none; }
+  .itemrow .nm { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .itemrow .mt { color:var(--dim); font-size:11px; }
+  .itemrow .rm { background:none; border:0; color:var(--dim); cursor:pointer;
+                 font-size:13px; line-height:1; padding:2px 4px; border-radius:4px; }
+  .itemrow .rm:hover { color:#fff; background:#b3202b; }
+  .itemhead { font-size:11px; color:var(--dim); margin:5px 0 1px; letter-spacing:.02em; }
+  .itemhead:first-child { margin-top:0; }
   .dim { color:var(--dim); }
   .warn { color:var(--warn); }
   .fieldrow { display:flex; gap:6px; align-items:center; }
@@ -111,6 +123,10 @@
       <button class="mode" id="m-exit"><i class="dot" style="background:#1d4ed8"></i>Exit 지정 <span class="hint-r">선</span></button>
       <button class="mode" id="m-start"><i class="dot" style="background:#8b5cf6"></i>출발점 지정 <span class="hint-r">클릭</span></button>
       <button id="undoBtn" class="small">실행취소 <kbd>Ctrl+Z</kbd></button>
+    </div>
+    <div class="grp">
+      <h2>편집 요소 <span class="hint-r" id="itemCnt"></span></h2>
+      <div id="itemList" class="itemlist"><div class="dim">아직 없음</div></div>
     </div>
     <div class="grp">
       <h2>보기</h2>
@@ -330,6 +346,7 @@ function draw() {
     ctx.fillStyle = "#1d4ed8"; ctx.fillRect(mx - 6, my - 6, 12, 12);
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.strokeRect(mx - 6, my - 6, 12, 12);
   }
+  drawHover();
   // 검증 경로
   if (verifyPaths && $("pathChk").checked) {
     for (const p of verifyPaths) {
@@ -416,13 +433,15 @@ window.addEventListener("mouseup", e => {
     const kind = $("rectChk").checked ? "rect" : "line";
     const sh = { op: mode, kind, pts: [wx0, wy0, wx1, wy1] };
     if (kind === "line") sh.w = 900;
-    shapes.push(sh); undoStack.push({ t: "shape" }); afterEdit();
+    shapes.push(sh); undoStack.push({ t: "shape", i: shapes.length - 1, add: true });
+    afterEdit();
   }
-  else if (mode === "exit") { exits.push([wx0, wy0, wx1, wy1]); undoStack.push({t:"exit"}); stepDone(3); afterEdit(); }
+  else if (mode === "exit") { exits.push([wx0, wy0, wx1, wy1]);
+    undoStack.push({ t: "exit", i: exits.length - 1, add: true }); stepDone(3); afterEdit(); }
   else if (mode === "start") {
     // 클릭(짧은 드래그 포함) 지점을 출발점으로 — occupant 모드 입력
     starts.push([wx1, wy1]);
-    undoStack.push({ t: "start" });
+    undoStack.push({ t: "start", i: starts.length - 1, add: true });
     afterEdit();
   }
   else if (mode === "measure") {
@@ -458,30 +477,125 @@ function doDelete(x1, y1, x2, y2) {
   stepDone(2); afterEdit(true);
 }
 
+// 추가/삭제 모두 "어느 배열의 몇 번째"를 기록한다. pop() 기반이면 개별 삭제가
+// 섞이는 순간 실행취소가 엉뚱한 항목을 되돌린다.
+const LISTS = { exit: () => exits, shape: () => shapes, start: () => starts,
+                open: () => openings };
+
 function undo() {
   const op = undoStack.pop();
   if (!op) return;
-  if (op.t === "del") {
+  if (op.t === "del") {                       // CAD 요소 박스삭제 되돌리기
     for (const h of op.hs) {
       deleted.delete(h);
       const ent = entIndex.find(e => e.h === h);
       if (ent) segAlive.fill(1, ent.o, ent.o + ent.n);
     }
     afterEdit(true);
-  } else if (op.t === "open") { openings.pop(); afterEdit(); }
-  else if (op.t === "shape") { shapes.pop(); afterEdit(); }
-  else if (op.t === "start") { starts.pop(); afterEdit(); }
-  else if (op.t === "exit") { exits.pop(); afterEdit(); }
+    return;
+  }
+  const arr = LISTS[op.t] && LISTS[op.t]();
+  if (!arr) return;
+  if (op.add) arr.splice(op.i, 1);            // 추가를 취소 → 그 자리에서 제거
+  else arr.splice(op.i, 0, op.v);             // 삭제를 취소 → 그 자리에 복원
+  afterEdit();
+}
+
+/** 개별 삭제 — 실행취소 스택에도 남겨 Ctrl+Z 로 되살릴 수 있게 한다. */
+function removeItem(kind, i) {
+  const arr = LISTS[kind] && LISTS[kind]();
+  if (!arr || i < 0 || i >= arr.length) return;
+  const [v] = arr.splice(i, 1);
+  undoStack.push({ t: kind, i, v, add: false });
+  afterEdit();
 }
 $("undoBtn").onclick = undo;
 window.addEventListener("keydown", e => {
   if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
 });
 
+// ── 편집요소 목록 (개별 삭제)
+let hoverItem = null;            // {kind, i} — 목록 위에 올린 항목을 도면에서 강조
+
+function itemLabel(kind, v, i) {
+  const len = (a, b) => Math.hypot(a[2] - a[0], a[3] - a[1]) / 1000;
+  if (kind === "exit") return [`Exit ${i + 1}`, `${len(v).toFixed(1)} m`, "#1d4ed8"];
+  if (kind === "start") return [`출발점 ${i + 1}`, "", "#8b5cf6"];
+  if (kind === "open") return [`개구부 ${i + 1}`, `${len(v).toFixed(1)} m`, "#06b6d4"];
+  const open = v.op === "open";
+  const nm = open ? "뚫기" : "차단";
+  const shape = v.kind === "rect" ? "사각형" : "선";
+  const [x1, y1, x2, y2] = v.pts;
+  const size = v.kind === "rect"
+    ? `${(Math.abs(x2 - x1) / 1000).toFixed(1)}×${(Math.abs(y2 - y1) / 1000).toFixed(1)} m`
+    : `${(Math.hypot(x2 - x1, y2 - y1) / 1000).toFixed(1)} m`;
+  return [`${nm} ${i + 1} (${shape})`, size, open ? "#06b6d4" : "#dc2626"];
+}
+
+function renderItems() {
+  const box = $("itemList");
+  const groups = [["exit", exits], ["shape", shapes], ["start", starts],
+                  ["open", openings]];
+  const total = groups.reduce((n, [, a]) => n + a.length, 0);
+  $("itemCnt").textContent = total ? `${total}개` : "";
+  box.innerHTML = "";
+  if (!total) { box.innerHTML = '<div class="dim">아직 없음</div>'; return; }
+  const HEAD = { exit: "Exit", shape: "뚫기 · 차단", start: "출발점", open: "개구부(구형식)" };
+  for (const [kind, arr] of groups) {
+    if (arr.length) {
+      const h = document.createElement("div");
+      h.className = "itemhead";
+      h.textContent = `${HEAD[kind]} ${arr.length}`;
+      box.appendChild(h);
+    }
+    arr.forEach((v, i) => {
+      const [nm, mt, col] = itemLabel(kind, v, i);
+      const row = document.createElement("div");
+      row.className = "itemrow";
+      row.innerHTML = `<span class="sw" style="background:${col}"></span>`
+                    + `<span class="nm">${nm}</span><span class="mt">${mt}</span>`
+                    + `<button class="rm" title="이 항목만 삭제">🗑</button>`;
+      row.onmouseenter = () => { hoverItem = { kind, i }; draw(); };
+      row.onmouseleave = () => { hoverItem = null; draw(); };
+      row.querySelector(".rm").onclick = () => {
+        hoverItem = null;
+        removeItem(kind, i);
+        toast(`${nm} 삭제 — 되돌리려면 Ctrl+Z`);
+      };
+      box.appendChild(row);
+    });
+  }
+}
+
+/** 목록에서 가리키는 항목을 도면 위에 노란 테두리로 강조. */
+function drawHover() {
+  if (!hoverItem) return;
+  const { kind, i } = hoverItem;
+  const arr = LISTS[kind] && LISTS[kind]();
+  const v = arr && arr[i];
+  if (!v) return;
+  ctx.save();
+  ctx.strokeStyle = "#facc15"; ctx.lineWidth = 3; ctx.setLineDash([6, 4]);
+  if (kind === "start") {
+    ctx.beginPath(); ctx.arc(W2SX(v[0]), W2SY(v[1]), 12, 0, 7); ctx.stroke();
+  } else if (kind === "shape" && v.kind === "rect") {
+    const [x1, y1, x2, y2] = v.pts;
+    ctx.strokeRect(W2SX(Math.min(x1, x2)) - 3, W2SY(Math.max(y1, y2)) - 3,
+                   Math.abs(x2 - x1) * view.s + 6, Math.abs(y2 - y1) * view.s + 6);
+  } else {
+    const a = kind === "shape" ? v.pts : v;
+    ctx.lineWidth = 9; ctx.globalAlpha = 0.55;
+    ctx.beginPath(); ctx.moveTo(W2SX(a[0]), W2SY(a[1]));
+    ctx.lineTo(W2SX(a[2]), W2SY(a[3])); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 let editSyncTimer = null, connTimer = null;
 function afterEdit(geomChanged = false) {
   verifyPaths = null;
   updateStats();
+  renderItems();
   $("applyBtn").disabled = exits.length === 0;
   clearTimeout(editSyncTimer);
   editSyncTimer = setTimeout(() => fetch("/api/edits", {
@@ -660,7 +774,7 @@ async function applyGeometry(meta) {
   $("dropzone").classList.add("hidden");
   stepDone(1);
   if (exits.length) stepDone(3);
-  fitView(); renderBase(); updateStats(); draw();
+  fitView(); renderBase(); updateStats(); renderItems(); draw();
   try {
     units = await (await fetch("/api/units")).json();
   } catch (e) { units = null; }
