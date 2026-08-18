@@ -87,9 +87,12 @@ const App = {
   },
 
   // 층 전환 — 현재 편집 상태 저장(syncFloor) 후 층 교체 + 현재 뷰 재로드
-  async setFloor(fid) {
+  // discardEdits: 서버가 이미 바뀐 뒤(예: CAD 편집기 적용) 호출하는 경우.
+  // syncFloor()를 건너뛴다 — 낡은 메모리 값을 층 객체로 되돌려 서버 결과를
+  // 덮어쓰는 것을 막기 위함.
+  async setFloor(fid, { discardEdits = false } = {}) {
     if (fid === App.currentFloor) return;
-    App.syncFloor();
+    if (!discardEdits) App.syncFloor();
     App.currentFloor = fid;
     App.applyFloor();
     await App.loadMapImage();

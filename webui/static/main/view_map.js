@@ -487,13 +487,15 @@ Views.map = (() => {
     window.addEventListener("message", async (ev) => {
       if (!ev.data || ev.data.type !== "evac-floor-applied") return;
       try {
-        // 편집기가 반영한 층으로 전환(다른 층이면) 후 그 층 맵 재로드
+        // 편집기가 서버를 이미 바꿨다 — 브라우저가 들고 있는 값은 낡았다.
+        // 먼저 서버에서 다시 읽는다. (전에는 '다른 층이면' setFloor만 불렀는데,
+        // setFloor는 서버를 안 읽고 syncFloor로 낡은 값을 되돌리기까지 해서
+        // 옛 경로·구역이 그대로 보였고 [저장] 시 CAD 결과를 덮어썼다.)
         const applied = ev.data.floor || "default";
+        await App.reloadSite();
         if (applied !== App.currentFloor
             && (App.site.floors || []).some((f) => f.id === applied)) {
-          await App.setFloor(applied);
-        } else {
-          await App.reloadSite();
+          await App.setFloor(applied, { discardEdits: true });
         }
         if (App.floor && App.floor.map) mc.setImage(App.mapImg, App.floor.map.w, App.floor.map.h);
         hint("도면 편집기 적용 완료 — 맵·축척(m/px)이 자동 반영되었습니다.");
