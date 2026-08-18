@@ -390,7 +390,13 @@
   <section id="viewReplay" class="view hidden">
     <div class="workarea">
       <aside class="side left">
-        <div class="sidehead">경보 세션 이력 <span class="conn" id="rpConn"></span></div>
+        <div class="sidehead">
+          <span class="rpseg">
+            <button class="tag-btn on" id="rpModeSess">세션</button>
+            <button class="tag-btn" id="rpModeDrill" title="전 층 공유 세션(건물 드릴) 이력·재계산">건물 드릴</button>
+          </span>
+          <span class="conn" id="rpConn"></span>
+        </div>
         <div class="sidebody">
           <div id="rpSessList" class="camlist"><div class="grow">불러오는 중…</div></div>
         </div>
@@ -400,6 +406,8 @@
         <div class="toolbar">
           <button class="btn primary sm" id="rpPlay" disabled>▶ 재생</button>
           <button class="tag-btn" id="rpToStart" title="처음으로" disabled>⏮</button>
+          <span class="fieldlab hidden" id="rpFloorWrap">층 <select id="rpFloorSel" title="재생할 층 선택"></select></span>
+          <button class="tag-btn hidden" id="rpReport" title="건물 롤업 리포트(층별 상세)">📋 리포트</button>
           <span class="fieldlab">속도
             <select id="rpSpeed" title="재생 배속">
               <option value="0.5">0.5</option><option value="1" selected>1</option>

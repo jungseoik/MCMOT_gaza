@@ -199,6 +199,12 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .drill-tbl td{ padding:4px 8px; border-bottom:1px solid var(--stroke-3);
   text-align:right; color:var(--text-1); font-family:var(--font-num); }
 
+/* ④ 리플레이 — 세션/건물 드릴 모드 토글 + 층별 미니요약 */
+.rpseg{ display:inline-flex; gap:4px; }
+.rpseg .tag-btn.on{ background:var(--brand,#30DCFB); color:#06121a; border-color:transparent; }
+.rpbase-row{ font-size:11px; color:var(--text-2); padding:2px 0; border-top:1px solid var(--stroke-3); }
+.rpbase-row b{ color:var(--text-1); }
+
 /* 드릴 층별 원점 지정 현황 (●지정/○미지정) */
 .drill-floorstat{ display:flex; flex-wrap:wrap; gap:5px; margin-bottom:6px; }
 .drill-floorstat .dfs{ font-size:11px; padding:1px 7px; border-radius:999px;

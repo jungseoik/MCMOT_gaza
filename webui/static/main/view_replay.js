@@ -16,6 +16,14 @@ Views.replay = (() => {
   let data = null;          // {result, timeline, frames, site, meta}
   let site = null;          // 세션 당시 공간요소 (배경 렌더)
 
+  // 건물 드릴 모드(Phase 2·3) — 전 층 공유 세션 이력·재계산
+  let mode = "sess";        // "sess"(층별 세션) | "drill"(건물 드릴)
+  let drills = [];          // 드릴 이력 [{session_id, alarm_ts, floors, epfi_avg, ..., has_record}]
+  let drill = null;         // 선택 드릴의 재산출 DrillResult
+  let drillFrames = {};     // {floor: frames[]} — 층별 2D 재생 프레임
+  let drillSites = {};      // {floor: site_view} — 층별 배경 공간요소
+  let curDrillFloor = null; // 현재 재생 중인 층
+
   // 재생 상태
   let playing = false;
   let cursor = 0;           // 재생 위치(세션 초, frames[0].ts 기준 0)
@@ -30,6 +38,12 @@ Views.replay = (() => {
   // ------------------------------------------------------------ 세션 목록
   async function loadList() {
     $("rpConn").textContent = "불러오는 중…";
+    if (mode === "drill") {
+      try { drills = await API.getDrills(); } catch (e) { drills = []; }
+      renderDrillList();
+      $("rpConn").textContent = `${drills.length}건`;
+      return;
+    }
     try {
       sessions = await API.getSessions();
     } catch (e) { sessions = []; }
@@ -59,6 +73,155 @@ Views.replay = (() => {
     box.querySelectorAll(".rpsess").forEach((el) => {
       el.onclick = () => selectSession(el.dataset.id);
     });
+  }
+
+  // ------------------------------------------------------------ 건물 드릴 모드
+  function renderDrillList() {
+    const box = $("rpSessList");
+    if (!drills.length) {
+      box.innerHTML = `<div class="grow">저장된 건물 드릴 없음 — ③ 운영 뷰에서 [🔔 건물 전체 경보]를 실행하면 이력이 쌓입니다.</div>`;
+      return;
+    }
+    box.innerHTML = drills.map((d) => {
+      const t = d.alarm_ts ? new Date(d.alarm_ts * 1000).toLocaleString("ko-KR", {hour12:false}) : d.session_id;
+      const rec = d.has_record
+        ? `<span class="badge ok">재계산가능</span>`
+        : `<span class="badge" title="일부 층 녹화 없음 — 재계산·재생 불가">요약만</span>`;
+      return `<div class="camrow rpsess${d.session_id === selId ? " sel" : ""}" data-id="${d.session_id}">
+        <div class="r1"><span class="nm">${t}</span>${rec}</div>
+        <div class="r2"><span>층 ${(d.floors || []).length}</span>
+          <span>EPFI ${fmtVal(d.epfi_avg,0)}</span>
+          <span>CBS ${fmtVal(d.cbs_total,1)}</span>
+          <span>통과 ${d.total_passed || 0}</span></div></div>`;
+    }).join("");
+    box.querySelectorAll(".rpsess").forEach((el) => {
+      el.onclick = () => {
+        const d = drills.find((x) => x.session_id === el.dataset.id);
+        if (d && !d.has_record) {
+          selId = el.dataset.id; renderDrillList(); clearMetrics();
+          setControlsEnabled(false); $("rpReset").disabled = true; $("rpApply").disabled = true;
+          $("rpReport").disabled = false;
+          $("rpHint").textContent = "이 드릴은 일부 층 녹화가 없어 재계산·재생이 불가합니다 (요약만).";
+          drill = null;
+          return;
+        }
+        selectDrill(el.dataset.id);
+      };
+    });
+  }
+
+  const floorName = (f) => (typeof App !== "undefined" ? App.floorName(f) : f);
+  const floorResultOf = (f) => {
+    const pf = (drill && drill.per_floor || []).find((p) => p.floor_id === f);
+    return pf ? pf.result : null;
+  };
+
+  async function selectDrill(id) {
+    if (playing) pause();
+    selId = id;
+    baseRow = drills.find((d) => d.session_id === id) || null;
+    renderDrillList();
+    $("rpHint").textContent = "건물 드릴 재계산·재생 데이터를 불러오는 중…";
+    $("rpMsg").textContent = "";
+    let resp;
+    try { resp = await API.drillReplay(id, { fps: 5 }); }
+    catch (e) { $("rpHint").textContent = "드릴 로드 실패: " + e.message; return; }
+    drill = resp.drill;
+    drillFrames = resp.frames_by_floor || {};
+    drillSites = resp.site_by_floor || {};
+    const floors = drill.floors || [];
+    $("rpFloorSel").innerHTML = floors.map((f) =>
+      `<option value="${f}">${floorName(f)}</option>`).join("");
+    showBuildingMetrics(drill, "원본값");
+    const st0 = drillSites[floors[0]];
+    fillThresholds(st0 && st0.thresholds);
+    setControlsEnabled(true);
+    $("rpReset").disabled = false; $("rpApply").disabled = false; $("rpReport").disabled = false;
+    if (floors.length) loadDrillFloor(floors[0]);
+    $("rpHint").textContent = `건물 드릴 · 참여 ${floors.length}개 층 — 층을 골라 2D 재생, 임계값을 바꿔 [재계산]하면 건물 지표가 갱신됩니다.`;
+  }
+
+  // 선택 층의 프레임을 기존 재생 파이프라인(data/site)에 실어 그대로 재생.
+  function loadDrillFloor(floor) {
+    curDrillFloor = floor;
+    $("rpFloorSel").value = floor;
+    const st = drillSites[floor] || null;
+    site = st;
+    data = { frames: drillFrames[floor] || [], site: st, result: floorResultOf(floor),
+             meta: { alarm_origins: (st && st.alarm_origins) || [] } };
+    prepPlayback();
+    setDrillCanvasImage(floor, st);
+    goTo(0);
+    if (mc) mc.render();
+  }
+
+  function setDrillCanvasImage(floor, st) {
+    if (!mc || !st || !st.map) { if (mc) mc.render(); return; }
+    const img = new Image();
+    img.onload = () => { mc.setImage(img, st.map.w, st.map.h); mc.render(); };
+    img.onerror = () => { mc.setImage(null, st.map.w, st.map.h); mc.render(); };
+    img.src = API.mapImageUrl(floor);
+  }
+
+  function showBuildingMetrics(dr, tag) {
+    const b = dr.building || {};
+    $("rpTag").textContent = tag || "건물값";
+    $("rpSei").textContent = fmtVal(b.sei, 1);
+    $("rpEpfi").textContent = fmtVal(b.epfi_avg, 1);
+    $("rpCbs").textContent = fmtVal(b.cbs_total, 1);
+    let zSt = 0, zTot = 0;
+    Object.values(b.idr_by_floor || {}).forEach((zs) =>
+      (zs || []).forEach((z) => { zTot++; if (z.status === "started") zSt++; }));
+    $("rpIdr").textContent = `${zSt}/${zTot}`;
+    $("rpBase").innerHTML = (dr.per_floor || []).map((pf) => {
+      const r = pf.result || {};
+      return `<div class="rpbase-row"><b>${floorName(pf.floor_id)}</b> · SEI ${fmtVal(r.sei,0)} · EPFI ${fmtVal(r.epfi_avg,0)} · CBS ${fmtVal(r.cbs_total,1)}</div>`;
+    }).join("");
+  }
+
+  function clearMetrics() {
+    ["rpSei","rpEpfi","rpCbs","rpIdr"].forEach((id) => { $(id).textContent = "—"; });
+    $("rpBase").innerHTML = "";
+    $("rpTag").textContent = mode === "drill" ? "건물값" : "현재값";
+  }
+
+  function setMode(m) {
+    if (mode === m) return;
+    mode = m;
+    $("rpModeSess").classList.toggle("on", m === "sess");
+    $("rpModeDrill").classList.toggle("on", m === "drill");
+    $("rpFloorWrap").classList.toggle("hidden", m !== "drill");
+    $("rpReport").classList.toggle("hidden", m !== "drill");
+    pause();
+    selId = null; data = null; site = null; drill = null;
+    setControlsEnabled(false);
+    $("rpReset").disabled = true; $("rpApply").disabled = true; $("rpReport").disabled = true;
+    clearMetrics();
+    $("rpHint").textContent = m === "drill"
+      ? "건물 드릴 이력을 선택하면 전 층 결과를 건물 롤업으로 보여주고, 층을 골라 2D 재생·재계산할 수 있습니다."
+      : "좌측에서 경보 세션을 선택하면 그 세션의 이동 기록을 도면 위에 그대로 재생합니다.";
+    loadList();
+    if (mc) mc.render();
+  }
+
+  async function recomputeDrill() {
+    if (!selId) return;
+    $("rpMsg").textContent = "건물 재계산 중…"; $("rpApply").disabled = true;
+    const keepFloor = curDrillFloor, keepIdx = frameIndexAt(cursor);
+    try {
+      const resp = await API.drillReplay(selId, collectOverrides());
+      drill = resp.drill;
+      drillFrames = resp.frames_by_floor || {};
+      drillSites = resp.site_by_floor || {};
+      showBuildingMetrics(drill, "재계산값");
+      const floors = drill.floors || [];
+      const fl = floors.includes(keepFloor) ? keepFloor : floors[0];
+      if (fl) { loadDrillFloor(fl); goTo(Math.min(keepIdx, (data.frames || []).length - 1)); }
+      $("rpMsg").textContent = "재계산 완료 — 원본 저장값은 그대로 보존됩니다.";
+      if (mc) mc.render();
+    } catch (e) {
+      $("rpMsg").textContent = "재계산 실패: " + e.message;
+    } finally { $("rpApply").disabled = false; }
   }
 
   // ------------------------------------------------------------ 세션 선택·로드
@@ -253,6 +416,7 @@ Views.replay = (() => {
   }
 
   async function recompute() {
+    if (mode === "drill") return recomputeDrill();
     if (!selId || !data) return;
     $("rpMsg").textContent = "재계산 중…"; $("rpApply").disabled = true;
     const keepIdx = frameIndexAt(cursor);
@@ -295,6 +459,12 @@ Views.replay = (() => {
     $("rpSpeed").onchange = (e) => { speed = parseFloat(e.target.value) || 1; };
     $("rpApply").onclick = recompute;
     $("rpReset").onclick = () => { fillThresholds(site && site.thresholds); $("rpMsg").textContent = "원래값으로 되돌림 — [재계산]을 눌러 반영"; };
+    $("rpModeSess").onclick = () => setMode("sess");
+    $("rpModeDrill").onclick = () => setMode("drill");
+    $("rpFloorSel").onchange = (e) => { pause(); loadDrillFloor(e.target.value); };
+    $("rpReport").onclick = () => {
+      if (drill && window.Session && Session.openDrillReport) Session.openDrillReport(drill);
+    };
   }
 
   function enter() {
@@ -302,7 +472,7 @@ Views.replay = (() => {
     active = true;
     setCanvasImage();
     loadList();
-    if (selId) {                                   // 재진입 시 선택 유지
+    if (selId && mode === "sess") {                // 재진입 시 선택 유지(세션 모드)
       const still = sessions.find((s) => s.session_id === selId);
       if (!still) { selId = null; data = null; site = null; }
     }

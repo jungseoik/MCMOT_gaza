@@ -85,6 +85,10 @@ const API = {
   drillStop: () => API._post("/api/drill/stop"),
   drillResult: (id) => API._j(`/api/drill/${encodeURIComponent(id)}/result`),
   getDrills: () => API._j("/api/drills"),
+  // 건물 드릴 재계산(Phase 3) — 전 층 .db를 같은 오버라이드로 리플레이 → 재산출 롤업.
+  drillReplay: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/replay`, body || {}),
+  drillExportUrl: (id, format) =>
+    `/api/drill/${encodeURIComponent(id)}/export?format=${format || "json"}`,
   getSession: (floor) => API._j("/api/session?" + API._fq(floor)),
   getSessionResult: (floor) => API._j("/api/session/result?" + API._fq(floor)),
   getSessionTimeline: (floor) => API._j("/api/session/timeline?" + API._fq(floor)),

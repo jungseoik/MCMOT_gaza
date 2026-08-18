@@ -167,6 +167,40 @@ class EvaluationResult(BaseModel):
     generated_at: float = 0.0
 
 
+class DrillBuilding(BaseModel):
+    """건물 드릴 롤업의 건물 집계값 (ADR 06 §3)."""
+    epfi_avg: float | None = None              # 전 층 전 인원 평균(인원 가중)
+    cbs_total: float = 0.0                     # 전 층 병목 합
+    sei: float | None = None                   # 전 층 출구 통합분포 재계산
+    idr_by_floor: dict[str, list[ZoneMetric]] = {}   # 구역별 유지(층별 나열)
+
+
+class DrillSummary(BaseModel):
+    """건물 드릴 추가 요약 (ADR 06 §7-3)."""
+    total_passed: int = 0                      # 전 층 출구 총 통과 인원
+    max_cbs_floor: str | None = None           # 최대 혼잡(CBS) 층
+    floor_start_ts: dict[str, float | None] = {}     # 층별 최초 개시시각
+
+
+class DrillFloorResult(BaseModel):
+    """드릴 참여 층 1개의 결과 (층별 상세표용)."""
+    floor_id: str
+    result: EvaluationResult
+
+
+class DrillResult(BaseModel):
+    """건물 드릴(전 층 세션) 롤업 결과 — 계약 v1.11 (ADR 06 §4).
+
+    같은 session_id를 참여 전 층에서 모아 건물 4대지표로 집계한다.
+    저장 스키마는 층별 EvaluationResult 그대로 유지, 이 모델은 조회 시 조립물."""
+    session_id: str
+    alarm_ts: float | None = None
+    floors: list[str] = []
+    building: DrillBuilding
+    summary: DrillSummary
+    per_floor: list[DrillFloorResult] = []
+
+
 class TimelinePoint(BaseModel):
     """세션 타임라인 1초 샘플 — 대시보드 시간대별 시각화."""
     ts: float

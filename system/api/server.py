@@ -43,7 +43,7 @@ from system.config.schema import (
     SiteConfig,
 )
 from system.config.store import SiteStore
-from system.contracts import MapState
+from system.contracts import DrillResult, MapState
 from system.ingest.frame_queue import FrameQueue
 from system.ingest.manager import IngestManager
 from system.metrics.engine import MetricsEngine
@@ -803,11 +803,15 @@ def _floor_result(session_id: str, floor_id: str):
     return saved["result"] if saved else None
 
 
-def _drill_rollup(session_id: str) -> dict:
-    """전 층 결과를 session_id로 모아 건물 롤업 (ADR 06 §3): EPFI 전원평균·CBS 합·
-    SEI 통합분포·IDR 구역별 나열 + 추가 요약(총 통과·최대혼잡층·층별 개시시각)."""
-    floors = [(f, r) for f in rt.participating_floors()
-              if (r := _floor_result(session_id, f)) is not None]
+def _r(v, n: int = 4):
+    """CSV용 반올림 — None은 빈 칸."""
+    return "" if v is None else round(v, n)
+
+
+def _aggregate_floors(session_id: str, floors: list[tuple[str, dict]]) -> dict:
+    """참여 층 결과 [(floor_id, result_dict)] → 건물 롤업 (ADR 06 §3): EPFI 전원평균·
+    CBS 합·SEI 통합분포·IDR 구역별 나열 + 추가요약(총 통과·최대혼잡층·층별 개시시각).
+    저장본/라이브/리플레이 결과 어디서든 공통으로 쓰는 순수 집계 코어."""
     epfis = [pm["epfi"] for _f, r in floors for pm in r.get("person_metrics", [])
              if pm.get("epfi") is not None]
     epfi_avg = sum(epfis) / len(epfis) if epfis else None
@@ -828,8 +832,10 @@ def _drill_rollup(session_id: str) -> dict:
         starts = [z["evacuation_start_at"] for z in r.get("zone_metrics", [])
                   if z.get("evacuation_start_at") is not None]
         floor_start[f] = min(starts) if starts else None
+    alarm_ts = next((r.get("alarm_ts") for _f, r in floors), None)
     return {
         "session_id": session_id,
+        "alarm_ts": alarm_ts,
         "floors": [f for f, _r in floors],
         "building": {"epfi_avg": epfi_avg, "cbs_total": round(cbs_total, 4), "sei": sei,
                      "idr_by_floor": {f: r.get("zone_metrics", []) for f, r in floors}},
@@ -837,6 +843,13 @@ def _drill_rollup(session_id: str) -> dict:
                     "floor_start_ts": floor_start},
         "per_floor": [{"floor_id": f, "result": r} for f, r in floors],
     }
+
+
+def _drill_rollup(session_id: str) -> dict:
+    """저장본/라이브에서 session_id로 참여 전 층 결과를 모아 건물 롤업."""
+    floors = [(f, r) for f in rt.participating_floors()
+              if (r := _floor_result(session_id, f)) is not None]
+    return _aggregate_floors(session_id, floors)
 
 
 @app.post("/api/drill/start")
@@ -872,7 +885,7 @@ async def drill_start(request: Request):
             "floors": floors}
 
 
-@app.post("/api/drill/stop")
+@app.post("/api/drill/stop", response_model=DrillResult)
 def drill_stop():
     """건물 드릴 종료 — 참여 전 층 세션 일괄 finalize·저장 후 롤업 반환."""
     sid = None
@@ -894,7 +907,7 @@ def drill_stop():
     return _drill_rollup(sid)
 
 
-@app.get("/api/drill/{session_id}/result")
+@app.get("/api/drill/{session_id}/result", response_model=DrillResult)
 def drill_result(session_id: str):
     roll = _drill_rollup(session_id)
     if not roll["per_floor"]:
@@ -902,22 +915,100 @@ def drill_result(session_id: str):
     return roll
 
 
+def _drill_session_ids() -> list[str]:
+    """참여 층 전부에 공통 존재하는 session_id (= 건물 드릴), 최신순."""
+    ids = None
+    for f in rt.participating_floors():
+        fids = {p.stem for p in _sessions_dir(f).glob("*.json")}
+        ids = fids if ids is None else (ids & fids)
+    return sorted(ids or [], reverse=True)
+
+
 @app.get("/api/drills")
 def drills_list():
     """드릴 이력 — 참여 층 전부에 공통 존재하는 session_id 기준(건물 롤업 요약)."""
-    part = rt.participating_floors()
-    ids = None
-    for f in part:
-        fids = {p.stem for p in _sessions_dir(f).glob("*.json")}
-        ids = fids if ids is None else (ids & fids)
     out = []
-    for sid in sorted(ids or [], reverse=True):
+    for sid in _drill_session_ids():
         roll = _drill_rollup(sid)
         b = roll["building"]
-        out.append({"session_id": sid, "floors": roll["floors"], "epfi_avg": b["epfi_avg"],
+        # 참여 각 층에 .db가 있으면 드릴 재계산 가능
+        has_record = all(_session_db_path(sid, f).is_file() for f in roll["floors"]) \
+            if roll["floors"] else False
+        out.append({"session_id": sid, "alarm_ts": roll.get("alarm_ts"),
+                    "floors": roll["floors"], "epfi_avg": b["epfi_avg"],
                     "cbs_total": b["cbs_total"], "sei": b["sei"],
-                    "total_passed": roll["summary"]["total_passed"]})
+                    "total_passed": roll["summary"]["total_passed"],
+                    "has_record": has_record})
     return out
+
+
+@app.get("/api/drill/{session_id}/export")
+def drill_export(session_id: str, format: str = "json"):
+    """건물 드릴 롤업 + 층별 상세를 JSON/CSV로 내보내기 (ADR 06 §4)."""
+    roll = _drill_rollup(session_id)
+    if not roll["per_floor"]:
+        raise HTTPException(404, f"드릴 결과 없음: {session_id}")
+    if format == "json":
+        return DrillResult.model_validate(roll)
+    # CSV — 건물 요약 1행 + 층별 상세 N행
+    import csv as _csv
+    import io as _io
+    b, s = roll["building"], roll["summary"]
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["scope", "floor_id", "sei", "epfi_avg", "cbs_total",
+                "passed", "zones_started", "zones_total"])
+    zst = sum(1 for zs in b["idr_by_floor"].values() for z in zs if z.get("status") == "started")
+    ztot = sum(len(zs) for zs in b["idr_by_floor"].values())
+    w.writerow(["building", "", _r(b["sei"]), _r(b["epfi_avg"]), _r(b["cbs_total"]),
+                s["total_passed"], zst, ztot])
+    for pf in roll["per_floor"]:
+        r = pf["result"]
+        passed = sum(em.get("actual_count", 0) for em in r.get("exit_metrics", []))
+        zm = r.get("zone_metrics", [])
+        started = sum(1 for z in zm if z.get("status") == "started")
+        w.writerow(["floor", pf["floor_id"], _r(r.get("sei")), _r(r.get("epfi_avg")),
+                    _r(r.get("cbs_total")), passed, started, len(zm)])
+    return Response(content=buf.getvalue(), media_type="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="drill_{session_id}.csv"'})
+
+
+@app.post("/api/drill/{session_id}/replay")
+async def drill_replay(session_id: str, request: Request):
+    """건물 드릴 재계산 — 참여 각 층의 녹화 db를 같은 오버라이드로 리플레이하고
+    재산출된 층별 결과로 건물 롤업을 다시 만든다 (ADR 06 Phase 3, 계약 v1.11).
+
+    body(모두 선택): {thresholds, rho_crit, bottlenecks:{id:{...}},
+      exits:{id:{...}}, fps(재생 격자, 기본 5)}. 반환: 재산출 DrillResult +
+      frames_by_floor(층별 2D 재생 프레임) + site_by_floor(층별 배경 공간요소)."""
+    import anyio
+    from system.metrics.replay import run_replay
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    overrides = {k: body[k] for k in ("thresholds", "rho_crit", "bottlenecks", "exits")
+                 if k in body and body[k] is not None}
+    fps = float(body.get("fps", 5.0))
+
+    part = rt.participating_floors()
+    dbs = [(f, _session_db_path(session_id, f)) for f in part]
+    dbs = [(f, db) for f, db in dbs if db.is_file()]
+    if not dbs:
+        raise HTTPException(404, f"드릴 녹화 없음: {session_id} — 녹화 이후 드릴만 재계산 가능")
+
+    floors: list[tuple[str, dict]] = []
+    frames_by_floor: dict[str, list] = {}
+    site_by_floor: dict[str, dict] = {}
+    for f, db in dbs:
+        result, _timeline, frames, meta = await anyio.to_thread.run_sync(
+            run_replay, db, overrides, fps)
+        floors.append((f, result.model_dump()))
+        frames_by_floor[f] = frames
+        site_by_floor[f] = meta.get("site_view")
+    roll = _aggregate_floors(session_id, floors)
+    return {"drill": DrillResult.model_validate(roll).model_dump(),
+            "frames_by_floor": frames_by_floor, "site_by_floor": site_by_floor}
 
 
 @app.get("/api/session")

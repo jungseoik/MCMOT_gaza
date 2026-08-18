@@ -948,6 +948,7 @@ const Session = (() => {
 
   return {
     init, bootstrap, onState, placeAlarm, updateCards,
+    openDrillReport: showDrillModal,   // ④ 리플레이 탭에서 드릴 롤업 리포트 재사용
     isPlacing: () => addingOrigin,
     pendingAlarmOrigins: () => pendingOrigins,
     alarmOrigins: () => {
