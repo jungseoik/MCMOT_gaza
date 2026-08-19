@@ -1,0 +1,11 @@
+{
+  "cam_id": "cam01",
+  "name": "채널1 (1_v1)",
+  "rtsp": "rtsp://127.0.0.1:8554/1_v1",
+  "enabled": true,
+  "analyze_fps": 5.0,
+  "floor_id": null,
+  "mapping": null,
+  "valid_roi": null,
+  "min_conf": null
+}
