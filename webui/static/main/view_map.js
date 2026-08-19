@@ -521,8 +521,18 @@ Views.map = (() => {
       const url = location.protocol + "//" + location.hostname
                 + ":8910/?live=1&floor=" + encodeURIComponent(floor);
       const w = window.open(url, "evacFloorEditor", "width=1560,height=980");
-      if (!w) { hint("팝업이 차단되었습니다 — 브라우저 팝업 허용 후 다시 시도.", true); return; }
       const fname = (App.floor && App.floor.name) || floor;
+      if (!w || w.closed || typeof w.closed === "undefined") {
+        // 팝업 차단 — 안내문만 띄우면 "아무 일도 안 일어난 것"처럼 보인다.
+        // 바로 누를 수 있는 링크를 함께 준다.
+        const el = $("mapHint");
+        el.classList.add("warn");
+        el.innerHTML = `팝업이 차단되어 편집기 창이 열리지 않았습니다 — `
+          + `<a href="${url}" target="_blank" rel="noopener" `
+          + `style="color:var(--pia-cyan);text-decoration:underline">여기를 눌러 «${fname}» 층 편집기 열기</a>`
+          + ` (또는 주소창 오른쪽 팝업 차단 아이콘에서 허용)`;
+        return;
+      }
       hint(`도면 편집기(새 창)에서 정리·Exit 지정 후 [저장 & 적용]하면 «${fname}» 층 맵에 반영됩니다.`);
     };
     window.addEventListener("message", async (ev) => {
