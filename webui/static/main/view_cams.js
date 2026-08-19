@@ -536,9 +536,17 @@ Views.cams = (() => {
   }
 
   // ------------------------------------------------------------ overlays
+  /** 회전 버튼 표기 — 0°면 "원래대로" 버튼을 숨긴다. */
+  function updateRotLabel() {
+    const r = mapMc ? mapMc.rot : 0;
+    const b = $("mapRotBtn"), rs = $("mapRotReset");
+    if (b) { b.textContent = `도면 회전 ${r}°`; b.classList.toggle("on", !!r); }
+    if (rs) rs.classList.toggle("hidden", !r);
+  }
+
   function drawCrosshair(g, px, py, col, label) {
-    const { ctx, TX, TY } = g;
-    const cx = TX(px), cy = TY(py);
+    const { ctx } = g;
+    const [cx, cy] = PT(g, px, py);      // 회전 반영
     ctx.save();
     ctx.strokeStyle = col; ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 3]);
@@ -663,6 +671,18 @@ Views.cams = (() => {
       hint(`커버리지 ROI 자동 설정 완료 (${roi.length}점) — 확인 후 매핑 저장.`);
       renderSel();
     };
+    // 도면 회전 — 표시 전용. 저장되는 map_pts 는 언제나 원본 맵 px 이므로
+    // 돌려놓고 찍어도 매핑값은 그대로다(toMap 이 역회전).
+    $("mapRotBtn").onclick = () => {
+      if (!mapMc) return;
+      mapMc.setRot((mapMc.rot + 90) % 360);
+      updateRotLabel();
+    };
+    $("mapRotReset").onclick = () => {
+      if (!mapMc || !mapMc.rot) return;
+      mapMc.setRot(0);
+      updateRotLabel();
+    };
     $("camRetest").onclick = async () => {
       if (!sel) return;
       try {
@@ -687,5 +707,9 @@ Views.cams = (() => {
     }
   }
 
-  return { enter, leave: () => {}, renderList };
+  return { enter, leave: () => {}, renderList,
+           // 테스트용 접근자 — 회전/좌표 왕복 검증에 쓴다(런타임 동작엔 무관)
+           __mc: () => mapMc, __mapPts: () => mapPts,
+           __clearPairs: () => { mapPts = []; cctvPts = [];
+                                 if (mapMc) mapMc.render(); if (camMc) camMc.render(); } };
 })();
