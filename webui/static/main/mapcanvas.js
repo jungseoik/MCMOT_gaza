@@ -11,6 +11,7 @@ class MapCanvas {
     this.img = null;
     this.w = 1000; this.h = 600;      // 원본(맵) px 크기
     this.s = 1; this.ox = 0; this.oy = 0;
+    this.rot = 0;                     // 표시 전용 회전(도) — 저장 좌표엔 영향 없음
     this.dpr = 1; this.cw = 0; this.ch = 0;
     this.freehand = false;            // true면 좌드래그가 팬 대신 자유곡선 드로잉
     this._down = null; this._moved = false; this._drawing = false;
@@ -52,20 +53,57 @@ class MapCanvas {
   fit() {
     if (!this.cw) return;
     const pad = 14;
-    this.s = Math.min((this.cw - 2 * pad) / this.w, (this.ch - 2 * pad) / this.h);
+    const [rw, rh] = this.rotDims();          // 90/270 이면 가로세로가 바뀐다
+    this.s = Math.min((this.cw - 2 * pad) / rw, (this.ch - 2 * pad) / rh);
     if (!isFinite(this.s) || this.s <= 0) this.s = 1;
-    this.ox = (this.cw - this.w * this.s) / 2;
-    this.oy = (this.ch - this.h * this.s) / 2;
+    this.ox = (this.cw - rw * this.s) / 2;
+    this.oy = (this.ch - rh * this.s) / 2;
   }
 
+  /* ── 표시 전용 회전 (0/90/180/270)
+   * 저장되는 좌표는 언제나 "원본 맵 px" 다. 회전은 화면에만 적용하고
+   * 클릭은 _inv() 로 원본 px 로 되돌린다 — 그래야 도면을 돌려놓고 찍어도
+   * map_pts 가 오염되지 않는다. */
+  rotDims() { return (this.rot % 180) ? [this.h, this.w] : [this.w, this.h]; }
+
+  _fwd(x, y) {                       // 원본 px → 회전 후 px
+    const { w, h, rot } = this;
+    if (rot === 90) return [h - y, x];
+    if (rot === 180) return [w - x, h - y];
+    if (rot === 270) return [y, w - x];
+    return [x, y];
+  }
+
+  _inv(rx, ry) {                     // 회전 후 px → 원본 px
+    const { w, h, rot } = this;
+    if (rot === 90) return [ry, h - rx];
+    if (rot === 180) return [w - rx, h - ry];
+    if (rot === 270) return [w - ry, rx];
+    return [rx, ry];
+  }
+
+  /** 원본 맵 px → 화면 px. 회전을 쓰는 캔버스의 드로잉은 이걸 쓴다. */
+  P(x, y) {
+    const [rx, ry] = this._fwd(x, y);
+    return [this.ox + rx * this.s, this.oy + ry * this.s];
+  }
+
+  // 회전 0 에서는 기존과 동일. (회전 캔버스에서는 P() 를 쓸 것)
   TX(x) { return this.ox + x * this.s; }
   TY(y) { return this.oy + y * this.s; }
+
+  /** 회전 설정 — 0/90/180/270. 화면 맞춤을 다시 한다. */
+  setRot(deg) {
+    this.rot = ((deg % 360) + 360) % 360;
+    this.fit(); this.render();
+  }
 
   /** 마우스 이벤트 → 맵 원본 px (경계로 클램프). */
   toMap(e) {
     const r = this.cv.getBoundingClientRect();
-    const x = (e.clientX - r.left - this.ox) / this.s;
-    const y = (e.clientY - r.top - this.oy) / this.s;
+    const rx = (e.clientX - r.left - this.ox) / this.s;
+    const ry = (e.clientY - r.top - this.oy) / this.s;
+    const [x, y] = this._inv(rx, ry);
     return { x: Math.min(Math.max(x, 0), this.w),
              y: Math.min(Math.max(y, 0), this.h) };
   }
@@ -130,9 +168,20 @@ class MapCanvas {
     c.clearRect(0, 0, this.cw, this.ch);
     c.fillStyle = "#0d0d0d";
     c.fillRect(0, 0, this.cw, this.ch);
-    const X = this.TX(0), Y = this.TY(0), W = this.w * this.s, H = this.h * this.s;
+    const [rw, rh] = this.rotDims();
+    const X = this.ox, Y = this.oy, W = rw * this.s, H = rh * this.s;
     if (this.img) {
-      c.drawImage(this.img, X, Y, W, H);
+      if (this.rot) {                      // 회전 표시 — 좌표계는 그대로 원본 px
+        c.save();
+        c.translate(X, Y); c.scale(this.s, this.s);
+        if (this.rot === 90) { c.translate(this.h, 0); c.rotate(Math.PI / 2); }
+        else if (this.rot === 180) { c.translate(this.w, this.h); c.rotate(Math.PI); }
+        else { c.translate(0, this.w); c.rotate(-Math.PI / 2); }
+        c.drawImage(this.img, 0, 0, this.w, this.h);
+        c.restore();
+      } else {
+        c.drawImage(this.img, X, Y, W, H);
+      }
     } else {                                        // 이미지 없음: 흰 캔버스 + 격자
       c.fillStyle = "#f5f5f5"; c.fillRect(X, Y, W, H);
       c.strokeStyle = "#dddddd"; c.lineWidth = 1;
@@ -147,7 +196,10 @@ class MapCanvas {
     c.strokeStyle = "#525252"; c.lineWidth = 1;
     c.strokeRect(X - 0.5, Y - 0.5, W + 1, H + 1);
     if (this.opts.draw) {
+      // P(x,y) 는 회전을 반영한 화면좌표. 회전을 쓰는 캔버스의 드로잉은
+      // TX/TY 대신 P 를 써야 한다(축이 뒤바뀌므로 x·y 를 따로 못 변환).
       this.opts.draw({ ctx: c, TX: (x) => this.TX(x), TY: (y) => this.TY(y),
+                       P: (x, y) => this.P(x, y), rot: this.rot,
                        s: this.s, mc: this });
     }
   }
@@ -294,10 +346,10 @@ const MC_COLORS = {
 /** IDR 공간그래프 렌더 — 엣지(점선)·노드(원+id). opts.sel = 엣지 연결용 선택 노드. */
 function drawGraph(g, graph, opts = {}) {
   if (!graph || !graph.nodes || !graph.nodes.length) return;
-  const { ctx, TX, TY } = g;
+  const { ctx } = g;
   const col = MC_COLORS.graph;
   const pos = {};
-  graph.nodes.forEach((n) => { pos[n.id] = [TX(n.xy[0]), TY(n.xy[1])]; });
+  graph.nodes.forEach((n) => { pos[n.id] = PT(g, n.xy[0], n.xy[1]); });
   ctx.globalAlpha = opts.faint ? 0.45 : 1.0;
   ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
   (graph.edges || []).forEach(([a, b]) => {
@@ -321,6 +373,10 @@ function drawGraph(g, graph, opts = {}) {
   ctx.globalAlpha = 1.0;
 }
 
+/** 회전 반영 화면좌표쌍. draw 훅이 P 를 주면 그걸 쓰고, 없으면(회전 0 전제의
+ *  옛 호출부) TX/TY 로 폴백한다. x·y 가 서로 뒤바뀔 수 있어 반드시 쌍으로 변환한다. */
+function PT(g, x, y) { return g.P ? g.P(x, y) : [g.TX(x), g.TY(y)]; }
+
 function camColor(camId, cams) {
   let idx = (cams || []).findIndex((c) => c.cam_id === camId);
   if (idx < 0) {
@@ -332,10 +388,11 @@ function camColor(camId, cams) {
 }
 
 function mcPath(g, pts, close) {
-  const { ctx, TX, TY } = g;
+  const { ctx } = g;
   ctx.beginPath();
   pts.forEach((p, i) => {
-    const x = TX(p[0] !== undefined ? p[0] : p.x), y = TY(p[1] !== undefined ? p[1] : p.y);
+    const [x, y] = PT(g, p[0] !== undefined ? p[0] : p.x,
+                         p[1] !== undefined ? p[1] : p.y);
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
   });
   if (close && pts.length >= 3) ctx.closePath();
@@ -353,9 +410,10 @@ function mcArrowHead(ctx, x, y, ang, size, color) {
 
 /** 번호 달린 점 목록 (대응점·꼭짓점). colorFn(i) 지정 시 점마다 색. */
 function mcNumbered(g, pts, color, colorFn) {
-  const { ctx, TX, TY } = g;
+  const { ctx } = g;
   pts.forEach((p, i) => {
-    const x = TX(p[0] !== undefined ? p[0] : p.x), y = TY(p[1] !== undefined ? p[1] : p.y);
+    const [x, y] = PT(g, p[0] !== undefined ? p[0] : p.x,
+                         p[1] !== undefined ? p[1] : p.y);
     const c = colorFn ? colorFn(i) : color;
     ctx.fillStyle = c;
     ctx.beginPath(); ctx.arc(x, y, 5, 0, 7); ctx.fill();
@@ -373,7 +431,7 @@ function mcNumbered(g, pts, color, colorFn) {
  * opts: {faint, state(MapState: 상태 하이라이트/카운트), showScale} */
 function drawSiteElements(g, site, opts = {}) {
   if (!site) return;
-  const { ctx, TX, TY } = g;
+  const { ctx } = g;
   const a = opts.faint ? 0.35 : 1.0;
   const lab = (txt, x, y, color) => {
     ctx.font = "bold 11px Pretendard, sans-serif";
@@ -401,7 +459,7 @@ function drawSiteElements(g, site, opts = {}) {
     const zs = st && find(st.zones, z.id);
     const txt = zs ? `${z.name || z.id} · ${zs.count}명${zs.density != null ? ` · ${zs.density}/m²` : ""}`
                    : (z.name || z.id);
-    lab(txt, TX(cx), TY(cy), MC_COLORS.zone);
+    lab(txt, ...PT(g, cx, cy), MC_COLORS.zone);
     ctx.globalAlpha = 1;
   });
 
@@ -419,7 +477,7 @@ function drawSiteElements(g, site, opts = {}) {
     const [cx, cy] = centroid(b.polygon);
     const txt = bs ? `${b.name || b.id} · ${bs.count}명${bs.density != null ? ` · ${bs.density}/m²` : ""}${over ? " ⚠" : ""}`
                    : `${b.name || b.id} · ρ임계 ${b.rho_crit}`;
-    lab(txt, TX(cx), TY(cy), over ? MC_COLORS.over : MC_COLORS.bottleneck);
+    lab(txt, ...PT(g, cx, cy), over ? MC_COLORS.over : MC_COLORS.bottleneck);
     ctx.globalAlpha = 1;
   });
 
@@ -431,11 +489,13 @@ function drawSiteElements(g, site, opts = {}) {
     ctx.setLineDash([8, 5]); ctx.stroke(); ctx.setLineDash([]);
     const pts = r.points;
     for (let i = 1; i < pts.length; i += Math.max(1, Math.floor(pts.length / 4))) {
-      const ang = Math.atan2(TY(pts[i][1]) - TY(pts[i - 1][1]),
-                             TX(pts[i][0]) - TX(pts[i - 1][0]));
-      mcArrowHead(ctx, TX(pts[i][0]), TY(pts[i][1]), ang, 9, MC_COLORS.route);
+      const c1 = PT(g, pts[i][0], pts[i][1]);
+      const c0 = PT(g, pts[i - 1][0], pts[i - 1][1]);
+      const ang = Math.atan2(c1[1] - c0[1], c1[0] - c0[0]);
+      mcArrowHead(ctx, c1[0], c1[1], ang, 9, MC_COLORS.route);
     }
-    lab(r.name || r.id, TX(pts[0][0]), TY(pts[0][1]) - 14, MC_COLORS.route);
+    const r0 = PT(g, pts[0][0], pts[0][1]);
+    lab(r.name || r.id, r0[0], r0[1] - 14, MC_COLORS.route);
     ctx.globalAlpha = 1;
   });
 
@@ -444,17 +504,19 @@ function drawSiteElements(g, site, opts = {}) {
     ctx.globalAlpha = a;
     const [p1, p2] = e.line;
     ctx.strokeStyle = MC_COLORS.exit; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(TX(p1[0]), TY(p1[1])); ctx.lineTo(TX(p2[0]), TY(p2[1])); ctx.stroke();
-    [p1, p2].forEach((p) => {
+    const q1 = PT(g, p1[0], p1[1]), q2 = PT(g, p2[0], p2[1]);
+    ctx.beginPath(); ctx.moveTo(q1[0], q1[1]); ctx.lineTo(q2[0], q2[1]); ctx.stroke();
+    [q1, q2].forEach((q) => {
       ctx.fillStyle = MC_COLORS.exit;
-      ctx.beginPath(); ctx.arc(TX(p[0]), TY(p[1]), 4, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, 7); ctx.fill();
     });
     if (e.inside) {                                  // 안쪽 방향 짧은 화살표
       const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2;
-      const ang = Math.atan2(TY(e.inside[1]) - TY(my), TX(e.inside[0]) - TX(mx));
-      const ex = TX(mx) + 20 * Math.cos(ang), ey = TY(my) + 20 * Math.sin(ang);
+      const ins = PT(g, e.inside[0], e.inside[1]), mid = PT(g, mx, my);
+      const ang = Math.atan2(ins[1] - mid[1], ins[0] - mid[0]);
+      const ex = mid[0] + 20 * Math.cos(ang), ey = mid[1] + 20 * Math.sin(ang);
       ctx.strokeStyle = MC_COLORS.exit; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(TX(mx), TY(my)); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(mid[0], mid[1]); ctx.lineTo(ex, ey); ctx.stroke();
       mcArrowHead(ctx, ex, ey, ang, 7, MC_COLORS.exit);
       ctx.font = "10px Pretendard, sans-serif"; ctx.fillStyle = MC_COLORS.exit;
       ctx.fillText("안", ex + 5, ey + 3);
@@ -463,7 +525,8 @@ function drawSiteElements(g, site, opts = {}) {
     const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2;
     const txt = es ? `${e.name || e.id} · IN ${es.in_count} / OUT ${es.out_count}`
                    : (e.name || e.id);
-    lab(txt, TX(mx), TY(my) - 16, MC_COLORS.exit);
+    const el = PT(g, mx, my);
+    lab(txt, el[0], el[1] - 16, MC_COLORS.exit);
     ctx.globalAlpha = 1;
   });
 
@@ -472,14 +535,15 @@ function drawSiteElements(g, site, opts = {}) {
     const sc = site.map.scale;
     ctx.strokeStyle = MC_COLORS.scale; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    ctx.moveTo(TX(sc.p1[0]), TY(sc.p1[1]));
-    ctx.lineTo(TX(sc.p2[0]), TY(sc.p2[1]));
+    const s1 = PT(g, sc.p1[0], sc.p1[1]), s2 = PT(g, sc.p2[0], sc.p2[1]);
+    ctx.moveTo(s1[0], s1[1]);
+    ctx.lineTo(s2[0], s2[1]);
     ctx.stroke(); ctx.setLineDash([]);
-    [sc.p1, sc.p2].forEach((p) => {
+    [s1, s2].forEach((q) => {
       ctx.fillStyle = MC_COLORS.scale;
-      ctx.beginPath(); ctx.arc(TX(p[0]), TY(p[1]), 4, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, 7); ctx.fill();
     });
-    const mx = (TX(sc.p1[0]) + TX(sc.p2[0])) / 2, my = (TY(sc.p1[1]) + TY(sc.p2[1])) / 2;
+    const mx = (s1[0] + s2[0]) / 2, my = (s1[1] + s2[1]) / 2;
     lab(`${sc.meters} m`, mx, my - 12, MC_COLORS.scale);
   }
 }
