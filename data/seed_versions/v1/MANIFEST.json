@@ -1,0 +1,84 @@
+{
+  "name": "v1",
+  "note": "삼성화재 PoC 초기 3층 구성 (17F·19F 시드맵 + 지상1층 CAD, 카메라 3대)",
+  "saved_at": "2026-08-19T00:09:21+00:00",
+  "source": "seed",
+  "site": "default",
+  "summary": {
+    "site_id": "default",
+    "version": 47,
+    "floors": [
+      {
+        "id": "default",
+        "name": "17F",
+        "map": "map.png",
+        "px": [
+          3400,
+          3207
+        ],
+        "m_per_px": 0.02391,
+        "scale_src": "수동 2점",
+        "routes": 2,
+        "zones": 3,
+        "bottlenecks": 2,
+        "exits": 2
+      },
+      {
+        "id": "floor2",
+        "name": "19F",
+        "map": "map_floor2.png",
+        "px": [
+          3400,
+          3207
+        ],
+        "m_per_px": 0.02391,
+        "scale_src": "수동 2점",
+        "routes": 2,
+        "zones": 3,
+        "bottlenecks": 2,
+        "exits": 2
+      },
+      {
+        "id": "floor3",
+        "name": "지상1층",
+        "map": "map_floor3.png",
+        "px": [
+          2346,
+          1672
+        ],
+        "m_per_px": 0.04,
+        "scale_src": "CAD 자동",
+        "routes": 0,
+        "zones": 0,
+        "bottlenecks": 0,
+        "exits": 0
+      }
+    ],
+    "cameras": [
+      {
+        "cam_id": "cam01",
+        "name": "채널1 (1_v1)",
+        "floor_id": null,
+        "rtsp": "rtsp://127.0.0.1:8554/1_v1",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam02",
+        "name": "채널2 (2_v1)",
+        "floor_id": null,
+        "rtsp": "rtsp://127.0.0.1:8554/2_v1",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam03",
+        "name": "채널3 (3_v1)",
+        "floor_id": "floor2",
+        "rtsp": "rtsp://127.0.0.1:8554/3_v1",
+        "mapped": true,
+        "enabled": true
+      }
+    ]
+  }
+}
