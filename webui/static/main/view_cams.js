@@ -111,6 +111,15 @@ Views.cams = (() => {
   // ------------------------------------------------------------ 목록
   function badge(cls, txt) { return `<span class="badge ${cls}">${txt}</span>`; }
 
+  /** RTSP는 앞부분이 전부 같다(rtsp://127.0.0.1:8554/…) — 구분되는 건 끝의
+   *  스트림 이름이므로 그쪽을 보여준다. 전체 주소는 title 로. */
+  function rtspTail(url) {
+    if (!url) return "";
+    const m = String(url).split("?")[0].replace(/\/+$/, "");
+    const seg = m.slice(m.lastIndexOf("/") + 1);
+    return seg || m;
+  }
+
   function renderList() {
     const box = $("camList");
     box.innerHTML = "";
@@ -121,21 +130,33 @@ Views.cams = (() => {
       box.innerHTML = `<div class="grow">등록된 카메라가 없습니다. 아래에서 추가하세요.</div>`;
     }
     const def = siteMinConf();
+    // 층별 소제목 — 12대쯤 되면 목록만 봐선 어느 층 것인지 분간이 안 된다.
+    // 층이 하나뿐이면(단일 도면) 넣지 않는다.
+    let lastFloor = null;
     App.cameras.forEach((c) => {
+      const fid = c.floor_id || "default";
+      if (multiFloor() && fid !== lastFloor) {
+        lastFloor = fid;
+        const n = App.cameras.filter((x) => (x.floor_id || "default") === fid).length;
+        const h = document.createElement("div");
+        h.className = "camgrp";
+        h.textContent = `${App.floorName(fid)} · ${n}대`;
+        box.appendChild(h);
+      }
       const div = document.createElement("div");
       div.className = "camrow" + (c.cam_id === sel ? " sel" : "");
       const overridden = c.min_conf != null;
       const effVal = overridden ? c.min_conf : def;   // 입력창에 실효값을 채워둠(A안)
-      const floorBadge = multiFloor()
-        ? badge("fl", "층 " + App.floorName(c.floor_id || "default")) : "";
+      // 층은 그룹 소제목에 이미 있으므로 행마다 배지로 또 달지 않는다.
+      // 이름이 먼저다 — 예전엔 배지 4개가 폭을 다 먹어 이름이 "1..."로 눌렸다.
+      // 층·활성 배지는 아랫줄로 내리고, 활성은 체크박스와 중복이라 배지를 뺐다.
       div.innerHTML = `
         <div class="r1"><span class="dotc" style="background:${camColor(c.cam_id, App.cameras)}"></span>
-          <span class="nm">${c.name || c.cam_id}</span>
+          <span class="nm" title="${c.name || c.cam_id}">${c.name || c.cam_id}</span>
           ${c.mapping ? badge("ok", "매핑 ✓") : badge("warn", "매핑 필요")}
-          ${c.enabled ? badge("cy", "활성") : badge("", "비활성")}
-          ${floorBadge}
           <button class="del" title="삭제">🗑</button></div>
-        <div class="r2"><span>${c.cam_id}</span><span class="rtsp">${c.rtsp}</span>
+        <div class="r2"><span class="cid">${c.cam_id}</span>
+          <span class="rtsp" title="${c.rtsp}">${rtspTail(c.rtsp)}</span>
           <label style="cursor:pointer"><input type="checkbox" class="en" ${c.enabled ? "checked" : ""} /> 활성</label></div>
         <div class="r3">
           <span class="cflab" title="이 카메라의 최소 검출 신뢰도. 값을 지우고 적용하면 기본값(${def}) 상속.">검출 신뢰도</span>
