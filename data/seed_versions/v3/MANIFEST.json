@@ -1,0 +1,156 @@
+{
+  "name": "v3",
+  "note": "17F=시드 3채널 구성(v1 기준) + 16F=CAD·현장 6채널 매핑 유지",
+  "saved_at": "2026-08-19T05:59:41+00:00",
+  "source": "live",
+  "site": "default",
+  "summary": {
+    "site_id": "default",
+    "version": 103,
+    "floors": [
+      {
+        "id": "default",
+        "name": "17F",
+        "map": "map.png",
+        "px": [
+          3400,
+          3207
+        ],
+        "m_per_px": 0.02391,
+        "scale_src": "수동 2점",
+        "routes": 2,
+        "zones": 3,
+        "bottlenecks": 2,
+        "exits": 2
+      },
+      {
+        "id": "floor2",
+        "name": "16F",
+        "map": "map_floor2.png",
+        "px": [
+          2000,
+          1887
+        ],
+        "m_per_px": 0.03662,
+        "scale_src": "CAD 자동",
+        "routes": 5,
+        "zones": 9,
+        "bottlenecks": 0,
+        "exits": 2
+      },
+      {
+        "id": "floor3",
+        "name": "지상1층",
+        "map": "map_floor3.png",
+        "px": [
+          2346,
+          1672
+        ],
+        "m_per_px": 0.04,
+        "scale_src": "CAD 자동",
+        "routes": 0,
+        "zones": 0,
+        "bottlenecks": 0,
+        "exits": 0
+      }
+    ],
+    "cameras": [
+      {
+        "cam_id": "cam01",
+        "name": "채널1 (1_v1)",
+        "floor_id": null,
+        "rtsp": "rtsp://127.0.0.1:8554/1_v1",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam02",
+        "name": "채널2 (2_v1)",
+        "floor_id": null,
+        "rtsp": "rtsp://127.0.0.1:8554/2_v1",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam03",
+        "name": "채널3 (3_v1)",
+        "floor_id": null,
+        "rtsp": "rtsp://127.0.0.1:8554/3_v1",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam04",
+        "name": "16F 북측",
+        "floor_id": "floor2",
+        "rtsp": "rtsp://127.0.0.1:8554/field_16f_n",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam05",
+        "name": "16F 남측",
+        "floor_id": "floor2",
+        "rtsp": "rtsp://127.0.0.1:8554/field_16f_s",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam06",
+        "name": "16F 동측",
+        "floor_id": "floor2",
+        "rtsp": "rtsp://127.0.0.1:8554/field_16f_e",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam07",
+        "name": "16F 서측",
+        "floor_id": "floor2",
+        "rtsp": "rtsp://127.0.0.1:8554/field_16f_w",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam08",
+        "name": "16F 동측 출구",
+        "floor_id": "floor2",
+        "rtsp": "rtsp://127.0.0.1:8554/field_16f_exit_e",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam09",
+        "name": "16F 서측 출구",
+        "floor_id": "floor2",
+        "rtsp": "rtsp://127.0.0.1:8554/field_16f_exit_w",
+        "mapped": true,
+        "enabled": true
+      },
+      {
+        "cam_id": "cam10",
+        "name": "1F 동측 출구",
+        "floor_id": "floor3",
+        "rtsp": "rtsp://127.0.0.1:8554/field_1f_exit_e",
+        "mapped": false,
+        "enabled": false
+      },
+      {
+        "cam_id": "cam11",
+        "name": "1F 서측 출구",
+        "floor_id": "floor3",
+        "rtsp": "rtsp://127.0.0.1:8554/field_1f_exit_w",
+        "mapped": false,
+        "enabled": false
+      },
+      {
+        "cam_id": "cam12",
+        "name": "1F 서측 게이트",
+        "floor_id": "floor3",
+        "rtsp": "rtsp://127.0.0.1:8554/field_1f_gate_w",
+        "mapped": false,
+        "enabled": false
+      }
+    ]
+  }
+}
