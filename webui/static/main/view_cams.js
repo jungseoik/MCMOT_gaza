@@ -13,6 +13,7 @@ Views.cams = (() => {
   let mode = "pair";                    // pair | roi | pan
   const frames = {};                    // cam_id -> {img, w, h}
   let cctvPts = [], mapPts = [], roi = [];
+  let showAllCov = false;        // 전 카메라 대응점·커버영역 표시
   let selFloor = "default";             // 선택 카메라가 매핑될 층 id
   const mapImages = {};                 // floor_id -> Image (층별 맵 캐시)
 
@@ -598,8 +599,74 @@ Views.cams = (() => {
     }
   }
 
+  /** 이 층 전체 카메라의 대응점·커버영역을 맵에 한꺼번에 그린다.
+   *  카메라를 하나씩 눌러보지 않고도 어디가 겹치고 어디가 비었는지 보이게. */
+  function drawAllCoverage(g) {
+    const { ctx } = g;
+    const others = App.cameras.filter(
+      (c) => c.mapping && (c.floor_id || "default") === selFloor);
+    ctx.save();
+    others.forEach((c) => {
+      const isSel = c.cam_id === sel;
+      const col = camColor(c.cam_id, App.cameras);
+      const pts = c.mapping.map_pts;
+      // 커버영역 = 대응점의 컨벡스 헐 (실제 투영 게이트와 같은 규칙)
+      const hull = convexHull(pts);
+      if (hull.length >= 3) {
+        mcPath(g, hull, true);
+        ctx.fillStyle = col; ctx.globalAlpha = isSel ? 0.22 : 0.10; ctx.fill();
+        ctx.globalAlpha = isSel ? 1 : 0.55;
+        ctx.strokeStyle = col; ctx.lineWidth = isSel ? 2.5 : 1.5;
+        ctx.setLineDash(isSel ? [] : [6, 4]); ctx.stroke(); ctx.setLineDash([]);
+      }
+      ctx.globalAlpha = isSel ? 1 : 0.7;
+      pts.forEach((pt) => {
+        const [x, y] = PT(g, pt[0], pt[1]);
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(x, y, isSel ? 4.5 : 3, 0, 7); ctx.fill();
+        ctx.strokeStyle = "#111"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(x, y, isSel ? 4.5 : 3, 0, 7); ctx.stroke();
+      });
+      // 이름표 — 커버영역 중심
+      const cx = pts.reduce((a, q) => a + q[0], 0) / pts.length;
+      const cy = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+      const [lx, ly] = PT(g, cx, cy);
+      const txt = `${c.name || c.cam_id} (${pts.length})`;
+      ctx.font = `${isSel ? "bold " : ""}11px Pretendard, sans-serif`;
+      const w = ctx.measureText(txt).width + 10;
+      ctx.globalAlpha = isSel ? 0.9 : 0.6;
+      ctx.fillStyle = "rgba(17,17,17,.8)";
+      ctx.fillRect(lx - w / 2, ly - 8, w, 16);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = col;
+      ctx.fillText(txt, lx - w / 2 + 5, ly + 4);
+    });
+    ctx.restore();
+  }
+
+  /** 컨벡스 헐 (Andrew monotone chain) — 커버영역 표시용. */
+  function convexHull(pts) {
+    if (pts.length < 3) return pts.slice();
+    const p = pts.map((q) => [q[0], q[1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) =>
+      (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const half = (arr) => {
+      const h = [];
+      for (const q of arr) {
+        while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+        h.push(q);
+      }
+      h.pop();
+      return h;
+    };
+    return half(p).concat(half(p.slice().reverse()));
+  }
+
   function mapOverlay(g) {
-    drawSiteElements(g, selFloorObj() || App.site, { faint: true });
+    // 전체 커버리지를 켜면 구역·병목·경로는 숨긴다 — 색이 겹쳐 카메라
+    // 커버영역이 안 보이기 때문. 대응점 작업 중엔 커버영역만 보이는 게 낫다.
+    if (!showAllCov) drawSiteElements(g, selFloorObj() || App.site, { faint: true });
+    if (showAllCov) drawAllCoverage(g);
     mcNumbered(g, mapPts, null, pairColor);
     // hover crosshair: 카메라에서 마우스 올렸을 때 순방향 투영 위치 표시
     if (hoverCam) {
@@ -673,6 +740,17 @@ Views.cams = (() => {
     };
     // 도면 회전 — 표시 전용. 저장되는 map_pts 는 언제나 원본 맵 px 이므로
     // 돌려놓고 찍어도 매핑값은 그대로다(toMap 이 역회전).
+    $("covAllBtn").onclick = () => {
+      showAllCov = !showAllCov;
+      $("covAllBtn").classList.toggle("on", showAllCov);
+      const n = App.cameras.filter(
+        (c) => c.mapping && (c.floor_id || "default") === selFloor).length;
+      hint(showAllCov
+        ? `이 층 매핑된 카메라 ${n}대의 대응점·커버영역 — 겹치는 곳과 비는 곳을 `
+          + `확인하세요. (색이 겹치지 않게 구역·병목·경로는 잠시 숨김)`
+        : "구역·병목·경로 표시를 되돌렸습니다.");
+      if (mapMc) mapMc.render();
+    };
     $("mapRotBtn").onclick = () => {
       if (!mapMc) return;
       mapMc.setRot((mapMc.rot + 90) % 360);
