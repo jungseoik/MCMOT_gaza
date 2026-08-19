@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import urllib.request
@@ -73,6 +74,32 @@ def summarize(root: Path) -> dict:
             "floors": floors, "cameras": cams}
 
 
+CRED_RE = re.compile(r"^(rtsps?|https?)://[^/@\s]+:[^/@\s]+@", re.I)
+
+
+def find_credentials(root: Path) -> list[tuple[str, str]]:
+    """카메라 URL에 박힌 계정/비밀번호 탐지 — [(cam_id, 마스킹된 url)].
+
+    현장 NVR 은 rtsp://id:pw@host 형태라 그대로 보관하면 git 에 비밀번호가
+    올라간다. seed_versions/ 는 커밋 대상이므로 기본적으로 막는다.
+    """
+    hits = []
+    cdir = root / "cameras"
+    if not cdir.is_dir():
+        return hits
+    for p in sorted(cdir.glob("*.json")):
+        try:
+            c = json.loads(p.read_text())
+        except Exception:
+            continue
+        url = c.get("rtsp") or ""
+        if CRED_RE.match(url):
+            scheme, rest = url.split("://", 1)
+            host = rest.split("@", 1)[1]
+            hits.append((c.get("cam_id", p.stem), f"{scheme}://***:***@{host}"))
+    return hits
+
+
 def copy_tree(src: Path, dst: Path) -> None:
     """sessions/ 를 뺀 전체 복사 (대상 내용은 먼저 비운다)."""
     if dst.exists():
@@ -99,6 +126,19 @@ def cmd_save(a) -> int:
     if dst.exists() and not a.force:
         print(f"오류: 이미 있는 버전 '{a.name}' — 덮어쓰려면 --force", file=sys.stderr)
         return 1
+    creds = find_credentials(src)
+    if creds and not a.allow_secrets:
+        print(f"중단: RTSP 주소에 계정/비밀번호가 들어 있습니다 ({len(creds)}대).",
+              file=sys.stderr)
+        for cid, masked in creds:
+            print(f"  {cid}  {masked}", file=sys.stderr)
+        print("\ndata/seed_versions/ 는 git 커밋 대상이라 그대로 저장하면 "
+              "비밀번호가 저장소에 남습니다.\n"
+              "  · 보관이 꼭 필요하면: --allow-secrets (그리고 이 버전은 커밋하지 말 것)\n"
+              "  · 권장: 현장 계정은 URL 대신 환경변수로 다루기\n"
+              "    (tools/bulk_register_cams.py 의 NVR_USER/NVR_PASS 방식)",
+              file=sys.stderr)
+        return 2
     copy_tree(src, dst)
     man = {"name": a.name, "note": a.note or "",
            "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -202,6 +242,8 @@ def main() -> int:
     p.add_argument("--source", choices=("seed", "live"), default="seed",
                    help="seed=현재 디폴트(기본) / live=지금 돌고 있는 사이트")
     p.add_argument("--force", action="store_true", help="같은 이름 덮어쓰기")
+    p.add_argument("--allow-secrets", action="store_true",
+                   help="RTSP URL 에 계정·비밀번호가 있어도 저장 (커밋 금지)")
     p.set_defaults(func=cmd_save)
 
     p = sub.add_parser("list", help="보관된 버전 목록")
