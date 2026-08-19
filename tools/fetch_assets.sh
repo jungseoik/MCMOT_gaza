@@ -103,6 +103,8 @@ if [ "$DO_CAD" -eq 1 ]; then
   fetch "backseollgi/MCMOT" model "cad/17F.dwg"                       "cad/17F.dwg"                       || RC=1
   fetch "backseollgi/MCMOT" model "cad/17F.dxf"                       "cad/17F.dxf"                       || RC=1
   fetch "backseollgi/MCMOT" model "cad/17F_Egress Review(Sample).dwg" "cad/17F_Egress Review(Sample).dwg" || RC=1
+  # 여러 층을 한 시트에 늘어놓은 도면(전체 551x3326 m). 지상1층 맵의 출처지만
+  # 운영 맵은 여기서 1층만 잘라낸 것(93.8x66.9 m)이라 그대로는 재현되지 않는다.
   fetch "backseollgi/MCMOT" model "cad/A-101_128_각 층 평면도_최종_수정.dwg" "cad/A-101_128_각 층 평면도_최종_수정.dwg" || RC=1
   # 현재 17F·16F 에 적용되어 있는 도면 — 같은 맵을 재현하려면 이걸 편집기에 올린다
   fetch "backseollgi/MCMOT" model "cad/17F_v2.dwg"                     "cad/17F_v2.dwg"                     || RC=1
