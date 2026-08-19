@@ -21,7 +21,7 @@
 #   bash tools/fetch_assets.sh --weights      # 가중치만(공개, 토큰 불필요)
 #   bash tools/fetch_assets.sh --onnx         # ONNX만
 #   bash tools/fetch_assets.sh --cad          # CAD 원본만
-#   bash tools/fetch_assets.sh --field        # 현장 화재대피훈련 영상만(1F·16F, 450MB·비공개)
+#   bash tools/fetch_assets.sh --field        # 현장 화재대피훈련 RTSP 송출본만(1F 3 + 16F 6, 294MB·비공개)
 #   bash tools/fetch_assets.sh --manual       # 사용 가이드 docx·pdf·스크린샷(버전별, ~45MB)
 #   bash tools/fetch_assets.sh --force        # 이미 있어도 다시 받기
 #   HF_TOKEN=hf_xxx bash tools/fetch_assets.sh   # MCMOT(비공개) 접근용
@@ -67,8 +67,15 @@ fetch() {
   echo "  ↓ $repo :: $rpath  →  $dest"
   mkdir -p "$(dirname "$dest")"
   local src
-  src="$("$HF_BIN" download "$repo" "$rpath" --repo-type "$rt")" || {
+  src="$("$HF_BIN" download "$repo" "$rpath" --repo-type "$rt" | tail -n 1)" || {
     echo "  [실패] $repo/$rpath — 비공개 레포면 HF_TOKEN 필요(위 주석 참조)" >&2
+    return 1
+  }
+  # huggingface_hub 1.x 의 hf CLI 는 경로를 "path=/..." 로 출력한다(0.x 는 맨경로).
+  # 이 접두를 안 벗기면 cp 가 실패하는데도 위 || 가 안 걸려 ✔ 로 보인다 — 실측 확인.
+  src="${src#path=}"
+  [ -f "$src" ] || {
+    echo "  [실패] $repo/$rpath — 다운로드 경로를 못 찾음: $src" >&2
     return 1
   }
   cp -f "$src" "$dest"
@@ -97,11 +104,15 @@ if [ "$DO_CAD" -eq 1 ]; then
   fetch "backseollgi/MCMOT" model "cad/17F.dxf"                       "cad/17F.dxf"                       || RC=1
   fetch "backseollgi/MCMOT" model "cad/17F_Egress Review(Sample).dwg" "cad/17F_Egress Review(Sample).dwg" || RC=1
   fetch "backseollgi/MCMOT" model "cad/A-101_128_각 층 평면도_최종_수정.dwg" "cad/A-101_128_각 층 평면도_최종_수정.dwg" || RC=1
+  # 현재 17F·16F 에 적용되어 있는 도면 — 같은 맵을 재현하려면 이걸 편집기에 올린다
+  fetch "backseollgi/MCMOT" model "cad/17F_v2.dwg"                     "cad/17F_v2.dwg"                     || RC=1
+  fetch "backseollgi/MCMOT" model "cad/17F_v2.dxf"                     "cad/17F_v2.dxf"                     || RC=1
 fi
 
 if [ "$DO_FIELD" -eq 1 ]; then
   echo "== 현장 영상 (실제 화재대피훈련 0521 — backseollgi/MCMOT/field, 비공개·개인정보) =="
-  # 폴더째 다운로드(1F·16F, 새 층 자동 포함) → 로컬 field/ (git 무시). 원본 avi + 미리보기 jpg
+  # HF 에는 **RTSP 송출본(encoded/, H.264 mp4)** 만 올려둔다 — 9채널 송출에 필요한 최소 집합.
+  # 원본 avi(raw/)·추론 산출물(infer/)은 4.9GB 라 원본 서버에만 둔다.
   if "$HF_BIN" download backseollgi/MCMOT --repo-type model --include "field/**" --local-dir . >/dev/null; then
     echo "  ↓ field/** → ./field/  ($(du -sh field 2>/dev/null | cut -f1))"
   else
