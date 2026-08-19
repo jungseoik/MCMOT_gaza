@@ -28,9 +28,13 @@ _IMAGENET_STD = [0.229, 0.224, 0.225]
 class RFDETRTRTDetector:
     """TensorRT RF-DETR person detector (drop-in with BoostTrackGPUInference)."""
 
-    def __init__(self, engine_path: str, res: int = 560, conf_thresh: float = 0.1,
+    def __init__(self, engine_path: str, res: int | None = None, conf_thresh: float = 0.1,
                  person_class: int = 1, num_select: int = 300):
         self.engine = TRTEngine(engine_path)
+        # 입력 해상도 자동 감지(엔진 바인딩) — Base(560)/Large(704) 등 변형 무설정 지원.
+        if res is None:
+            ishape = tuple(self.engine.engine.get_tensor_shape(self.engine.input_names[0]))
+            res = int(ishape[2]) if len(ishape) >= 4 and ishape[2] > 0 else 560
         self.res = res
         self.conf = conf_thresh
         self.person = person_class
