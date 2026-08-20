@@ -15,7 +15,8 @@ Views.cams = (() => {
   let cctvPts = [], mapPts = [], roi = [];
   let showAllCov = false;
   // 출입구 화면 통과선 편집 — {exit_id, pts:[2점], inside} (선택 기능)
-  let exLineExit = null, exLinePts = [], exLineInside = null;        // 전 카메라 대응점·커버영역 표시
+  let exLineExit = null, exLinePts = [], exLineInside = null;
+  let exKind = "line", exZonePts = [];      // "line" | "zone" (영역 다각형)        // 전 카메라 대응점·커버영역 표시
   let selFloor = "default";             // 선택 카메라가 매핑될 층 id
   const mapImages = {};                 // floor_id -> Image (층별 맵 캐시)
 
@@ -492,7 +493,16 @@ Views.cams = (() => {
   /** 선택 출입구의 저장된 화면 통과선을 편집 상태로 가져온다. */
   function loadExLine() {
     const ex = (selFloorObj()?.exits || []).find((e) => e.id === exLineExit);
-    if (ex && ex.count_cam === sel && ex.cam_line && ex.cam_inside) {
+    exZonePts = [];
+    if (ex && ex.count_cam === sel && ex.cam_zone && ex.cam_zone.length >= 3) {
+      exKind = "zone";
+      exZonePts = ex.cam_zone.map((p) => p.slice());
+      $("exDwell").value = ex.cam_zone_dwell || 2;
+      exLinePts = []; exLineInside = null;
+      syncExKind();
+      hint(`${ex.name || ex.id} — 이 카메라가 영역으로 담당 중.`);
+    } else if (ex && ex.count_cam === sel && ex.cam_line && ex.cam_inside) {
+      exKind = "line"; syncExKind();
       exLinePts = ex.cam_line.map((p) => p.slice());
       exLineInside = ex.cam_inside.slice();
       hint(`${ex.name || ex.id} — 이 카메라가 담당 중. 다시 그리려면 [되돌리기] 후 클릭.`);
@@ -507,29 +517,42 @@ Views.cams = (() => {
   }
 
   /** 화면 통과선을 site 에 저장. line=null 이면 해제(맵 카운트로 복귀). */
-  async function saveExLine(line) {
+  async function saveExLine(payload) {
     const exits = (selFloorObj()?.exits) || [];
     const ex = exits.find((e) => e.id === exLineExit);
     if (!ex) { hint("출입구를 찾을 수 없습니다.", true); return; }
-    if (line) {
-      ex.count_cam = sel; ex.cam_line = line.pts; ex.cam_inside = line.inside;
-    } else {
-      ex.count_cam = null; ex.cam_line = null; ex.cam_inside = null;
+    // 선·영역은 배타 — 한 출입구는 한 방식으로만 집계한다
+    ex.count_cam = ex.cam_line = ex.cam_inside = ex.cam_zone = null;
+    if (payload && payload.zone) {
+      ex.count_cam = sel; ex.cam_zone = payload.zone;
+      ex.cam_zone_dwell = payload.dwell || 2;
+    } else if (payload) {
+      ex.count_cam = sel; ex.cam_line = payload.pts; ex.cam_inside = payload.inside;
     }
     try {
       App.syncFloor();                       // 별칭된 top-level → 층 객체 반영
       await API.putSite(App.site);
       await App.reloadSite();
       renderExLineUI();
-      hint(line
-        ? `${ex.name || ex.id} — 이제 ${sel} 화면에서 카운트합니다 `
+      hint(payload
+        ? `${ex.name || ex.id} — 이제 ${sel} 화면 `
+          + `${payload.zone ? "영역" : "통과선"}으로 집계합니다 `
           + `(맵 선은 표시·폭 계산에만 사용).`
-        : `${ex.name || ex.id} — 맵 통과선 카운트로 되돌렸습니다.`);
+        : `${ex.name || ex.id} — 맵 통과선 집계로 되돌렸습니다.`);
     } catch (e) { hint("저장 실패: " + e.message, true); }
+  }
+
+  /** 선/영역 토글 표시 동기화. */
+  function syncExKind() {
+    document.querySelectorAll("#exKind .tag-btn").forEach((b) =>
+      b.classList.toggle("on", b.dataset.kind === exKind));
+    const w = $("exDwellWrap");
+    if (w) w.style.display = (exKind === "zone") ? "" : "none";
   }
 
   function setMode(m) {
     mode = m;
+    if (typeof syncExKind === "function") syncExKind();
     if (typeof renderExLineUI === "function") renderExLineUI();
     document.querySelectorAll("#camTools .tag-btn").forEach((b) =>
       b.classList.toggle("on", b.dataset.mode === m));
@@ -541,6 +564,13 @@ Views.cams = (() => {
     if (!sel) return;
     if (mode === "exline") {
       if (!exLineExit) { hint("먼저 어느 출입구인지 고르세요.", true); return; }
+      if (exKind === "zone") {
+        exZonePts.push([p.x, p.y]);
+        hint(exZonePts.length < 3
+          ? `영역 ${exZonePts.length}/3 — 문(나가는 공간)을 감싸게 찍으세요.`
+          : `영역 ${exZonePts.length}점 — 더 찍어 다듬거나 [매핑 저장].`);
+        renderSel(); return;
+      }
       if (exLinePts.length < 2) exLinePts.push([p.x, p.y]);
       else exLineInside = [p.x, p.y];       // 3번째 클릭 = '안쪽'
       hint(exLinePts.length < 2
@@ -566,7 +596,8 @@ Views.cams = (() => {
 
   function undo() {
     if (mode === "exline") {
-      if (exLineInside) exLineInside = null;
+      if (exKind === "zone") exZonePts.pop();
+      else if (exLineInside) exLineInside = null;
       else exLinePts.pop();
       renderSel(); return;
     }
@@ -584,7 +615,15 @@ Views.cams = (() => {
 
   async function saveMapping() {
     if (!sel) return;
-    if (mode === "exline") {                 // 화면 통과선 저장
+    if (mode === "exline") {                 // 화면 집계(선 또는 영역) 저장
+      if (exKind === "zone") {
+        if (exZonePts.length < 3) {
+          hint("영역은 3점 이상이어야 합니다.", true); return;
+        }
+        await saveExLine({ zone: exZonePts.map((p) => p.slice()),
+                           dwell: parseInt($("exDwell").value, 10) || 2 });
+        return;
+      }
       if (exLinePts.length !== 2 || !exLineInside) {
         hint("통과선 2점 + 안쪽 1점을 모두 찍어야 저장됩니다.", true); return;
       }
@@ -634,6 +673,18 @@ Views.cams = (() => {
   function drawExLine(g) {
     const { ctx } = g;
     const COL = "#FF9F1C", IN = "#30DCFB";
+    if (exKind === "zone") {
+      if (exZonePts.length >= 2) {
+        mcPath(g, exZonePts, exZonePts.length >= 3);
+        if (exZonePts.length >= 3) {
+          ctx.fillStyle = "rgba(255,159,28,.22)"; ctx.fill();
+        }
+        ctx.strokeStyle = COL; ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+      }
+      mcNumbered(g, exZonePts, COL);
+      return;
+    }
     if (exLinePts.length) {
       if (exLinePts.length === 2) {
         const a = PT(g, exLinePts[0][0], exLinePts[0][1]);
@@ -890,6 +941,12 @@ Views.cams = (() => {
     // 도면 회전 — 표시 전용. 저장되는 map_pts 는 언제나 원본 맵 px 이므로
     // 돌려놓고 찍어도 매핑값은 그대로다(toMap 이 역회전).
     $("exLineSel").onchange = (e) => { exLineExit = e.target.value || null; loadExLine(); };
+    document.querySelectorAll("#exKind .tag-btn").forEach((b) => {
+      b.onclick = () => { exKind = b.dataset.kind; syncExKind(); renderSel();
+        hint(exKind === "zone"
+          ? "문(나가는 공간)을 감싸도록 3점 이상 찍으세요 — 그 영역에 들어오면 집계됩니다."
+          : "문지방을 가로지르게 2점 + 안쪽 1점을 찍으세요."); };
+    });
     $("exLineClear").onclick = async () => {
       if (!exLineExit) return;
       if (!confirm("이 출입구의 화면 통과선을 해제하고 맵 통과선 카운트로 되돌릴까요?")) return;

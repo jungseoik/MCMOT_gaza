@@ -4,6 +4,7 @@
 """
 from system.spatial.geometry import (
     DirectionalLine,
+    ZoneGate,
     PolylineHit,
     nearest_on_polyline,
     point_in_polygon,
@@ -17,6 +18,7 @@ __all__ = [
     "CameraProjector",
     "ProjectedPoint",
     "DirectionalLine",
+    "ZoneGate",
     "PolylineHit",
     "nearest_on_polyline",
     "nearest_node_id",

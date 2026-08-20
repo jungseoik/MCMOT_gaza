@@ -98,10 +98,23 @@ class ExitLine(BaseModel):
     count_cam: str | None = None        # 카운트 담당 카메라 id (없으면 맵 카운트)
     cam_line: tuple[Point, Point] | None = None   # 그 카메라 화면 px 통과선
     cam_inside: Point | None = None               # 그 카메라 화면 px '안쪽' 점
+    # 화면 **영역** 방식 — 문이 프레임 가장자리라 선 통과가 성립하지 않을 때
+    # (사람이 문으로 들어가며 화면에서 사라져 선 반대편에 안 나타남).
+    # 영역 밖에서 본 적 있는 트랙이 영역 안으로 들어와 머물면 통과로 센다.
+    cam_zone: list[Point] | None = None           # 그 카메라 화면 px 다각형(3점 이상)
+    cam_zone_dwell: int = 2                       # 진입 후 이 프레임 수만큼 머물면 집계
+                                                  # (5fps 실측: 3이면 발끝 잘린 궤적을
+                                                  #  놓친다 — 접촉이 2프레임뿐)
 
     def counts_in_camera(self) -> bool:
-        """카운트를 화면 좌표에서 하는가 (셋 다 있어야 유효)."""
-        return bool(self.count_cam and self.cam_line and self.cam_inside)
+        """카운트를 화면 좌표에서 하는가 (선 또는 영역)."""
+        return bool(self.count_cam) and (
+            bool(self.cam_line and self.cam_inside)
+            or bool(self.cam_zone and len(self.cam_zone) >= 3))
+
+    def camera_zone_mode(self) -> bool:
+        """화면 방식 중 **영역**을 쓰는가 (영역이 선보다 우선)."""
+        return bool(self.count_cam and self.cam_zone and len(self.cam_zone) >= 3)
 
 
 class GraphNode(BaseModel):

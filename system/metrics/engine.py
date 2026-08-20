@@ -41,6 +41,7 @@ from system.metrics.session import EvaluationSession
 from system.spatial import (
     CameraProjector,
     DirectionalLine,
+    ZoneGate,
     nearest_on_polyline,
     point_in_polygon,
     polygon_area_m2,
@@ -73,6 +74,13 @@ class _ExitCounter:
     out_count: int = 0
     counted_in: set = field(default_factory=set)   # 이미 in 집계된 gid
     counted_out: set = field(default_factory=set)  # 이미 out 집계된 gid
+
+    def observe_zone(self, gid: str, pt, bbox) -> None:
+        """화면 영역 게이트용 — bbox 를 함께 넘긴다. 집계·debounce 는 동일."""
+        ev = self.line.observe(gid, pt, bbox)
+        if ev == "out" and gid not in self.counted_out:
+            self.counted_out.add(gid)
+            self.out_count += 1
 
     def observe(self, gid: str, pt: tuple[float, float]) -> None:
         ev = self.line.observe(gid, pt)
@@ -158,12 +166,17 @@ class MetricsEngine:
                 # 화면 통과선이 설정된 출입구는 **화면 px 기하**로 카운터를 만든다.
                 # 카운터는 출입구당 하나뿐이라 맵/화면이 동시에 세는 일은 없다.
                 in_cam = ex.counts_in_camera()
-                geo_line = ex.cam_line if in_cam else ex.line
-                geo_inside = ex.cam_inside if in_cam else ex.inside
-                key = (tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam)
-                # 화면 px 는 맵 px 보다 스케일이 작을 수 있어 데드밴드를 줄인다
-                line = DirectionalLine(geo_line, geo_inside,
-                                       margin_px=(margin_px * 0.5 if in_cam else margin_px))
+                if ex.camera_zone_mode():          # 화면 **영역** (선보다 우선)
+                    key = (tuple(map(tuple, ex.cam_zone)), ex.cam_zone_dwell, "zone")
+                    line = ZoneGate(ex.cam_zone, dwell=ex.cam_zone_dwell)
+                else:
+                    geo_line = ex.cam_line if in_cam else ex.line
+                    geo_inside = ex.cam_inside if in_cam else ex.inside
+                    key = (tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam)
+                    # 화면 px 는 맵 px 보다 스케일이 작을 수 있어 데드밴드를 줄인다
+                    line = DirectionalLine(
+                        geo_line, geo_inside,
+                        margin_px=(margin_px * 0.5 if in_cam else margin_px))
                 st = _ExitCounter(line=line, cfg_key=key)
                 if in_cam:
                     self._cam_exits.setdefault(ex.count_cam, []).append(ex.id)
@@ -222,7 +235,12 @@ class MetricsEngine:
                 # 아래 ROI 게이트에서 버려지는데, 카운트는 거기서도 살아야 한다.
                 for _eid in self._cam_exits.get(cam_id, ()):
                     _ec = self._exits.get(_eid)
-                    if _ec is not None:
+                    if _ec is None:
+                        continue
+                    if isinstance(_ec.line, ZoneGate):
+                        # 문 앞은 발끝이 잘려 튄다 — bbox 도 함께 넘겨 겹침으로 판정
+                        _ec.observe_zone(gid_pre, tr.foot_uv, tr.bbox_xyxy)
+                    else:
                         _ec.observe(gid_pre, tr.foot_uv)
                 p = proj.project(tr.foot_uv)
                 self._debug_foot[gid_pre] = {
@@ -299,12 +317,17 @@ class MetricsEngine:
         self._cam_exits = {}
         for ex in self._site.exits:
             in_cam = ex.counts_in_camera()
-            geo_line = ex.cam_line if in_cam else ex.line
-            geo_inside = ex.cam_inside if in_cam else ex.inside
-            self._exits[ex.id] = _ExitCounter(
-                line=DirectionalLine(geo_line, geo_inside,
-                                     margin_px=(margin_px * 0.5 if in_cam else margin_px)),
-                cfg_key=(tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam))
+            if ex.camera_zone_mode():
+                gate = ZoneGate(ex.cam_zone, dwell=ex.cam_zone_dwell)
+                key = (tuple(map(tuple, ex.cam_zone)), ex.cam_zone_dwell, "zone")
+            else:
+                geo_line = ex.cam_line if in_cam else ex.line
+                geo_inside = ex.cam_inside if in_cam else ex.inside
+                gate = DirectionalLine(
+                    geo_line, geo_inside,
+                    margin_px=(margin_px * 0.5 if in_cam else margin_px))
+                key = (tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam)
+            self._exits[ex.id] = _ExitCounter(line=gate, cfg_key=key)
             if in_cam:
                 self._cam_exits.setdefault(ex.count_cam, []).append(ex.id)
 

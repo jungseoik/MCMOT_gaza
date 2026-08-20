@@ -137,3 +137,63 @@ class DirectionalLine:
     def forget(self, key: str) -> None:
         """소실된 키의 부호 상태 제거."""
         self._side_of.pop(key, None)
+
+
+class ZoneGate:
+    """화면 영역 진입 판정 — 문이 화면 가장자리라 선 통과가 불가능할 때.
+
+    선(DirectionalLine)은 "선 이쪽 관측 → 저쪽 관측" 두 번이 필요하다. 그런데
+    출입문이 프레임 가장자리에 있으면 사람이 문으로 들어가며 화면에서 사라지지
+    **선 반대편에 나타나지 않는다** — 그래서 아무리 잘 그어도 카운트가 안 된다.
+
+    이 클래스는 "저쪽 관측"을 요구하지 않는다:
+        영역 **밖**에서 한 번이라도 본 키가 → 영역 **안**으로 들어와
+        dwell 프레임 이상 머물면 → "out" 1회.
+
+    포함 판정은 발끝점만 보지 않는다. 문 앞에서는 발이 문틀·프레임 경계에
+    잘려 발끝점이 튀므로, bbox 면적의 일정 비율 이상이 겹쳐도 안으로 본다.
+    """
+
+    def __init__(self, polygon, dwell: int = 3, overlap: float = 0.3):
+        self.poly = [tuple(p) for p in polygon]
+        self.dwell = max(1, int(dwell))
+        self.overlap = float(overlap)
+        self._seen_outside: set = set()   # 밖에서 본 적 있는 키
+        self._streak: dict = {}           # 키 -> 연속 진입 프레임 수
+
+    def _inside(self, pt, bbox=None) -> bool:
+        if pt is not None and point_in_polygon(pt, self.poly):
+            return True                    # 발끝이 안에 있으면 확정
+        if bbox is None or self.overlap <= 0:
+            return False
+        # bbox 를 5x5 로 샘플링해 겹침 비율 추정 (신규 의존성 없이)
+        x1, y1, x2, y2 = (float(v) for v in bbox)
+        if x2 <= x1 or y2 <= y1:
+            return False
+        n = 5
+        hit = 0
+        for i in range(n):
+            for j in range(n):
+                px = x1 + (x2 - x1) * (i + 0.5) / n
+                py = y1 + (y2 - y1) * (j + 0.5) / n
+                if point_in_polygon((px, py), self.poly):
+                    hit += 1
+        return hit / (n * n) >= self.overlap
+
+    def observe(self, key: str, pt=None, bbox=None) -> str | None:
+        """이번 관측으로 '나감'이 성립하면 "out", 아니면 None."""
+        inside = self._inside(pt, bbox)
+        if not inside:
+            self._seen_outside.add(key)    # 밖에서 접근한 이력
+            self._streak.pop(key, None)
+            return None
+        if key not in self._seen_outside:
+            return None                    # 처음부터 안에 있던 것(문 안쪽에서 등장)
+        n = self._streak.get(key, 0) + 1
+        self._streak[key] = n
+        return "out" if n == self.dwell else None   # dwell 도달 순간 1회만
+
+    def forget(self, key: str) -> None:
+        self._seen_outside.discard(key)
+        self._streak.pop(key, None)
+

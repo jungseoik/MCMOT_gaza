@@ -270,8 +270,15 @@
             <button class="tag-btn" data-mode="pan">이동</button>
           </div>
           <span class="fieldlab hidden" id="exLineWrap">출입구
-            <select id="exLineSel" title="이 카메라가 카운트를 담당할 출입구"></select>
-            <button class="tag-btn" id="exLineClear" title="이 출입구의 화면 통과선 해제 — 맵 카운트로 되돌림">해제</button>
+            <select id="exLineSel" title="이 카운트를 담당할 출입구"></select>
+            <span class="seg" id="exKind">
+              <button class="tag-btn on" data-kind="line" title="문이 화면 안쪽에 있을 때 — 선을 넘으면 집계">선</button>
+              <button class="tag-btn" data-kind="zone" title="문이 화면 가장자리라 절반만 보일 때 — 영역에 들어오면 집계">영역</button>
+            </span>
+            <label class="fieldlab" id="exDwellWrap" style="display:none">체류
+              <input id="exDwell" type="number" min="1" max="10" value="2" style="width:46px"
+                     title="영역에 이 프레임 수만큼 머물면 집계 (5fps 기준 2 권장)"></label>
+            <button class="tag-btn" id="exLineClear" title="이 출입구의 화면 집계 해제 — 맵 카운트로 되돌림">해제</button>
           </span>
           <button class="tag-btn" id="pairUndo">↶ 마지막 취소</button>
           <button class="tag-btn" id="pairClear">지우기</button>
