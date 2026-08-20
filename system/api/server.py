@@ -1412,6 +1412,20 @@ class _Preview:
 _preview = _Preview()
 
 
+def _sweep_preview_tmp() -> None:
+    """서버 기동 시 남은 미리보기 임시 디렉터리 청소.
+
+    미리보기 도중 API 가 재시작되면 stop() 이 못 돌아 /tmp/macs_preview_* 가
+    영구히 남는다(실측 확인). 기동 때 한 번 쓸어 준다 — 이 시점엔 살아 있는
+    세션이 있을 수 없다.
+    """
+    for d in Path(tempfile.gettempdir()).glob("macs_preview_*"):
+        shutil.rmtree(d, ignore_errors=True)
+
+
+_sweep_preview_tmp()
+
+
 @app.post("/api/preview/start")
 async def preview_start(payload: dict = None):
     """임의 RTSP 를 추론까지 돌려 미리보기 — 등록·저장 없음."""
