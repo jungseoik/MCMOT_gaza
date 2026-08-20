@@ -301,6 +301,9 @@ Views.map = (() => {
           const w = Math.sqrt(dx * dx + dy * dy) * mpp;
           meta = `W ${w.toFixed(2)}m · C ${Math.max(1, Math.round(w * qd))}명/분`;
         }
+        // 카운트 출처 — 맵 선인지, 어느 카메라 화면인지
+        meta += (ex.count_cam && ex.cam_line) ? ` · ${ex.count_cam} 화면 카운트`
+                                              : " · 맵 카운트";
         box.appendChild(elItem(ex.name || ex.id, meta, MC_COLORS.exit,
           () => { s.exits.splice(i, 1); refresh(); }));
       });
