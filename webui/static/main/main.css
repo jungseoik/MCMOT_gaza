@@ -93,6 +93,10 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .elitem .del{ background:none; border:0; color:var(--text-3); cursor:pointer; font-size:15px; }
 .elitem .del:hover{ color:var(--pia-coral); }
 .elitem-bn{ flex-wrap:wrap; row-gap:4px; }
+/* 추론 모델 패널 — 현재 적용 모델 요약 줄 */
+.curmodel{ color:var(--text-2); font-size:13px; margin:-2px 0 6px; }
+.curmodel b{ color:var(--pia-cyan); }
+
 /* 추론 모델 선택 — 프로파일 카드(선택된 것 강조, 엔진 없는 건 비활성) */
 .elitem.infer{ align-items:flex-start; cursor:pointer; }
 .elitem.infer .dot{ width:10px; height:10px; border-radius:50%; margin-top:4px;

@@ -346,12 +346,16 @@ Views.map = (() => {
   // 전환하면 추론 계층만 재기동한다 — 사이트 설정·세션 녹화본은 그대로.
   let inferBusy = false;
 
-  async function loadInfer() {
+  async function loadInfer(keepNote) {
     const box = $("inferList"), note = $("inferNote");
     box.innerHTML = "";
     let d;
     try { d = await (await fetch("/api/infer/profiles")).json(); }
     catch (e) { note.textContent = "추론 프로파일을 불러오지 못했습니다"; return; }
+    // 지금 돌고 있는 것 한 줄 — 카드에도 표시되지만 "무엇이 적용 중인지"를
+    // 스크롤 없이 바로 읽히게 한다.
+    const cur = (d.profiles || []).find((p) => p.selected);
+    $("inferCur").innerHTML = cur ? `지금 적용 중 — <b>${cur.label}</b>` : "—";
     (d.profiles || []).forEach((p) => {
       const el = document.createElement("div");
       el.className = "elitem infer" + (p.selected ? " on" : "") + (p.ready ? "" : " off");
@@ -364,7 +368,8 @@ Views.map = (() => {
       if (!p.selected && p.ready) el.onclick = () => applyInfer(p);
       box.appendChild(el);
     });
-    note.textContent = `인제스트 ${d.backend} · 전환 시 추론만 재기동(세션 중에는 불가)`;
+    note.textContent = keepNote
+      || `인제스트 ${d.backend} · 전환 시 추론만 재기동(세션 중에는 불가)`;
   }
 
   async function applyInfer(p) {
@@ -373,6 +378,7 @@ Views.map = (() => {
       + "추론 계층이 재기동되며 진행 중인 추적 상태(트랙 ID)는 초기화됩니다.\n"
       + "평가 세션이 진행 중이면 전환되지 않습니다. 계속할까요?")) return;
     inferBusy = true;
+    let msg = "";
     const note = $("inferNote");
     note.textContent = "전환 중 — 엔진 로드에 수십 초 걸릴 수 있습니다…";
     try {
@@ -381,13 +387,13 @@ Views.map = (() => {
         body: JSON.stringify({ profile: p.id }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) { note.textContent = "전환 실패 — " + (j.detail || r.status); return; }
-      note.textContent = `적용됨: ${j.label} (${j.restarted})`;
+      msg = r.ok ? `✔ 적용됨 — ${j.label} (${j.restarted})`
+                 : `전환 실패 — ${j.detail || r.status}`;
     } catch (e) {
-      note.textContent = "전환 실패 — " + e;
+      msg = "전환 실패 — " + e;
     } finally {
       inferBusy = false;
-      loadInfer();
+      loadInfer(msg);
     }
   }
 
@@ -532,15 +538,17 @@ Views.map = (() => {
       b.onclick = () => setTool(b.dataset.tool));
     $("drawDone").onclick = finishDraft;
     $("drawCancel").onclick = cancelDraft;
-    // 우측 패널: [설정] ↔ [지표 설명] 토글
-    const msTab = (help) => {
-      $("mapSetPanel").classList.toggle("hidden", help);
-      $("mapHelpPanel").classList.toggle("hidden", !help);
-      $("msTabSet").classList.toggle("on", !help);
-      $("msTabHelp").classList.toggle("on", help);
+    // 우측 패널: [설정] · [추론 모델] · [지표 설명] 토글
+    const MS_TABS = { set: "mapSetPanel", model: "mapModelPanel", help: "mapHelpPanel" };
+    const MS_BTN = { set: "msTabSet", model: "msTabModel", help: "msTabHelp" };
+    const msTab = (which) => {
+      Object.entries(MS_TABS).forEach(([k, id]) =>
+        $(id).classList.toggle("hidden", k !== which));
+      Object.entries(MS_BTN).forEach(([k, id]) =>
+        $(id).classList.toggle("on", k === which));
+      if (which === "model") loadInfer();     // 열 때마다 현재 적용값 재확인
     };
-    $("msTabSet").onclick = () => msTab(false);
-    $("msTabHelp").onclick = () => msTab(true);
+    Object.keys(MS_TABS).forEach((k) => { $(MS_BTN[k]).onclick = () => msTab(k); });
     // 도면(층) 관리 — 셀렉터/추가/삭제/이름
     $("floorEditSel").onchange = () => App.setFloor($("floorEditSel").value);
     $("floorAddBtn").onclick = addFloor;
