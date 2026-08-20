@@ -96,6 +96,9 @@ if [ "$DO_ONNX" -eq 1 ]; then
   fetch "backseollgi/MCMOT" model "onnx/fastreid_sbs_s50.onnx"    "external/weights/trt/fastreid_sbs_s50.onnx"    || RC=1
   # RF-DETR(투트랙 검출기) — 이 ONNX가 있으면 tools/setup_rfdetr.sh가 rfdetr venv 없이 엔진만 빌드.
   fetch "backseollgi/MCMOT" model "onnx/rfdetr-base.onnx"         "external/weights/onnx/rfdetr-base.onnx"        || RC=1
+  # 신규 추론 프로파일(yolo26_clipreid) 원천 — 엔진 빌드는 tools/build_profile_engines.sh
+  fetch "backseollgi/MCMOT" model "onnx/yolo26l_v6.3.onnx"        "external/weights/onnx/yolo26l_v6.3.onnx"       || RC=1
+  fetch "backseollgi/MCMOT" model "onnx/clipreid_person.onnx"     "external/weights/onnx/clipreid_person.onnx"    || RC=1
 fi
 
 if [ "$DO_CAD" -eq 1 ]; then

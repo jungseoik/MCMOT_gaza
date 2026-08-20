@@ -46,19 +46,19 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     st = {"running": True, "w": 0, "h": 0, "src_fps": 0.0, "fps": 0.0,
           "det": 0.0, "tracks": 0, "frames": 0, "error": "",
-          "first_latency": None, "stage": "엔진 로드 중"}
+          "first_latency": None, "stage": "엔진 로드 중", "profile": ""}
     write_status(out, **st)
 
     try:
+        import model_zoo
         from src.inference_gpu import BoostTrackGPUInference
-        eng = ROOT / "external" / "weights" / "trt"
-        kw = {}
-        yx, rd = eng / "yolox_mot20_fp16.engine", eng / "fastreid_sbs_s50_fp16.engine"
-        if yx.is_file():
-            kw["yolox_engine"] = str(yx)
-        if rd.is_file():
-            kw["reid_engine"] = str(rd)
-        inf = BoostTrackGPUInference(**kw)
+        # 미리보기는 **운영과 같은 추론 프로파일**로 돈다 — UI에서 고른 모델이
+        # 실제로 어떻게 잡는지 보려는 기능이라 여기만 다른 모델이면 의미가 없다.
+        prof = model_zoo.resolve()
+        st["profile"] = prof.label
+        st["stage"] = f"엔진 로드 중 — {prof.label}"
+        write_status(out, **st)
+        inf = BoostTrackGPUInference(profile="auto")
     except Exception as e:
         st.update(running=False, error=f"추론 엔진 로드 실패 — {type(e).__name__}: {e}",
                   stage="실패")

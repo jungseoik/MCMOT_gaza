@@ -51,6 +51,7 @@ from system.config.store import SiteStore
 from system.contracts import DrillResult, MapState
 from system.ingest.frame_queue import FrameQueue
 from system.ingest.manager import IngestManager
+import model_zoo
 from system.metrics.engine import MetricsEngine
 from system.metrics.recorder import SessionRecorder
 
@@ -1368,7 +1369,8 @@ class _Preview:
     def status(self) -> dict:
         base = {"running": False, "rtsp": self.mask(self.rtsp), "stage": "대기",
                 "w": 0, "h": 0, "src_fps": 0.0, "fps": 0.0, "det": 0.0,
-                "tracks": 0, "frames": 0, "error": "", "first_latency": None}
+                "tracks": 0, "frames": 0, "error": "", "first_latency": None,
+                "profile": ""}
         if self.dir is None:
             return base
         f = self.dir / "status.json"
@@ -1456,6 +1458,70 @@ def preview_frame():
         raise HTTPException(404, "프레임 없음")
     return Response(f, media_type="image/jpeg",
                     headers={"Cache-Control": "no-store"})
+
+
+# ============================================================ 추론 프로파일
+# 검출기·ReID·트래커 조합(model_zoo.py)을 UI에서 갈아끼운다. 실제 반영은 추론
+# 계층 재기동 시점이라, 선택 저장 → 인제스트/분석 스레드 재기동까지 한 번에 한다.
+
+def _infer_ds() -> bool:
+    return INGEST_BACKEND == "deepstream"
+
+
+def _restart_inference() -> str:
+    """추론 계층만 재기동 — 사이트 설정·세션 녹화본은 건드리지 않는다."""
+    if _infer_ds():
+        rt.ingest.stop()
+        rt.ingest.start(rt.cameras())
+        return "DeepStream 워커 재기동"
+    if rt.analyzer is not None:
+        rt.analyzer.stop()
+        rt.analyzer = None
+    from system.tracking.analyzer import AnalyzerThread
+    rt.analyzer = AnalyzerThread(
+        rt.queue, on_tracks=rt._dispatch_tracks,
+        camera_fps={c.cam_id: c.analyze_fps for c in rt.cameras()})
+    rt.analyzer.start()
+    return "분석 스레드 재기동"
+
+
+@app.get("/api/infer/profiles")
+def infer_profiles():
+    """선택 가능한 추론 프로파일 목록 + 현재 백엔드."""
+    return {"backend": INGEST_BACKEND,
+            "current": model_zoo.current_id(),
+            "profiles": model_zoo.describe(ds=_infer_ds())}
+
+
+@app.post("/api/infer/profile")
+async def set_infer_profile(request: Request):
+    """프로파일 전환 — 저장 후 추론 계층 재기동.
+
+    세션 중 전환은 막는다: 같은 세션 안에서 앞뒤 구간이 서로 다른 검출기로
+    계산되면 4대 지표를 신뢰할 수 없다(맵·구역 변경을 막는 것과 같은 이유).
+    """
+    body = await request.json()
+    pid = str(body.get("profile") or "").strip()
+    live = [fid for fid, eng in rt.engines.items() if eng.session_live() is not None]
+    if live:
+        raise HTTPException(409, f"평가 세션 진행 중({', '.join(live)}) — "
+                                 "세션을 종료한 뒤 추론 모델을 바꾸세요")
+    try:
+        prof = model_zoo.resolve(pid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    missing = model_zoo.missing_engines(prof, ds=_infer_ds())
+    if missing:
+        raise HTTPException(400, "TRT 엔진이 없습니다 — tools/build_trt_engine.py 로 "
+                                 f"먼저 빌드하세요: {', '.join(missing)}")
+    model_zoo.select(prof.id)
+    try:
+        how = _restart_inference()
+    except Exception as e:
+        logger.exception("추론 계층 재기동 실패")
+        raise HTTPException(500, f"프로파일은 저장됐으나 재기동 실패 — {e}")
+    logger.info("추론 프로파일 전환: %s (%s)", prof.id, how)
+    return {"ok": True, "profile": prof.id, "label": prof.label, "restarted": how}
 
 
 # ================================================================ 프론트

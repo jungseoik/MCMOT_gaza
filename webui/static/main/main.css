@@ -93,6 +93,16 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .elitem .del{ background:none; border:0; color:var(--text-3); cursor:pointer; font-size:15px; }
 .elitem .del:hover{ color:var(--pia-coral); }
 .elitem-bn{ flex-wrap:wrap; row-gap:4px; }
+/* 추론 모델 선택 — 프로파일 카드(선택된 것 강조, 엔진 없는 건 비활성) */
+.elitem.infer{ align-items:flex-start; cursor:pointer; }
+.elitem.infer .dot{ width:10px; height:10px; border-radius:50%; margin-top:4px;
+  flex:0 0 auto; border:2px solid var(--stroke-2); background:transparent; }
+.elitem.infer.on{ border-color:var(--pia-cyan); background:var(--bg-3); }
+.elitem.infer.on .dot{ background:var(--pia-cyan); border-color:var(--pia-cyan); }
+.elitem.infer.off{ opacity:.55; cursor:not-allowed; }
+.elitem.infer .sub{ color:var(--text-3); font-size:12px; line-height:1.45; margin-top:2px; }
+.elitem.infer .sub.warn{ color:var(--pia-coral); }
+.elitem.infer:not(.on):not(.off):hover{ border-color:var(--pia-cyan); }
 .bfield{ display:flex; align-items:center; gap:3px; font-size:13px; color:var(--text-3); white-space:nowrap; }
 .bni{ width:44px; height:22px; background:var(--bg-3); color:var(--text-1);
   border:1px solid var(--stroke-1); border-radius:4px; font-size:11px; text-align:right; padding:0 3px; }

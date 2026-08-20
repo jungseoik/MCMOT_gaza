@@ -1,7 +1,7 @@
 """분석 스레드(단일) — 공유 TRT 검출·ReID + 카메라별 BoostTrack 인스턴스 (M3).
 
-FrameQueue에서 FrameItem을 pull → 공유 TRT YOLOX 검출 → cam_id별 트래커
-update(공유 TRT FastReID 임베딩) → TrackedObject 목록을
+FrameQueue에서 FrameItem을 pull → 공유 TRT 검출 → cam_id별 트래커
+update(공유 TRT ReID 임베딩) → TrackedObject 목록을
 on_tracks(cam_id, ts, tracks) 콜백으로 전달 (계약 §2).
 
 설계 근거:
@@ -10,6 +10,8 @@ on_tracks(cam_id, ts, tracks) 콜백으로 전달 (계약 §2).
 - ReID: BoostTrack이 만드는 EmbeddingComputer는 모델을 lazy-load하므로,
   compute_embedding을 공유 GPUEmbeddingComputer(TRT)로 패치하면 카메라 수와
   무관하게 ReID 모델은 1회만 로드된다 (src/inference_gpu.py 패턴).
+- 검출기·ReID 조합은 추론 프로파일(model_zoo.py)로 갈아끼운다 — 기본은
+  현재 선택값("auto"), 미설정 시 기존 YOLOX+FastReID.
 - ECC 비활성(고정 CCTV), max_age는 카메라 analyze_fps 기준 시간 환산
   (원 설정 의도인 '2초 유지'를 프레임 수로 환산: 5fps → 10프레임).
 
@@ -24,10 +26,9 @@ import time
 from collections.abc import Callable
 
 import numpy as np
-import torch
 
-from dataset import preproc
 from default_settings import GeneralSettings
+import model_zoo
 from src.inference_gpu import GPUEmbeddingComputer
 from src.inference_trt import TRTDetector, TRTReID
 from system.contracts import FrameItem, TrackedObject
@@ -51,6 +52,7 @@ class AnalyzerThread(threading.Thread):
         frame_queue: FrameQueue,
         on_tracks: OnTracks,
         *,
+        profile: str | None = "auto",
         yolox_engine: str = DEFAULT_YOLOX_ENGINE,
         reid_engine: str = DEFAULT_REID_ENGINE,
         input_size: tuple[int, int] = (896, 1600),
@@ -60,15 +62,24 @@ class AnalyzerThread(threading.Thread):
         default_fps: float = 5.0,
         track_buffer_sec: float = TRACK_BUFFER_SEC,
     ) -> None:
+        """profile: 추론 프로파일 id (model_zoo.py). 기본 "auto" = 현재
+        선택값(:8900 UI 설정 → INFER_PROFILE → 기존 스택). None을 주면
+        프로파일을 무시하고 개별 engine 인자를 쓴다(구 동작·테스트용)."""
         super().__init__(daemon=True, name="analyzer")
         self.queue = frame_queue
         self.on_tracks = on_tracks
-        self.input_size = input_size
         self.camera_fps = dict(camera_fps or {})
         self.default_fps = default_fps
         self.track_buffer_sec = track_buffer_sec
         self._stop_evt = threading.Event()
         self._lock = threading.Lock()          # 트래커 dict 접근 보호
+
+        self.profile = model_zoo.resolve(None if profile == "auto" else profile) \
+            if profile is not None else None
+        if self.profile is not None:
+            input_size = self.profile.detector.input_size
+            det_thresh = self.profile.tracker.det_thresh
+        self.input_size = input_size
 
         # 전역 설정 — 이 프로세스의 모든 트래커 인스턴스에 공통 적용
         GeneralSettings.values["dataset"] = "mot20"
@@ -78,12 +89,21 @@ class AnalyzerThread(threading.Thread):
         GeneralSettings.values["det_thresh"] = det_thresh
 
         # 공유 TRT 엔진 — 프로세스에 1회 로드, 이 스레드가 직렬 사용
-        self.detector = TRTDetector(yolox_engine)
-        self._trt_reid: TRTReID | None = None
+        # (crop 크기는 ReID 모델마다 다르다 — FastReID 128×384, CLIP-ReID 128×256)
+        crop = (128, 384)
+        if self.profile is not None:
+            self.detector = model_zoo.build_detector(self.profile)
+        else:
+            self.detector = TRTDetector(yolox_engine, input_size=input_size)
+        self._trt_reid = None
         self._gpu_embedder: GPUEmbeddingComputer | None = None
         if use_reid:
-            self._trt_reid = TRTReID(reid_engine)
-            self._gpu_embedder = GPUEmbeddingComputer(self._trt_reid, crop_size=(128, 384))
+            if self.profile is not None:
+                self._trt_reid, crop = model_zoo.build_reid(self.profile)
+            else:
+                self._trt_reid = TRTReID(reid_engine)
+            self._gpu_embedder = GPUEmbeddingComputer(self._trt_reid, crop_size=crop)
+        logger.info("추론 프로파일: %s", self.profile.label if self.profile else "(직접 지정)")
 
         self._trackers: dict[str, BoostTrack] = {}
 
@@ -138,12 +158,15 @@ class AnalyzerThread(threading.Thread):
         t0 = time.perf_counter()
         lag = max(time.time() - item.ts, 0.0)
 
-        padded, scale_r = preproc(item.frame, self.input_size, mean=None, std=None)
-        tensor = torch.from_numpy(padded).unsqueeze(0).cuda()
-        pred = self.detector.detect(tensor)
+        # 검출기 공통 인터페이스 — detect_frame(bgr) -> (dets, scale_ref).
+        # dets 좌표계는 검출기마다 다르고(YOLOX=letterbox, YOLO26/RF-DETR=원본),
+        # scale_ref의 shape가 그 차이를 표현한다(BoostTrack.update와 동일 규약).
+        pred, ref = self.detector.detect_frame(item.frame)
+        h, w = item.frame.shape[:2]
+        scale_r = min(ref.shape[2] / h, ref.shape[3] / w)
 
         tracker = self._tracker_for(item.cam_id)
-        targets = tracker.update(pred, tensor, item.frame,
+        targets = tracker.update(pred, ref, item.frame,
                                  f"{item.cam_id}:{item.seq}")
 
         # 트랙별 '실제 검출 점수' — 트래커 출력 conf는 내부 신뢰도(부스팅 포함)라

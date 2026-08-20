@@ -172,6 +172,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# 외부 제공 참조 구현 (PIASPACE tracking_sample — 신규 프로파일 이식 원본).
+# 코드 자체는 우리 소유가 아니라 커밋하지 않는다. 이식 결과는 src/yolo26_trt.py,
+# src/clipreid_trt.py, system/ingest_ds/trt_infer.py 에 있다.
+external/reference/
+tracking_sample.zip
+
 # Model weights & TRT engines
 external/weights/
 *.engine
@@ -211,6 +217,8 @@ cad/A-101_128_각 층 평면도_최종_수정.dxf
 cad/CAD_API_Based_Optimal_Evacuation_Route_Algorithm/*.dxf
 # 멀티카메라 시스템 런타임 사이트 데이터(데모/운영) — 의도적 커밋만 허용
 data/sites/
+# 추론 프로파일 선택(로컬 런타임 상태) — 배포 기본값은 INFER_PROFILE 환경변수로
+data/infer_profile.json
 # 런타임 설정 백업(운영 스냅샷) — 저장소 밖 로컬 보관
 data/backups/
 

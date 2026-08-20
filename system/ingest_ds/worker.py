@@ -80,13 +80,16 @@ import pyds                           # noqa: E402
 
 from default_settings import GeneralSettings                     # noqa: E402
 from system.ingest_ds.gpu_embedding import DsGpuEmbeddingComputer  # noqa: E402
-from system.ingest_ds.trt_infer import BatchDetector, TRTReID     # noqa: E402
+import model_zoo
+from system.ingest_ds.trt_infer import (
+    BatchDetector, BatchYOLO26Detector, CLIPReID, TRTReID)     # noqa: E402
 from tracker.boost_track import BoostTrack                        # noqa: E402
 
 logger = logging.getLogger("ingest_ds.worker")
 
 MUX_W, MUX_H = 1920, 1080            # nvstreammux 출력 (모든 소스 스케일 통일)
-INPUT_H, INPUT_W = 896, 1600         # YOLOX 입력 (기존 경로와 동일)
+# 검출기 입력 크기는 추론 프로파일에서 온다 (YOLOX 896×1600 / YOLO26 640×640)
+# → self.in_h, self.in_w
 TRACK_BUFFER_SEC = 2.0               # max_age 시간 환산 (analyzer.py와 동일)
 MAX_TRACKERS_PER_CAM = 500           # 트래커 폭증 회로차단 임계 (_track_one 참조)
 MAX_DETS_PER_FRAME = 1000            # 쓰레기 프레임 판정 임계 (_track_one 참조)
@@ -111,6 +114,8 @@ class _Item:
     scale_r: float
     src_w: int           # 카메라 원본 해상도 — 트랙 좌표를 원본 px로 역스케일
     src_h: int           #   (TrackedObject 계약: 좌표는 '카메라 프레임 px')
+    pad_x: int = 0       # letterbox 패딩 오프셋 — 중앙 배치(YOLO26) 검출기용
+    pad_y: int = 0       #   (YOLOX는 좌상단 배치라 0)
 
 
 class _CamGate:
@@ -178,7 +183,7 @@ class DsWorker:
         self.cams = cams
         self.batch_size = args.batch_size
         self.gather_sec = args.gather_ms / 1000.0
-        self.det_thresh = args.det_thresh
+        self.det_thresh = args.det_thresh   # None이면 프로파일 값(아래에서 결정)
         self.use_reid = not args.no_reid
         self.lossless = args.lossless
         self.queue = _OldestDropQueue(maxsize=args.queue_size, lossless=self.lossless)
@@ -211,19 +216,44 @@ class DsWorker:
         else:
             self._pack = lambda o: json.dumps(o).encode()
 
+        # --- 추론 프로파일 (검출기·ReID·임계값 조합) ---
+        # 컨테이너에서는 model_zoo의 '스펙'만 쓴다 — 팩토리는 src.inference_trt
+        # (→ yolox 패키지)를 끌어오므로 여기선 못 쓴다. 엔진은 trt_ds/ 것으로,
+        # 컨테이너 TRT 버전에 맞게 따로 구운 파일이다.
+        self.profile = model_zoo.resolve(None if args.profile == "auto" else args.profile)
+        self.in_h, self.in_w = self.profile.detector.input_size
+        self._center_pad = self.profile.detector.center_pad
+        self._min_box = self.profile.detector.min_box_size
+        det_engine = args.det_engine or model_zoo.detector_engine(self.profile, ds=True)
+        reid_eng = args.reid_engine or model_zoo.reid_engine(self.profile, ds=True)
+        if args.det_thresh is None:
+            self.det_thresh = self.profile.tracker.det_thresh
+        logger.info("추론 프로파일: %s (det=%s, reid=%s, 입력 %dx%d)",
+                    self.profile.label, det_engine, reid_eng, self.in_h, self.in_w)
+
         # --- 공유 TRT 엔진 (프로세스 1회 로드, 추론 스레드가 직렬 사용) ---
-        self.detector = BatchDetector(args.det_engine)
+        if self.profile.detector.kind == "yolo26":
+            self.detector = BatchYOLO26Detector(
+                det_engine, conf_thresh=self.profile.detector.conf_thresh)
+        else:
+            self.detector = BatchDetector(det_engine)
         # 배치 상한은 하드코딩(16) 대신 엔진 프로파일에서 읽는다 —
         # b16/b32 등 어느 엔진을 꽂아도 --batch-size가 자동으로 안전 범위가 된다.
         engine_max = self.detector.max_batch
         if engine_max > 0 and self.batch_size > engine_max:
             logger.info("batch-size %d → 엔진 프로파일 max %d로 클램프 (%s)",
-                        self.batch_size, engine_max, args.det_engine)
+                        self.batch_size, engine_max, det_engine)
             self.batch_size = engine_max
         self._embedder: DsGpuEmbeddingComputer | None = None
         if self.use_reid:
-            self._trt_reid = TRTReID(args.reid_engine)
-            self._embedder = DsGpuEmbeddingComputer(self._trt_reid, crop_size=(128, 384))
+            # crop 크기는 ReID 모델마다 다르다 (FastReID 128×384 / CLIP-ReID 128×256)
+            if self.profile.reid.kind == "clipreid":
+                self._trt_reid = CLIPReID(reid_eng)
+                crop = self._trt_reid.crop_size
+            else:
+                self._trt_reid = TRTReID(reid_eng)
+                crop = self.profile.reid.crop
+            self._embedder = DsGpuEmbeddingComputer(self._trt_reid, crop_size=crop)
         self._warmup_engines()
 
         # --- 트래커 전역 설정 (system/tracking/analyzer.py와 동일) ---
@@ -237,6 +267,8 @@ class DsWorker:
         # BoostTrack.update의 img_numpy 인자는 shape 참조용으로만 쓰인다
         # (ECC off + 임베더가 GPU 텐서 사용) — 더미 1개를 공유한다.
         self._dummy_np = np.empty((MUX_H, MUX_W, 3), dtype=np.uint8)
+        # scale=1 참조(shape만 쓰임) — 이미 mux 좌표인 검출을 넘길 때 사용
+        self._ref_mux = torch.empty((1, 3, MUX_H, MUX_W), device="meta")
 
         # --- 통계 ---
         self._st_lock = threading.Lock()
@@ -383,14 +415,14 @@ class DsWorker:
             if gate.due(now):
                 try:
                     rgba = self._map_frame(buf, fm)
-                    det, rgb, r = self._preproc(rgba)
+                    det, rgb, r, dx, dy = self._preproc(rgba)
                     gate.seq += 1
                     if (self._dump_dir and
                             self._frames_dumped.get(gate.cam_id, 0) < self._dump_frames):
                         self._dump_rgba_frame(gate.cam_id, gate.seq, rgba)
                     self.queue.put(_Item(gate.cam_id, now, gate.seq, det, rgb, r,
                                          fm.source_frame_width,
-                                         fm.source_frame_height))
+                                         fm.source_frame_height, dx, dy))
                     pushed = True
                     with self._st_lock:
                         self._st_selected[gate.cam_id] = \
@@ -433,22 +465,27 @@ class DsWorker:
         return torch.from_numpy(np.array(view, copy=True)).cuda()
 
     def _preproc(self, rgba: torch.Tensor):
-        """dataset.preproc(letterbox 114, top-left, /255) GPU 재현.
+        """letterbox(114 패딩, /255) GPU 재현 — 프로파일 입력 크기·패딩 규칙 적용.
+
+        YOLOX(dataset.preproc)는 좌상단 배치, YOLO26(Ultralytics LetterBox)은
+        중앙 배치라 패딩 위치가 다르다. 중앙 배치면 오프셋을 함께 돌려주고
+        검출 좌표를 되돌릴 때 빼준다.
 
         원본은 uint8 cv2.resize(bilinear) 후 float 변환, 여기는 float 보간이라
         ±1/255 수준 차이만 존재. RGBA 소스라 BGR→RGB 플립은 불필요.
         """
         rgb = rgba[..., :3].permute(2, 0, 1).contiguous()   # (3,H,W) u8 — 버퍼와 분리
         h, w = rgb.shape[1], rgb.shape[2]
-        r = min(INPUT_H / h, INPUT_W / w)
+        r = min(self.in_h / h, self.in_w / w)
         rh, rw = int(h * r), int(w * r)
         resized = F.interpolate(rgb.unsqueeze(0).float(), size=(rh, rw),
                                 mode="bilinear", align_corners=False)[0]
-        canvas = torch.full((3, INPUT_H, INPUT_W), 114.0,
+        canvas = torch.full((3, self.in_h, self.in_w), 114.0,
                             dtype=torch.float32, device=rgb.device)
-        canvas[:, :rh, :rw] = resized
+        dx, dy = ((self.in_w - rw) // 2, (self.in_h - rh) // 2) if self._center_pad else (0, 0)
+        canvas[:, dy:dy + rh, dx:dx + rw] = resized
         canvas /= 255.0
-        return canvas, rgb, r
+        return canvas, rgb, r, dx, dy
 
     # ------------------------------------------------------- 검증 덤프 헬퍼
     def _dump_path(self, cam_id: str, name: str) -> str:
@@ -502,7 +539,7 @@ class DsWorker:
         t0 = time.perf_counter()
         stable_ms, stable_need, max_iter = 500.0, 2, 30
         with torch.no_grad():
-            dummy = torch.zeros((self.batch_size, 3, INPUT_H, INPUT_W),
+            dummy = torch.zeros((self.batch_size, 3, self.in_h, self.in_w),
                                 device="cuda")
             ok = 0
             for i in range(max_iter):
@@ -514,13 +551,14 @@ class DsWorker:
                     break
             del dummy
             if self.use_reid:
-                crops = torch.zeros((32, 3, 384, 128), device="cuda")
+                ch, cw = self._embedder.crop_h, self._embedder.crop_w
+                crops = torch.zeros((32, 3, ch, cw), device="cuda")
                 for _ in range(3):
                     self._trt_reid(crops)
                 del crops
             # 콜백 경로(GPU letterbox)의 보간 커널도 미리 컴파일
             frame = torch.zeros((1, 3, MUX_H, MUX_W), device="cuda")
-            F.interpolate(frame, size=(INPUT_H, INPUT_W), mode="bilinear",
+            F.interpolate(frame, size=(self.in_h, self.in_w), mode="bilinear",
                           align_corners=False)
             del frame
         torch.cuda.synchronize()
@@ -550,6 +588,10 @@ class DsWorker:
             try:
                 batch = torch.stack([it.det for it in items])
                 preds = self.detector.detect(batch)
+                if self._center_pad:
+                    # 중앙 배치 letterbox(YOLO26) — 패딩을 빼고 역스케일해 mux
+                    # 좌표로 만든다. 이후 경로는 scale=1로 취급(_track_one).
+                    preds = [self._unletterbox(p, it) for p, it in zip(preds, items)]
                 for it, pred in zip(items, preds):
                     self._track_one(it, pred)
             except Exception:
@@ -621,11 +663,16 @@ class DsWorker:
 
         # BoostTrack.update는 img_tensor/img_numpy를 shape 계산에만 쓴다
         # (ECC off, 임베더는 set_frame 텐서 사용) — det 텐서 뷰와 더미로 대체.
-        targets = tracker.update(pred, item.det.unsqueeze(0), self._dummy_np,
+        # 중앙 배치 검출기는 이미 mux 좌표로 되돌렸으므로 scale=1 참조를 준다.
+        if self._center_pad:
+            ref, scale_r = self._ref_mux, 1.0
+        else:
+            ref, scale_r = item.det.unsqueeze(0), item.scale_r
+        targets = tracker.update(pred, ref, self._dummy_np,
                                  f"{item.cam_id}:{item.seq}")
 
         # 트랙 conf = 원본 검출과 IoU 매칭한 실제 점수 (analyzer.py와 동일 규칙)
-        det_xyxy, det_scores = self._frame_dets(pred, item.scale_r)
+        det_xyxy, det_scores = self._frame_dets(pred, scale_r)
 
         # nvstreammux가 모든 소스를 MUX_W×MUX_H로 스케일하므로 트래킹 좌표는
         # mux px다 — 계약(카메라 프레임 px)에 맞게 원본 해상도로 역스케일.
@@ -653,6 +700,25 @@ class DsWorker:
         self._send({"cam_id": item.cam_id, "ts": item.ts, "tracks": tracks})
         with self._st_lock:
             self._st_analyzed[item.cam_id] = self._st_analyzed.get(item.cam_id, 0) + 1
+
+    def _unletterbox(self, pred, item: "_Item"):
+        """letterbox 좌표 검출 → mux 좌표 (패딩 제거 → 역스케일 → 최소크기 필터).
+
+        최소 박스 필터는 반드시 역스케일 **뒤**에 건다 — letterbox 좌표에 걸면
+        축소 배율(1080p→640이면 1/3)만큼 기준이 엄격해져 원거리 인원이 통째로
+        빠진다(실측: 트랙 수 1/3 토막).
+        """
+        if pred is None or pred.shape[0] == 0:
+            return pred
+        out = pred.clone()
+        out[:, [0, 2]] = (out[:, [0, 2]] - item.pad_x) / item.scale_r
+        out[:, [1, 3]] = (out[:, [1, 3]] - item.pad_y) / item.scale_r
+        out[:, [0, 2]] = out[:, [0, 2]].clamp(0, MUX_W)
+        out[:, [1, 3]] = out[:, [1, 3]].clamp(0, MUX_H)
+        if self._min_box > 0:
+            side = torch.minimum(out[:, 2] - out[:, 0], out[:, 3] - out[:, 1])
+            out = out[side >= self._min_box]
+        return out if out.shape[0] else None
 
     @staticmethod
     def _frame_dets(pred, scale_r: float):
@@ -761,11 +827,13 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=8,
                     help="추론 배치 상한 (엔진 프로파일 max로 자동 클램프)")
     ap.add_argument("--zmq-bind", default="tcp://*:5701")
-    ap.add_argument("--det-engine",
-                    default="external/weights/trt_ds/yolox_mot20_fp16_dyn_b16.engine")
-    ap.add_argument("--reid-engine",
-                    default="external/weights/trt_ds/fastreid_sbs_s50_fp16_dyn_b256.engine")
-    ap.add_argument("--det-thresh", type=float, default=0.4)
+    ap.add_argument("--profile", default="auto",
+                    help="추론 프로파일 id (model_zoo.py). auto=현재 선택값")
+    # 엔진 경로는 기본적으로 프로파일에서 온다 — 명시하면 그쪽이 이긴다.
+    ap.add_argument("--det-engine", default="")
+    ap.add_argument("--reid-engine", default="")
+    ap.add_argument("--det-thresh", type=float, default=None,
+                    help="미지정 시 프로파일의 tracker.det_thresh")
     ap.add_argument("--no-reid", action="store_true")
     ap.add_argument("--gather-ms", type=float, default=100.0,
                     help="배치 모으기 대기 (ms) — 지연 vs 배치효율 트레이드오프")

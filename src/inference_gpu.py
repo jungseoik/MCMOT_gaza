@@ -129,7 +129,20 @@ class BoostTrackGPUInference:
         use_ecc: bool = True,
         detector: str = "yolox",
         rfdetr_engine: str = "external/weights/trt/rfdetr_base_fp16.engine",
+        profile: str | None = None,
     ):
+        """profile: 추론 프로파일 id (model_zoo.py). "auto"면 현재 선택값
+        (:8900 UI 설정 → INFER_PROFILE → 기본)을 따른다. 지정하면 검출기·ReID·
+        임계값이 전부 프로파일에서 오고 개별 engine 인자는 무시된다. None(기본)
+        이면 종전 동작 그대로."""
+        self.profile = None
+        if profile is not None:
+            import model_zoo
+            self.profile = model_zoo.resolve(None if profile == "auto" else profile)
+            input_size = self.profile.detector.input_size
+            det_thresh = self.profile.tracker.det_thresh
+            detector = self.profile.detector.kind
+
         self.input_size = input_size
         self.det_thresh = det_thresh
         self.use_reid = use_reid
@@ -137,8 +150,12 @@ class BoostTrackGPUInference:
 
         self._configure_settings()
 
-        # TRT detector — 투트랙(YOLOX / RF-DETR). 둘 다 detect_frame(frame)->(dets,ref) 공통 인터페이스.
-        if detector == "rfdetr":
+        # TRT detector — 투트랙(YOLOX / RF-DETR) + 프로파일 경로(YOLO26 등).
+        # 모두 detect_frame(frame)->(dets,ref) 공통 인터페이스.
+        if self.profile is not None:
+            import model_zoo
+            self.detector = model_zoo.build_detector(self.profile)
+        elif detector == "rfdetr":
             self.detector = RFDETRTRTDetector(rfdetr_engine)
         elif detector == "yolox":
             self.detector = TRTDetector(yolox_engine, input_size=input_size)
@@ -156,9 +173,14 @@ class BoostTrackGPUInference:
             self.tracker.ecc.cache = {}
 
         # Replace ReID with GPU-accelerated version
+        # (crop 크기는 모델마다 다르다 — FastReID 128×384, CLIP-ReID 128×256)
         if use_reid and self.tracker.embedder is not None:
-            trt_reid = TRTReID(reid_engine)
-            gpu_embedder = GPUEmbeddingComputer(trt_reid, crop_size=(128, 384))
+            if self.profile is not None:
+                import model_zoo
+                trt_reid, crop = model_zoo.build_reid(self.profile)
+            else:
+                trt_reid, crop = TRTReID(reid_engine), (128, 384)
+            gpu_embedder = GPUEmbeddingComputer(trt_reid, crop_size=crop)
             self.tracker.embedder.compute_embedding = gpu_embedder.compute_embedding
             self.tracker.embedder.model = trt_reid
 
@@ -329,9 +351,13 @@ def main():
     parser.add_argument("--no_reid", action="store_true")
     parser.add_argument("--no_ecc", action="store_true")
     parser.add_argument("--input_size", nargs=2, type=int, default=[896, 1600])
+    parser.add_argument("--profile", default=None,
+                        help="추론 프로파일 id (model_zoo.py) — 지정 시 "
+                             "검출기·ReID·임계값이 프로파일에서 온다. 'auto'면 현재 선택값")
     args = parser.parse_args()
 
     tracker = BoostTrackGPUInference(
+        profile=args.profile,
         detector=args.detector,
         yolox_engine=args.yolox_engine,
         rfdetr_engine=args.rfdetr_engine,

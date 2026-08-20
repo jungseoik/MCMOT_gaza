@@ -341,6 +341,56 @@ Views.map = (() => {
 
   function refresh() { refreshLists(); renderFloorPanel(); if (mc) mc.render(); }
 
+  // ------------------------------------------------------------ 추론 모델
+  // 검출기·ReID 조합(백엔드 model_zoo.py의 '프로파일')을 여기서 고른다.
+  // 전환하면 추론 계층만 재기동한다 — 사이트 설정·세션 녹화본은 그대로.
+  let inferBusy = false;
+
+  async function loadInfer() {
+    const box = $("inferList"), note = $("inferNote");
+    box.innerHTML = "";
+    let d;
+    try { d = await (await fetch("/api/infer/profiles")).json(); }
+    catch (e) { note.textContent = "추론 프로파일을 불러오지 못했습니다"; return; }
+    (d.profiles || []).forEach((p) => {
+      const el = document.createElement("div");
+      el.className = "elitem infer" + (p.selected ? " on" : "") + (p.ready ? "" : " off");
+      el.innerHTML = `<span class="dot"></span>
+        <div class="grow"><b>${p.label}</b>
+          <div class="sub">${p.detector}<br/>${p.reid}<br/>${p.tracker}</div>
+          ${p.ready ? "" : `<div class="sub warn">엔진 없음: ${p.missing.join(", ")}</div>`}
+        </div>`;
+      el.title = p.note || "";
+      if (!p.selected && p.ready) el.onclick = () => applyInfer(p);
+      box.appendChild(el);
+    });
+    note.textContent = `인제스트 ${d.backend} · 전환 시 추론만 재기동(세션 중에는 불가)`;
+  }
+
+  async function applyInfer(p) {
+    if (inferBusy) return;
+    if (!confirm(`추론 모델을 "${p.label}" 로 바꿉니다.\n\n`
+      + "추론 계층이 재기동되며 진행 중인 추적 상태(트랙 ID)는 초기화됩니다.\n"
+      + "평가 세션이 진행 중이면 전환되지 않습니다. 계속할까요?")) return;
+    inferBusy = true;
+    const note = $("inferNote");
+    note.textContent = "전환 중 — 엔진 로드에 수십 초 걸릴 수 있습니다…";
+    try {
+      const r = await fetch("/api/infer/profile", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: p.id }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { note.textContent = "전환 실패 — " + (j.detail || r.status); return; }
+      note.textContent = `적용됨: ${j.label} (${j.restarted})`;
+    } catch (e) {
+      note.textContent = "전환 실패 — " + e;
+    } finally {
+      inferBusy = false;
+      loadInfer();
+    }
+  }
+
   // ------------------------------------------------------------ 도면(층) 관리
   function floorMsg(msg, warn) {
     const el = $("floorMsg");
@@ -590,6 +640,7 @@ Views.map = (() => {
     const g = App.site && App.site.grid;
     if (g && g.cell_size_m) $("gridCellSize").value = g.cell_size_m;
     refresh();
+    loadInfer();
   }
 
   return { enter, leave: () => {}, refresh };

@@ -118,6 +118,22 @@ docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace macs-deepstre
   --memPoolSize=workspace:4096M'
 ```
 
+### 4-3. 신규 추론 프로파일 (YOLO26-L + CLIP-ReID) — 선택
+
+`:8900 [① 설정 → 추론 모델]`에서 고를 수 있는 두 번째 스택. 엔진이 없으면 UI에
+"엔진 없음"으로 뜨고 선택되지 않으니, 쓸 계획이면 여기서 함께 구워 둔다.
+호스트·컨테이너 엔진을 한 번에 만든다(각 1분 남짓):
+
+```bash
+bash tools/fetch_assets.sh --onnx            # 3단계에서 이미 받았으면 생략
+bash tools/build_profile_engines.sh --ds     # --ds 없으면 호스트 엔진만
+```
+
+기본 프로파일은 기존 스택(`yolox_fastreid`)이라, 굽지 않아도 운영 재현에는 지장이
+없다. 배포 기본값을 바꾸려면 `INFER_PROFILE=yolo26_clipreid` 환경변수를 준다
+(UI에서 고른 값은 `data/infer_profile.json`에 남으며 git에는 올라가지 않는다).
+설계·실측 근거: `docs/architecture/07-추론-프로파일-교체구조.md`.
+
 9채널 이상이면 b32 엔진도 만든다(엔진당 ~1.5분):
 
 ```bash

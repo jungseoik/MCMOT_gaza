@@ -112,3 +112,69 @@ class TRTReID(torch.nn.Module):
     def forward(self, batch: torch.Tensor):
         outputs = self.engine(batch.float())
         return outputs[0]
+
+
+class BatchYOLO26Detector:
+    """dynamic-batch YOLO26(end2end) 검출 — src/yolo26_trt.py 의 배치 버전.
+
+    원본 모듈은 src.inference_trt(→ yolox 패키지)를 import하므로 컨테이너에서
+    쓸 수 없다. 후처리 수식만 이식한다(yolox_post.py 벤더링과 같은 이유).
+    end2end 모델이라 NMS가 그래프 안에 있어 후처리는 필터링뿐이다.
+    """
+
+    def __init__(self, engine_path: str, conf_thresh: float = 0.4,
+                 min_box_size: int = 0, person_class: int = 0):
+        # min_box_size 기본 0 — 이 단계의 좌표는 letterbox 스케일(1080p→640이면
+        # 1/3)이라 프레임 px 기준값을 그대로 걸면 3배 엄격해진다. 크기 필터는
+        # 역스케일 뒤(worker._unletterbox)에서 건다.
+        self.engine = TRTEngine(engine_path)
+        self.conf_thresh = conf_thresh
+        self.min_box = min_box_size
+        self.person = person_class
+
+    @property
+    def max_batch(self) -> int:
+        return self.engine.max_batch
+
+    def detect(self, batch: torch.Tensor) -> list:
+        """입력 (B,3,S,S) → 이미지별 (N,5)[x1,y1,x2,y2,conf] 텐서 목록.
+        좌표는 **모델 입력(letterbox) 기준** — 패딩 제거·역스케일은 호출자 몫."""
+        raw = self.engine(batch.float())[0]          # (B, 300, 6)
+        out = []
+        for i in range(raw.shape[0]):
+            rows = raw[i]
+            keep = (rows[:, 4] >= self.conf_thresh) & (rows[:, 5].round() == self.person)
+            if self.min_box > 0:
+                side = torch.minimum(rows[:, 2] - rows[:, 0], rows[:, 3] - rows[:, 1])
+                keep &= side >= self.min_box
+            sel = rows[keep]
+            out.append(torch.cat([sel[:, :4], sel[:, 4:5]], dim=1) if sel.shape[0] else None)
+        return out
+
+
+class CLIPReID(torch.nn.Module):
+    """CLIP-ReID TRT 엔진 (src/clipreid_trt.py 이식 — 컨테이너용).
+
+    임베더는 0~255 RGB 배치를 넘기는 계약이므로 CLIP 전처리(/255 + mean/std)를
+    이 안에서 끝낸다. crop 크기는 엔진 바인딩에서 읽는다(person 256×128).
+    """
+
+    _MEAN = (0.48145466, 0.4578275, 0.40821073)
+    _STD = (0.26862954, 0.26130258, 0.27577711)
+
+    def __init__(self, engine_path: str):
+        super().__init__()
+        self.engine = TRTEngine(engine_path)
+        ishape = tuple(self.engine.engine.get_tensor_shape(self.engine.input_names[0]))
+        self.pH = int(ishape[2]) if len(ishape) >= 4 and ishape[2] > 0 else 256
+        self.pW = int(ishape[3]) if len(ishape) >= 4 and ishape[3] > 0 else 128
+        self._mean = torch.tensor(self._MEAN, device="cuda").view(1, 3, 1, 1) * 255.0
+        self._std = torch.tensor(self._STD, device="cuda").view(1, 3, 1, 1) * 255.0
+
+    @property
+    def crop_size(self) -> tuple[int, int]:
+        return (self.pW, self.pH)
+
+    def forward(self, batch: torch.Tensor):
+        x = (batch.float() - self._mean) / self._std
+        return self.engine(x.contiguous())[0]
