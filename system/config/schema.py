@@ -79,12 +79,29 @@ class Bottleneck(BaseModel):
 
 
 class ExitLine(BaseModel):
-    """출입구/비상구 방향성 통과선 (맵 px). inside가 '안쪽' 반평면 지정."""
+    """출입구/비상구 방향성 통과선 (맵 px). inside가 '안쪽' 반평면 지정.
+
+    **카메라 화면 통과선(선택)** — count_cam·cam_line·cam_inside 를 채우면
+    카운트를 맵 좌표가 아니라 그 카메라의 **화면 px** 에서 판정한다.
+    문 앞은 대응점 헐 밖이라 맵 투영이 안 되는 경우가 많은데(화각이 눕는
+    구간이라 헐을 억지로 늘리면 좌표 오차가 폭증), 카운트는 좌표가 아니라
+    "넘었나"만 필요하므로 화면에서 재면 캘리브레이션 없이 정확하다.
+
+    셋이 비어 있으면 기존 동작(맵 선으로 카운트)과 완전히 동일하다.
+    line/inside 는 채워져 있어도 계속 쓰인다 — 화면 표시와 폭(W_eff→C_j) 산출용.
+    """
     id: str
     name: str = ""
     line: tuple[Point, Point]
     inside: Point
     design_capacity: int | None = None  # 설계 총인원(명) — SEI용 예약
+    count_cam: str | None = None        # 카운트 담당 카메라 id (없으면 맵 카운트)
+    cam_line: tuple[Point, Point] | None = None   # 그 카메라 화면 px 통과선
+    cam_inside: Point | None = None               # 그 카메라 화면 px '안쪽' 점
+
+    def counts_in_camera(self) -> bool:
+        """카운트를 화면 좌표에서 하는가 (셋 다 있어야 유효)."""
+        return bool(self.count_cam and self.cam_line and self.cam_inside)
 
 
 class GraphNode(BaseModel):

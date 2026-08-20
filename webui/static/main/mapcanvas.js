@@ -503,9 +503,14 @@ function drawSiteElements(g, site, opts = {}) {
   (site.exits || []).forEach((e) => {
     ctx.globalAlpha = a;
     const [p1, p2] = e.line;
+    // 카운트를 카메라 화면에서 하는 출입구는 점선 — 이 맵 선은 위치·폭(C_j)
+    // 표시용이고 통과 판정은 그 카메라 화면에서 한다는 신호.
+    const byCam = !!(e.count_cam && e.cam_line);
     ctx.strokeStyle = MC_COLORS.exit; ctx.lineWidth = 3;
+    if (byCam) ctx.setLineDash([9, 6]);
     const q1 = PT(g, p1[0], p1[1]), q2 = PT(g, p2[0], p2[1]);
     ctx.beginPath(); ctx.moveTo(q1[0], q1[1]); ctx.lineTo(q2[0], q2[1]); ctx.stroke();
+    ctx.setLineDash([]);
     [q1, q2].forEach((q) => {
       ctx.fillStyle = MC_COLORS.exit;
       ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, 7); ctx.fill();
@@ -523,8 +528,9 @@ function drawSiteElements(g, site, opts = {}) {
     }
     const es = st && find(st.exits, e.id);
     const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2;
-    const txt = es ? `${e.name || e.id} · IN ${es.in_count} / OUT ${es.out_count}`
-                   : (e.name || e.id);
+    const src = byCam ? ` · ${e.count_cam}` : "";   // 라벨이 길면 이웃과 겹쳐 짧게
+    const txt = (es ? `${e.name || e.id} · IN ${es.in_count} / OUT ${es.out_count}`
+                    : (e.name || e.id)) + src;
     const el = PT(g, mx, my);
     lab(txt, el[0], el[1] - 16, MC_COLORS.exit);
     ctx.globalAlpha = 1;

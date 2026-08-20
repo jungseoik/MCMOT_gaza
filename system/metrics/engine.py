@@ -106,6 +106,7 @@ class MetricsEngine:
         self._objects: dict[str, _ObjState] = {}   # gid -> 상태
         self._latest_ts: float | None = None
         self._exits: dict[str, _ExitCounter] = {}
+        self._cam_exits: dict[str, list[str]] = {}   # cam_id -> [exit_id] (화면 통과선)
         # 평가 세션 (계약 v1.2) — 진행 중 세션·마지막 결과·타임라인
         self._session: EvaluationSession | None = None
         self._recorder = None   # SessionRecorder | None (계약 v1.10 — 세션 녹화)
@@ -152,10 +153,20 @@ class MetricsEngine:
                          if self._m_per_px else 0.0)
             old = self._exits
             self._exits = {}
+            self._cam_exits = {}          # cam_id -> [exit_id] (화면 통과선)
             for ex in site.exits:
-                key = (tuple(map(tuple, ex.line)), tuple(ex.inside))
-                line = DirectionalLine(ex.line, ex.inside, margin_px=margin_px)
+                # 화면 통과선이 설정된 출입구는 **화면 px 기하**로 카운터를 만든다.
+                # 카운터는 출입구당 하나뿐이라 맵/화면이 동시에 세는 일은 없다.
+                in_cam = ex.counts_in_camera()
+                geo_line = ex.cam_line if in_cam else ex.line
+                geo_inside = ex.cam_inside if in_cam else ex.inside
+                key = (tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam)
+                # 화면 px 는 맵 px 보다 스케일이 작을 수 있어 데드밴드를 줄인다
+                line = DirectionalLine(geo_line, geo_inside,
+                                       margin_px=(margin_px * 0.5 if in_cam else margin_px))
                 st = _ExitCounter(line=line, cfg_key=key)
+                if in_cam:
+                    self._cam_exits.setdefault(ex.count_cam, []).append(ex.id)
                 prev = old.get(ex.id)
                 if prev is not None:
                     st.in_count, st.out_count = prev.in_count, prev.out_count
@@ -164,6 +175,10 @@ class MetricsEngine:
                     if prev.cfg_key == key:      # 선 기하 동일 → 부호상태 유지
                         st.line = prev.line
                 self._exits[ex.id] = st
+
+    def _cam_exit_ids(self) -> set:
+        """화면 통과선으로 카운트하는 출입구 id 집합 (맵 관측에서 제외)."""
+        return {eid for ids in self._cam_exits.values() for eid in ids}
 
     def _area_m2(self, polygon) -> float | None:
         if self._m_per_px is None:
@@ -202,8 +217,14 @@ class MetricsEngine:
             for tr in tracks:
                 if tr.conf < min_conf:           # 저신뢰 관측 — 오탐 연명 트랙 차단
                     continue                     # (BYTE 저신뢰 연관 유령 객체 방지)
-                p = proj.project(tr.foot_uv)
                 gid_pre = f"{cam_id}:{tr.local_track_id}"
+                # 화면 통과선 — **투영 전에** 관측한다. 문 앞은 대응점 헐 밖이라
+                # 아래 ROI 게이트에서 버려지는데, 카운트는 거기서도 살아야 한다.
+                for _eid in self._cam_exits.get(cam_id, ()):
+                    _ec = self._exits.get(_eid)
+                    if _ec is not None:
+                        _ec.observe(gid_pre, tr.foot_uv)
+                p = proj.project(tr.foot_uv)
                 self._debug_foot[gid_pre] = {
                     "foot_u": round(tr.foot_uv[0], 1), "foot_v": round(tr.foot_uv[1], 1),
                     "map_x": round(p.x, 1) if p else None, "map_y": round(p.y, 1) if p else None,
@@ -225,7 +246,10 @@ class MetricsEngine:
                     st.hist.popleft()            # sliding window 유지
                 st.last_ts = ts
                 st.in_bounds = p.in_bounds
-                for ec in self._exits.values():  # 방향성 crossing 관측
+                cam_owned = self._cam_exit_ids()
+                for eid, ec in self._exits.items():   # 방향성 crossing 관측
+                    if eid in cam_owned:              # 화면 통과선이 이미 셌다
+                        continue
                     ec.observe(gid, (p.x, p.y))
                 if sess is not None:             # EPFI 관측 누적
                     sess.observe_point(gid, ts, p.x, p.y)
@@ -234,8 +258,18 @@ class MetricsEngine:
                 sess.maybe_sample(self._latest_ts)
 
     def _drop(self, gid: str) -> None:
+        """맵 투영에서 빠진 객체 정리.
+
+        화면 통과선(cam_line)은 **일부러 헐 밖에서 쓰는 것**이라 여기서 부호
+        기억을 지우면 안 된다. 지우면 문 앞으로 나가는 매 프레임마다 상태가
+        초기화돼 crossing 이 영영 성립하지 않는다(실측으로 확인).
+        맵 통과선만 정리한다.
+        """
         self._objects.pop(gid, None)
-        for ec in self._exits.values():
+        cam_owned = self._cam_exit_ids()
+        for eid, ec in self._exits.items():
+            if eid in cam_owned:
+                continue
             ec.line.forget(gid)
 
     def _purge(self, now: float) -> None:
@@ -259,11 +293,20 @@ class MetricsEngine:
         self._objects.clear()
         margin_px = (self.margin_m / self._m_per_px
                      if self._m_per_px else 0.0)
-        self._exits = {
-            ex.id: _ExitCounter(
-                line=DirectionalLine(ex.line, ex.inside, margin_px=margin_px),
-                cfg_key=(tuple(map(tuple, ex.line)), tuple(ex.inside)))
-            for ex in self._site.exits}
+        # 카운터 재생성 — reload() 와 같은 규칙을 써야 한다. 화면 통과선 설정을
+        # 여기서 빠뜨리면 세션 시작·리셋 때 조용히 맵 카운트로 되돌아간다.
+        self._exits = {}
+        self._cam_exits = {}
+        for ex in self._site.exits:
+            in_cam = ex.counts_in_camera()
+            geo_line = ex.cam_line if in_cam else ex.line
+            geo_inside = ex.cam_inside if in_cam else ex.inside
+            self._exits[ex.id] = _ExitCounter(
+                line=DirectionalLine(geo_line, geo_inside,
+                                     margin_px=(margin_px * 0.5 if in_cam else margin_px)),
+                cfg_key=(tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam))
+            if in_cam:
+                self._cam_exits.setdefault(ex.count_cam, []).append(ex.id)
 
     def start_session(self,
                       origin_xy: tuple[float, float] | None = None,

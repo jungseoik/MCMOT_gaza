@@ -13,7 +13,9 @@ Views.cams = (() => {
   let mode = "pair";                    // pair | roi | pan
   const frames = {};                    // cam_id -> {img, w, h}
   let cctvPts = [], mapPts = [], roi = [];
-  let showAllCov = false;        // 전 카메라 대응점·커버영역 표시
+  let showAllCov = false;
+  // 출입구 화면 통과선 편집 — {exit_id, pts:[2점], inside} (선택 기능)
+  let exLineExit = null, exLinePts = [], exLineInside = null;        // 전 카메라 대응점·커버영역 표시
   let selFloor = "default";             // 선택 카메라가 매핑될 층 id
   const mapImages = {};                 // floor_id -> Image (층별 맵 캐시)
 
@@ -467,8 +469,68 @@ Views.cams = (() => {
     }
   }
 
+  /** 이 층 출입구 목록을 드롭다운에 채우고, 선택 출입구의 기존 화면 선을 불러온다. */
+  function renderExLineUI() {
+    const wrap = $("exLineWrap"), selEl = $("exLineSel");
+    if (!wrap || !selEl) return;
+    wrap.classList.toggle("hidden", mode !== "exline");
+    if (mode !== "exline") return;
+    const exits = (selFloorObj()?.exits) || [];
+    selEl.innerHTML = exits.length
+      ? exits.map((e) => {
+          const own = e.count_cam ? ` · 담당 ${e.count_cam}` : "";
+          return `<option value="${e.id}">${e.name || e.id}${own}</option>`;
+        }).join("")
+      : '<option value="">(이 층에 출입구 없음)</option>';
+    if (!exLineExit || !exits.some((e) => e.id === exLineExit)) {
+      exLineExit = exits[0]?.id || null;
+    }
+    selEl.value = exLineExit || "";
+    loadExLine();
+  }
+
+  /** 선택 출입구의 저장된 화면 통과선을 편집 상태로 가져온다. */
+  function loadExLine() {
+    const ex = (selFloorObj()?.exits || []).find((e) => e.id === exLineExit);
+    if (ex && ex.count_cam === sel && ex.cam_line && ex.cam_inside) {
+      exLinePts = ex.cam_line.map((p) => p.slice());
+      exLineInside = ex.cam_inside.slice();
+      hint(`${ex.name || ex.id} — 이 카메라가 담당 중. 다시 그리려면 [되돌리기] 후 클릭.`);
+    } else {
+      exLinePts = []; exLineInside = null;
+      if (ex && ex.count_cam && ex.count_cam !== sel) {
+        hint(`${ex.name || ex.id} 은 현재 ${ex.count_cam} 이 담당합니다 — `
+           + `여기서 새로 그리면 담당이 이 카메라로 바뀝니다.`, true);
+      }
+    }
+    renderSel();
+  }
+
+  /** 화면 통과선을 site 에 저장. line=null 이면 해제(맵 카운트로 복귀). */
+  async function saveExLine(line) {
+    const exits = (selFloorObj()?.exits) || [];
+    const ex = exits.find((e) => e.id === exLineExit);
+    if (!ex) { hint("출입구를 찾을 수 없습니다.", true); return; }
+    if (line) {
+      ex.count_cam = sel; ex.cam_line = line.pts; ex.cam_inside = line.inside;
+    } else {
+      ex.count_cam = null; ex.cam_line = null; ex.cam_inside = null;
+    }
+    try {
+      App.syncFloor();                       // 별칭된 top-level → 층 객체 반영
+      await API.putSite(App.site);
+      await App.reloadSite();
+      renderExLineUI();
+      hint(line
+        ? `${ex.name || ex.id} — 이제 ${sel} 화면에서 카운트합니다 `
+          + `(맵 선은 표시·폭 계산에만 사용).`
+        : `${ex.name || ex.id} — 맵 통과선 카운트로 되돌렸습니다.`);
+    } catch (e) { hint("저장 실패: " + e.message, true); }
+  }
+
   function setMode(m) {
     mode = m;
+    if (typeof renderExLineUI === "function") renderExLineUI();
     document.querySelectorAll("#camTools .tag-btn").forEach((b) =>
       b.classList.toggle("on", b.dataset.mode === m));
     hint();
@@ -477,6 +539,16 @@ Views.cams = (() => {
 
   function onCamClick(p) {
     if (!sel) return;
+    if (mode === "exline") {
+      if (!exLineExit) { hint("먼저 어느 출입구인지 고르세요.", true); return; }
+      if (exLinePts.length < 2) exLinePts.push([p.x, p.y]);
+      else exLineInside = [p.x, p.y];       // 3번째 클릭 = '안쪽'
+      hint(exLinePts.length < 2
+        ? `통과선 ${exLinePts.length}/2 — 문지방을 가로지르게 두 점을 찍으세요.`
+        : (exLineInside ? "선 2점 + 안쪽 지정 완료 — [매핑 저장]으로 반영됩니다."
+                        : "이제 '안쪽'(건물 안) 방향에 한 번 더 클릭하세요."));
+      renderSel(); return;
+    }
     if (mode === "roi") { roi.push([p.x, p.y]); }
     else if (mode === "pair") {
       if (cctvPts.length > mapPts.length) { hint("우측 맵에 먼저 대응점을 찍으세요.", true); return; }
@@ -493,6 +565,11 @@ Views.cams = (() => {
   }
 
   function undo() {
+    if (mode === "exline") {
+      if (exLineInside) exLineInside = null;
+      else exLinePts.pop();
+      renderSel(); return;
+    }
     if (mode === "roi") roi.pop();
     else if (cctvPts.length > mapPts.length) cctvPts.pop();
     else mapPts.pop();
@@ -507,6 +584,14 @@ Views.cams = (() => {
 
   async function saveMapping() {
     if (!sel) return;
+    if (mode === "exline") {                 // 화면 통과선 저장
+      if (exLinePts.length !== 2 || !exLineInside) {
+        hint("통과선 2점 + 안쪽 1점을 모두 찍어야 저장됩니다.", true); return;
+      }
+      await saveExLine({ pts: exLinePts.map((p) => p.slice()),
+                         inside: exLineInside.slice() });
+      return;
+    }
     const n = Math.min(cctvPts.length, mapPts.length);
     if (n < 4 || cctvPts.length !== mapPts.length) {
       hint(`대응점이 최소 4쌍 필요합니다 (현재 카메라 ${cctvPts.length} · 맵 ${mapPts.length}).`, true);
@@ -545,6 +630,66 @@ Views.cams = (() => {
     if (rs) rs.classList.toggle("hidden", !r);
   }
 
+  /** 화면 통과선 편집 표시 — 선 2점 + 안쪽 화살표. */
+  function drawExLine(g) {
+    const { ctx } = g;
+    const COL = "#FF9F1C", IN = "#30DCFB";
+    if (exLinePts.length) {
+      if (exLinePts.length === 2) {
+        const a = PT(g, exLinePts[0][0], exLinePts[0][1]);
+        const b = PT(g, exLinePts[1][0], exLinePts[1][1]);
+        ctx.strokeStyle = COL; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        if (exLineInside) {                       // 안쪽 방향 화살표
+          const i = PT(g, exLineInside[0], exLineInside[1]);
+          const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+          const ang = Math.atan2(i[1] - m[1], i[0] - m[0]);
+          ctx.strokeStyle = IN; ctx.lineWidth = 3;
+          const ex = m[0] + 34 * Math.cos(ang), ey = m[1] + 34 * Math.sin(ang);
+          ctx.beginPath(); ctx.moveTo(m[0], m[1]); ctx.lineTo(ex, ey); ctx.stroke();
+          mcArrowHead(ctx, ex, ey, ang, 10, IN);
+          ctx.font = "bold 12px Pretendard, sans-serif"; ctx.fillStyle = IN;
+          ctx.fillText("안쪽", ex + 6, ey + 4);
+        }
+      }
+      mcNumbered(g, exLinePts, COL);
+    }
+    // 맵 통과선을 역투영해 참고선으로 (H 를 쓰므로 '추정' — 확정값 아님)
+    const ex = (selFloorObj()?.exits || []).find((e) => e.id === exLineExit);
+    const H9 = getCamH();
+    if (ex && H9) {
+      const inv = invH(H9);
+      if (inv) {
+        const q = ex.line.map((p) => applyH(inv, p[0], p[1])).filter(Boolean);
+        if (q.length === 2) {
+          const a = PT(g, q[0][0], q[0][1]), b = PT(g, q[1][0], q[1][1]);
+          ctx.strokeStyle = "rgba(255,74,68,.55)"; ctx.lineWidth = 2;
+          ctx.setLineDash([8, 6]);
+          ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "11px Pretendard, sans-serif"; ctx.fillStyle = "rgba(255,74,68,.8)";
+          ctx.fillText(`${ex.name || ex.id} (맵 선 추정 위치)`, a[0] + 6, a[1] - 6);
+        }
+      }
+    }
+  }
+
+  /** 3x3 역행렬 — 맵 선을 화면으로 되돌릴 때만 쓴다. */
+  function invH(h) {
+    const m = [[h[0], h[1], h[2]], [h[3], h[4], h[5]], [h[6], h[7], h[8]]];
+    const d = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if (!d || !isFinite(d)) return null;
+    const c = (r, cc) => {
+      const s = [[0, 1, 2].filter((i) => i !== r), [0, 1, 2].filter((i) => i !== cc)];
+      const a = m[s[0][0]][s[1][0]] * m[s[0][1]][s[1][1]]
+              - m[s[0][0]][s[1][1]] * m[s[0][1]][s[1][0]];
+      return ((r + cc) % 2 ? -a : a) / d;
+    };
+    return [c(0,0), c(1,0), c(2,0), c(0,1), c(1,1), c(2,1), c(0,2), c(1,2), c(2,2)];
+  }
+
   function drawCrosshair(g, px, py, col, label) {
     const { ctx } = g;
     const [cx, cy] = PT(g, px, py);      // 회전 반영
@@ -566,6 +711,10 @@ Views.cams = (() => {
 
   function camOverlay(g) {
     const { ctx } = g;
+    if (mode === "exline") {
+      drawExLine(g);
+      return;                        // 대응점·ROI 와 색이 겹치지 않게 단독 표시
+    }
     // 각 모드는 자기 데이터만 표시 — 점과 영역이 항상 같은 좌표라 어긋나지 않게.
     if (mode === "roi") {
       // 유효 ROI 편집 — 탐지영역(점 순서 그대로, 오목 가능)만.
@@ -740,6 +889,13 @@ Views.cams = (() => {
     };
     // 도면 회전 — 표시 전용. 저장되는 map_pts 는 언제나 원본 맵 px 이므로
     // 돌려놓고 찍어도 매핑값은 그대로다(toMap 이 역회전).
+    $("exLineSel").onchange = (e) => { exLineExit = e.target.value || null; loadExLine(); };
+    $("exLineClear").onclick = async () => {
+      if (!exLineExit) return;
+      if (!confirm("이 출입구의 화면 통과선을 해제하고 맵 통과선 카운트로 되돌릴까요?")) return;
+      exLinePts = []; exLineInside = null;
+      await saveExLine(null);
+    };
     $("covAllBtn").onclick = () => {
       showAllCov = !showAllCov;
       $("covAllBtn").classList.toggle("on", showAllCov);

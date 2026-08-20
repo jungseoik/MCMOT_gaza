@@ -266,8 +266,13 @@
           <div class="seg" id="camTools">
             <button class="tag-btn on" data-mode="pair">대응점 (4+쌍)</button>
             <button class="tag-btn" data-mode="roi">유효 ROI</button>
+            <button class="tag-btn" data-mode="exline" title="출입구 통과 카운트를 카메라 화면에서 판정 — 문 앞이 대응점 범위 밖이라 맵에 안 잡힐 때">출입구 통과선</button>
             <button class="tag-btn" data-mode="pan">이동</button>
           </div>
+          <span class="fieldlab hidden" id="exLineWrap">출입구
+            <select id="exLineSel" title="이 카메라가 카운트를 담당할 출입구"></select>
+            <button class="tag-btn" id="exLineClear" title="이 출입구의 화면 통과선 해제 — 맵 카운트로 되돌림">해제</button>
+          </span>
           <button class="tag-btn" id="pairUndo">↶ 마지막 취소</button>
           <button class="tag-btn" id="pairClear">지우기</button>
           <span class="vsep"></span>
