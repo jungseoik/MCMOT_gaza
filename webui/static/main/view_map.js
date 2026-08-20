@@ -368,8 +368,7 @@ Views.map = (() => {
       if (!p.selected && p.ready) el.onclick = () => applyInfer(p);
       box.appendChild(el);
     });
-    note.textContent = keepNote
-      || `인제스트 ${d.backend} · 전환 시 추론만 재기동(세션 중에는 불가)`;
+    note.textContent = keepNote || `인제스트 백엔드: ${d.backend}`;
   }
 
   async function applyInfer(p) {

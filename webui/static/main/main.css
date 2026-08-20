@@ -93,6 +93,13 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .elitem .del{ background:none; border:0; color:var(--text-3); cursor:pointer; font-size:15px; }
 .elitem .del:hover{ color:var(--pia-coral); }
 .elitem-bn{ flex-wrap:wrap; row-gap:4px; }
+/* 추론 모델 패널 — 키:값 스펙 줄 */
+.spec{ display:flex; gap:10px; padding:3px 0; border-bottom:1px solid var(--stroke-1); }
+.spec:last-of-type{ border-bottom:0; margin-bottom:6px; }
+.spec > span{ flex:0 0 88px; color:var(--text-3); }
+.spec > b{ flex:1; color:var(--text-1); font-weight:600; }
+.spec.hd > b{ color:var(--text-3); font-weight:500; }
+
 /* 추론 모델 패널 — 현재 적용 모델 요약 줄 */
 .curmodel{ color:var(--text-2); font-size:13px; margin:-2px 0 6px; }
 .curmodel b{ color:var(--pia-cyan); }

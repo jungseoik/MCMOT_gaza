@@ -67,8 +67,8 @@
           <span>사이트 설정</span>
           <span class="seg">
             <button class="tag-btn on" id="msTabSet">설정</button>
-            <button class="tag-btn" id="msTabModel">추론 모델</button>
             <button class="tag-btn" id="msTabHelp">지표 설명</button>
+            <button class="tag-btn" id="msTabModel">추론 모델</button>
           </span>
         </div>
         <div class="sidebody">
@@ -184,34 +184,30 @@
               <div class="grow" id="inferNote">불러오는 중…</div>
             </div>
             <div class="hcard">
-              <div class="htitle">전환하면 무엇이 바뀌나</div>
+              <div class="htitle">전환 시 동작</div>
               <div class="hbody">
-                <b>추론 계층만</b> 재기동된다(20~30초). 층·도면·카메라 매핑·구역·
-                출입구 설정과 세션 녹화본은 <b>그대로</b>다.<br/>
-                재기동 동안 추적이 잠시 끊기고 <b>추적 ID가 초기화</b>된다 —
-                진행 중이던 사람은 새 번호를 받는다.<br/>
-                <b>평가 세션 진행 중에는 전환되지 않는다</b>: 한 세션 안에서 앞뒤 구간이
-                서로 다른 검출기로 계산되면 4대 지표를 신뢰할 수 없다(맵·구역을
-                세션 중에 못 바꾸는 것과 같은 이유).
+                <div class="spec"><span>재기동</span><b>추론 계층만 · 20~30초</b></div>
+                <div class="spec"><span>유지</span><b>층 · 도면 · 매핑 · 구역 · 출입구 · 세션 녹화본</b></div>
+                <div class="spec"><span>초기화</span><b>추적 ID (재기동 구간은 추적 끊김)</b></div>
+                <div class="spec"><span>차단</span><b>평가 세션 진행 중 — 구간마다 검출기가 다르면 지표 무효</b></div>
               </div>
             </div>
             <div class="hcard">
-              <div class="htitle">두 스택의 차이 <i class="mtag">현장영상 실측</i></div>
+              <div class="htitle">성능 <i class="mtag">현장영상 실측</i></div>
               <div class="hbody">
-                <b>신규(YOLO26-L + CLIP-ReID)</b>는 같은 영상에서 사람을 더 많이·더 오래
-                유지한다(장수명 트랙 5→7). 단일 영상 처리는 <b>2.8배 빠르다</b>(28→78fps).<br/>
-                다만 <b>다채널 배치 추론에서는 24% 느리다</b>(프레임당 10.8→13.4ms) —
-                배치가 YOLOX의 큰 입력 비용을 잘 상각하고, 더 많이 잡는 만큼 ReID·연관
-                비용이 함께 늘기 때문. 현재 채널 수(12ch@5fps)에서는 둘 다 여유(드랍 0).<br/>
-                <b>기존(YOLOX + FastReID)</b>은 현장 검증을 마친 기본 스택이다. 채널을 크게
-                늘릴 때는 이쪽이 유리하다.
+                <div class="spec hd"><span></span><b>기존 &nbsp;/&nbsp; 신규</b></div>
+                <div class="spec"><span>단일 영상 처리</span><b>28 &nbsp;/&nbsp; 78 fps</b></div>
+                <div class="spec"><span>다채널 배치</span><b>10.8 &nbsp;/&nbsp; 13.4 ms/frame</b></div>
+                <div class="spec"><span>장수명 트랙</span><b>5 &nbsp;/&nbsp; 7 개</b></div>
+                <div class="spec"><span>검출 지연</span><b>28.9 &nbsp;/&nbsp; 6.2 ms @720p</b></div>
+                12ch@5fps 기준 둘 다 드랍 0. 채널을 크게 늘릴 계획이면 기존.
               </div>
             </div>
             <div class="hcard">
-              <div class="htitle">모델이 "엔진 없음"으로 뜬다면</div>
+              <div class="htitle">"엔진 없음" 표시</div>
               <div class="hbody">
-                TRT 엔진은 GPU·TensorRT 버전마다 다시 구워야 해서 서버 이관 시 따라오지
-                않는다. 서버에서 한 번 빌드하면 된다:<br/>
+                TRT 엔진은 GPU·TensorRT 버전에 종속이라 서버 이관 시 따라오지 않는다.
+                해당 서버에서 한 번 빌드:<br/>
                 <code>bash tools/fetch_assets.sh --onnx</code><br/>
                 <code>bash tools/build_profile_engines.sh --ds</code>
               </div>
