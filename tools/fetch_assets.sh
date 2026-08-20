@@ -112,6 +112,19 @@ if [ "$DO_CAD" -eq 1 ]; then
   # 현재 17F·16F 에 적용되어 있는 도면 — 같은 맵을 재현하려면 이걸 편집기에 올린다
   fetch "backseollgi/MCMOT" model "cad/17F_v2.dwg"                     "cad/17F_v2.dwg"                     || RC=1
   fetch "backseollgi/MCMOT" model "cad/17F_v2.dxf"                     "cad/17F_v2.dxf"                     || RC=1
+  # AI hub(AI지원센터) 도면 일습 — 125파일·156MB라 파일별 fetch 대신 폴더째 받는다.
+  # AutoCAD 자동백업(.bak)·락(.dwl*)은 업로드 대상이 아니라 여기에도 없다.
+  CADD="$(mktemp -d)"
+  if "$HF_BIN" download backseollgi/MCMOT --repo-type model \
+       --include "cad/ai_hub_cad/**" --local-dir "$CADD" >/dev/null 2>&1 \
+     && [ -d "$CADD/cad/ai_hub_cad" ]; then
+    mkdir -p cad/ai_hub_cad
+    cp -r "$CADD/cad/ai_hub_cad/." cad/ai_hub_cad/
+    echo "  ↓ cad/ai_hub_cad/** → cad/ai_hub_cad/  ($(du -sh cad/ai_hub_cad 2>/dev/null | cut -f1))"
+  else
+    echo "  [실패] cad/ai_hub_cad — 비공개 MCMOT 접근 토큰(HF_TOKEN) 필요" >&2; RC=1
+  fi
+  rm -rf "$CADD"
 fi
 
 if [ "$DO_FIELD" -eq 1 ]; then
