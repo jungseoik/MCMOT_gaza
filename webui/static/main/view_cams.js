@@ -917,6 +917,69 @@ Views.cams = (() => {
       mapMc.setRot(0);
       updateRotLabel();
     };
+    // ── RTSP 미리보기 — 등록 전/후 임의 주소를 추론까지 돌려 눈으로 확인
+    let pvTimer = null, pvImgTimer = null;
+    const pvSet = (id, v) => { $(id).textContent = v; };
+    async function pvTick() {
+      let s;
+      try { s = await (await fetch("/api/preview/status")).json(); }
+      catch (e) { return; }
+      pvSet("pv0", s.stage || (s.running ? "동작 중" : "정지"));
+      pvSet("pv1", s.w ? `${s.w}x${s.h}` : "—");
+      pvSet("pv2", s.src_fps ? s.src_fps.toFixed(0) : "—");
+      pvSet("pv3", s.frames ? s.fps.toFixed(2) : "—");
+      pvSet("pv4", s.frames ? s.det.toFixed(2) : "—");
+      pvSet("pv5", s.frames ? s.tracks : "—");
+      pvSet("pv6", s.first_latency != null ? s.first_latency + "s" : "—");
+      $("pvErr").textContent = s.error || "";
+      if (!s.running) pvHalt(false);
+    }
+    function pvHalt(alsoServer) {
+      clearInterval(pvTimer); clearInterval(pvImgTimer);
+      pvTimer = pvImgTimer = null;
+      $("pvStart").disabled = false; $("pvStop").disabled = true;
+      if (alsoServer) fetch("/api/preview/stop", { method: "POST" }).catch(() => {});
+    }
+    async function pvStart() {
+      const rtsp = $("pvUrl").value.trim();
+      if (!rtsp) return;
+      $("pvStart").disabled = true; $("pvErr").textContent = "";
+      pvSet("pv0", "엔진 로드·연결 중…");
+      try {
+        const r = await fetch("/api/preview/start", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rtsp }) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail || r.status);
+        $("pvStop").disabled = false;
+        // 프레임은 폴링으로 교체 (MJPEG 대신 — 연결이 남지 않아 정리가 확실)
+        pvImgTimer = setInterval(() => {
+          $("pvImg").src = "/api/preview/frame?t=" + Date.now();
+        }, 350);
+        pvTimer = setInterval(pvTick, 800);
+        pvTick();
+      } catch (e) {
+        $("pvErr").textContent = "시작 실패: " + e.message;
+        $("pvStart").disabled = false;
+      }
+    }
+    $("camPreview").onclick = () => {
+      // 선택된 카메라가 있으면 그 주소를 채워둔다(등록 후 점검용)
+      const c = App.cameras.find((x) => x.cam_id === sel);
+      if (c && !$("pvUrl").value) $("pvUrl").value = c.rtsp;
+      $("pvModal").classList.remove("hidden");
+    };
+    $("pvClose").onclick = () => {
+      pvHalt(true);                      // 닫으면 반드시 워커도 정지
+      $("pvImg").removeAttribute("src");
+      $("pvModal").classList.add("hidden");
+    };
+    $("pvModal").onclick = (e) => { if (e.target === $("pvModal")) $("pvClose").onclick(); };
+    $("pvStart").onclick = pvStart;
+    $("pvStop").onclick = () => { pvHalt(true); pvSet("pv0", "정지됨"); };
+    $("pvUrl").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); pvStart(); } });
+
     $("camRetest").onclick = async () => {
       if (!sel) return;
       try {
