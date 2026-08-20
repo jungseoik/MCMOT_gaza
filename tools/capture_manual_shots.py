@@ -169,13 +169,47 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
 
     # 전 카메라 커버리지·공간그래프 오버레이 (② 매핑 상태 한눈에 보기)
     try:
-        for label in ("커버리지", "공간그래프"):
-            btn = pg.get_by_text(label, exact=False).first
-            if btn.count():
-                btn.click(); pg.wait_for_timeout(500)
+        pg.locator("#covAllBtn").click(); pg.wait_for_timeout(700)
         s.shot("27_coverage_overlay", note="전 카메라 커버리지 오버레이")
+        pg.locator("#covAllBtn").click(); pg.wait_for_timeout(300)   # 원상복구
     except Exception as e:
         print(f"  ✗ 27_coverage_overlay: {type(e).__name__}")
+
+    # RTSP 미리보기 모달 (v0.0.3) — 등록 전 추론 확인
+    try:
+        pg.locator("#camPreview").click(); pg.wait_for_timeout(600)
+        cams = json.load(urllib.request.urlopen(f"{MAIN}/api/cameras", timeout=8))
+        url = (cams or [{}])[0].get("rtsp", "")
+        if url:
+            pg.fill("#pvUrl", url)
+            pg.locator("#pvStart").click()
+            for _ in range(30):                      # 엔진 로드 대기
+                pg.wait_for_timeout(2000)
+                if (pg.eval_on_selector("#pv3", "e=>e.textContent") or "—") != "—":
+                    break
+        s.shot("28_preview", "#pvModal .modalbox", note="RTSP 미리보기")
+    except Exception as e:
+        print(f"  ✗ 28_preview: {type(e).__name__}: {e}")
+    finally:
+        # 모달이 열린 채 남으면 이후 모든 클릭이 가로막힌다 — 반드시 닫는다
+        try:
+            pg.evaluate("""() => {
+                fetch('/api/preview/stop', {method:'POST'});
+                document.getElementById('pvModal').classList.add('hidden');
+            }""")
+            pg.wait_for_timeout(600)
+        except Exception:
+            pass
+
+    # 출입구 화면 통과선 모드 (v0.0.3)
+    try:
+        pg.locator('#camTools button[data-mode="exline"]').click(timeout=8000)
+        pg.wait_for_timeout(800)
+        s.shot("29_exline", note="출입구 화면 통과선 모드")
+        pg.locator('#camTools button[data-mode="pair"]').click()
+        pg.wait_for_timeout(300)
+    except Exception as e:
+        print(f"  ✗ 29_exline: {type(e).__name__}")
 
     # ③ 운영 뷰
     tab("③ 운영 뷰")
