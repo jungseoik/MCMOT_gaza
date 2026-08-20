@@ -167,12 +167,24 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
     except Exception as e:
         print(f"  ✗ 매핑 화면: {type(e).__name__} — 매핑된 카메라가 있어야 캡처됨")
 
+    # 전 카메라 커버리지·공간그래프 오버레이 (② 매핑 상태 한눈에 보기)
+    try:
+        for label in ("커버리지", "공간그래프"):
+            btn = pg.get_by_text(label, exact=False).first
+            if btn.count():
+                btn.click(); pg.wait_for_timeout(500)
+        s.shot("27_coverage_overlay", note="전 카메라 커버리지 오버레이")
+    except Exception as e:
+        print(f"  ✗ 27_coverage_overlay: {type(e).__name__}")
+
     # ③ 운영 뷰
     tab("③ 운영 뷰")
     pg.wait_for_timeout(3000)
     s.shot("30_live", note="③ 운영 뷰 전체")
     s.shot("31_live_map", "#liveCv", "평면도 표시 영역")
     s.shot("33_metric_rt", "#liveSide", "실시간 지표 패널")
+    # 건물 훈련 패널(세션 시작 전 — 층별 경보 발생원 현황·건물 전체 경보 버튼)
+    s.shot("35_building_drill_panel", note="건물 훈련 패널(층별 경보 발생원 현황)")
 
     if do_session:
         try:
@@ -198,15 +210,31 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
         except Exception:
             pass
 
-    # ④ 리플레이
+    # ④ 리플레이 (다층 사이트는 기본이 '건물 훈련' 모드)
     tab("④ 리플레이")
     pg.wait_for_timeout(2500)
-    s.shot("40_replay", note="④ 리플레이")
+    s.shot("40_replay", note="④ 리플레이 (건물 훈련 모드)")
+    # 건물 훈련: 이력 선택 → 층별 재생 + 롤업 리포트
     try:
+        if pg.locator("#rpModeDrill").count():
+            pg.locator("#rpModeDrill").click(); pg.wait_for_timeout(1200)
+        pg.locator(".rpsess").first.click(); pg.wait_for_timeout(3500)
+        s.shot("42_replay_drill", note="건물 훈련 재생 — 층 선택·건물 지표")
+        if pg.locator("#rpReport").count():
+            pg.locator("#rpReport").click(); pg.wait_for_timeout(900)
+            s.shot("43_drill_report", note="건물 훈련 롤업 리포트")
+            if pg.locator("#resClose").count():
+                pg.locator("#resClose").click(); pg.wait_for_timeout(400)
+    except Exception as e:
+        print(f"  ✗ 42/43 건물 훈련: {type(e).__name__} — 저장된 건물 훈련이 있어야 캡처됨")
+    # 개별 층 세션 재생
+    try:
+        if pg.locator("#rpModeSess").count():
+            pg.locator("#rpModeSess").click(); pg.wait_for_timeout(1200)
         pg.locator(".rpsess").first.click(); pg.wait_for_timeout(2500)
         s.shot("41_replay_play", note="세션 재생")
     except Exception:
-        print("  ✗ 41_replay_play: 재생할 세션이 없음")
+        print("  ✗ 41_replay_play: 재생할 개별 층 세션이 없음")
     b.close()
     return s
 
