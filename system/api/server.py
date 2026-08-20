@@ -19,6 +19,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import sys
+import tempfile
+import time
+import subprocess
+import shutil
 import logging
 import os
 import threading
@@ -1304,6 +1309,139 @@ def status():
     except Exception as e:  # 원인 노출 (임시 디버그 겸 방어)
         logger.exception("/api/status 실패")
         raise HTTPException(500, f"status 수집 실패: {type(e).__name__}: {e}")
+
+
+# ================================================================ RTSP 미리보기
+# 등록 전 임의 주소를 **추론까지 돌려** 눈으로 확인하는 기능. probe 는 연결
+# 여부만 보고 스냅샷은 정지화면이라, "탐지가 실제로 되나"를 못 본다.
+#
+# 추론은 API 프로세스에 올리지 않는다(운영 API 는 77MB — torch/TRT 를 얹으면
+# GB 단위로 늘고 기동이 느려진다). 필요할 때만 워커 subprocess 를 띄우고
+# 결과 파일을 중계한다. 동시 1개, 저장 없음, 정지하면 흔적이 남지 않는다.
+
+class _Preview:
+    """미리보기 워커 수명주기 — 동시 1개."""
+
+    def __init__(self) -> None:
+        self.proc: subprocess.Popen | None = None
+        self.dir: Path | None = None
+        self.rtsp = ""
+        self.started = 0.0
+
+    @staticmethod
+    def mask(url: str) -> str:
+        """계정·비밀번호 가림 — 화면·로그에 남기지 않는다."""
+        if "://" in url and "@" in url.split("://", 1)[1].split("/", 1)[0]:
+            scheme, rest = url.split("://", 1)
+            return f"{scheme}://***:***@{rest.split('@', 1)[1]}"
+        return url
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def start(self, rtsp: str, fps: float, max_sec: float) -> None:
+        self.stop()
+        self.dir = Path(tempfile.mkdtemp(prefix="macs_preview_"))
+        self.rtsp = rtsp
+        self.started = time.time()
+        # 워커 출력은 버리지 않고 파일로 남긴다 — 버리면 실패 원인을 알 수 없다.
+        log = open(self.dir / "worker.log", "wb")
+        self.proc = subprocess.Popen(
+            [sys.executable, "-m", "system.api.preview_worker",
+             "--rtsp", rtsp, "--out", str(self.dir),
+             "--fps", str(fps), "--max-sec", str(max_sec)],
+            cwd=str(Path(__file__).resolve().parents[2]),
+            stdout=log, stderr=subprocess.STDOUT)
+
+    def stop(self) -> None:
+        if self.alive():
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=6)
+            except Exception:
+                self.proc.kill()
+        self.proc = None
+        if self.dir is not None:
+            shutil.rmtree(self.dir, ignore_errors=True)   # 흔적 없이
+            self.dir = None
+
+    def status(self) -> dict:
+        base = {"running": False, "rtsp": self.mask(self.rtsp), "stage": "대기",
+                "w": 0, "h": 0, "src_fps": 0.0, "fps": 0.0, "det": 0.0,
+                "tracks": 0, "frames": 0, "error": "", "first_latency": None}
+        if self.dir is None:
+            return base
+        f = self.dir / "status.json"
+        from_file = None
+        if f.is_file():
+            try:
+                from_file = json.loads(f.read_text())
+                base.update(from_file)
+            except Exception:
+                from_file = None
+        base["rtsp"] = self.mask(self.rtsp)
+        # 워커가 뜨는 데 시간이 걸린다(엔진 로드). 그 사이 status.json 이 아직
+        # 없으면 "아직 시작 중"이지 "끝난 것"이 아니다. base 에 이미
+        # running:False 가 있어 .get(...,True) 의 기본값이 먹지 않으므로
+        # 파일 유무를 명시적으로 갈라야 한다.
+        base["running"] = self.alive() and (
+            bool(from_file.get("running")) if from_file is not None else True)
+        if self.alive() and from_file is None:
+            base["stage"] = "시작 중"
+        if not self.alive() and not base.get("error"):
+            # 워커가 상태를 못 남기고 죽은 경우 — 로그 꼬리를 사유로 올린다
+            lg = self.dir / "worker.log"
+            if lg.is_file():
+                tail = lg.read_text(errors="replace").strip().splitlines()[-3:]
+                if tail:
+                    base["error"] = " / ".join(t[:120] for t in tail)
+        if not self.alive() and not base.get("error"):
+            base["stage"] = "정지"
+        return base
+
+    def frame(self) -> bytes | None:
+        if self.dir is None:
+            return None
+        f = self.dir / "frame.jpg"
+        try:
+            return f.read_bytes() if f.is_file() else None
+        except Exception:
+            return None
+
+
+_preview = _Preview()
+
+
+@app.post("/api/preview/start")
+async def preview_start(payload: dict = None):
+    """임의 RTSP 를 추론까지 돌려 미리보기 — 등록·저장 없음."""
+    body = payload or {}
+    rtsp = (body.get("rtsp") or "").strip()
+    if not rtsp.lower().startswith(("rtsp://", "rtsps://", "http://", "https://")):
+        raise HTTPException(422, "rtsp:// 로 시작하는 주소를 넣으세요")
+    _preview.start(rtsp, float(body.get("fps") or 5.0),
+                   float(body.get("max_sec") or 600.0))
+    return {"ok": True, "rtsp": _Preview.mask(rtsp)}
+
+
+@app.post("/api/preview/stop")
+def preview_stop():
+    _preview.stop()
+    return {"ok": True}
+
+
+@app.get("/api/preview/status")
+def preview_status():
+    return _preview.status()
+
+
+@app.get("/api/preview/frame")
+def preview_frame():
+    f = _preview.frame()
+    if f is None:
+        raise HTTPException(404, "프레임 없음")
+    return Response(f, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
 
 
 # ================================================================ 프론트

@@ -448,3 +448,15 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .rpbtns{ display:flex; gap:8px; margin-top:10px; align-items:center; }
 .rpbtns .btn{ flex:1; }
 #rpSeek{ accent-color:var(--brand, #30DCFB); }
+
+/* RTSP 미리보기 모달 */
+.pvwrap{ display:flex; gap:16px; margin-top:12px; align-items:flex-start; flex-wrap:wrap; }
+.pvview{ flex:1; min-width:420px; background:#000; border:1px solid var(--stroke-1);
+  border-radius:var(--r-md); overflow:hidden; min-height:240px; }
+.pvview img{ display:block; width:100%; height:auto; }
+.pvstat{ width:250px; flex:0 0 auto; }
+.pvstat .row{ display:flex; justify-content:space-between; gap:12px; padding:6px 0;
+  border-bottom:1px solid var(--stroke-1); font-size:12px; color:var(--text-3); }
+.pvstat .row b{ color:var(--text-1); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.pvnote{ font-size:11px; color:var(--text-3); line-height:1.6; margin-top:10px; }
+.pvnote.warn{ color:var(--danger); }

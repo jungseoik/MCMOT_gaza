@@ -283,6 +283,7 @@
           <button class="tag-btn" id="mapRotBtn" title="맵 도면만 90°씩 돌려서 봅니다. 저장되는 좌표는 그대로입니다.">도면 회전 0°</button>
           <button class="tag-btn hidden" id="mapRotReset" title="원래 방향으로">원래대로</button>
           <span class="vsep"></span>
+          <button class="tag-btn" id="camPreview" title="등록 전/후 임의 주소를 추론까지 돌려 확인 — 저장되지 않습니다">미리보기 ▶</button>
           <button class="tag-btn" id="camRetest">연결 테스트 ↻</button>
           <button class="btn primary sm" id="mappingSave">매핑 저장</button>
         </div>
@@ -477,6 +478,34 @@
 </div>
 
 <!-- 카메라 일괄 등록 -->
+<div id="pvModal" class="modal hidden">
+  <div class="modalbox wide">
+    <div class="modalhead">RTSP 미리보기 <span class="grow" id="pvSub">등록·저장되지 않습니다 — 확인 후 [정지]</span>
+      <button class="tag-btn" id="pvClose">닫기 ✕</button></div>
+    <div class="bulkrow">
+      <input type="text" id="pvUrl" spellcheck="false" style="flex:1"
+             placeholder="rtsp://아이디:비밀번호@172.29.0.11:554/trackID=1&streamID=2">
+      <button class="btn sm primary" id="pvStart">시작</button>
+      <button class="tag-btn" id="pvStop" disabled>정지</button>
+    </div>
+    <div class="pvwrap">
+      <div class="pvview"><img id="pvImg" alt=""></div>
+      <div class="pvstat">
+        <div class="row"><span>상태</span><b id="pv0">대기</b></div>
+        <div class="row"><span>해상도</span><b id="pv1">—</b></div>
+        <div class="row"><span>소스 fps</span><b id="pv2">—</b></div>
+        <div class="row"><span>추론 fps</span><b id="pv3">—</b></div>
+        <div class="row"><span>검출 / 프레임</span><b id="pv4">—</b></div>
+        <div class="row"><span>고유 트랙</span><b id="pv5">—</b></div>
+        <div class="row"><span>첫 프레임</span><b id="pv6">—</b></div>
+        <div id="pvErr" class="pvnote warn"></div>
+        <div class="pvnote">ID 박스가 보이면 <b>검출·추적이 도는 것</b>입니다.<br>
+          운영과 GPU 를 나눠 쓰므로 확인 후 정지하세요(10분 상한).</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="bulkModal" class="modal hidden">
   <div class="modalbox wide bulk">
     <div class="modalhead">
