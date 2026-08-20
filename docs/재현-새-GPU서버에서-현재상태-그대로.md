@@ -135,6 +135,18 @@ cp external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o32.engine \
 
 ## 5. RTSP 송출 띄우기 (12채널 소스)
 
+> **현장 NVR 을 직접 붙일 거면 이 단계는 건너뛴다.** 여기서 송출하는 건
+> 데모·검증용 영상이다. 현장에서는 NVR 주소를 6단계 이후 UI 에서 등록하고,
+> 세션 부담 때문에 **로컬 mediamtx 허브**를 두는 것을 권한다 →
+> [현장-NVR-RTSP-수집-대응계획.md](현장-NVR-RTSP-수집-대응계획.md)
+
+**전제: mediamtx 가 떠 있어야 한다** (`:8554`). 설치·기동은
+[RTSP-송출서버-구성.md](RTSP-송출서버-구성.md) 참조. 확인:
+
+```bash
+ss -tlnp | grep 8554     # 리스닝하면 OK
+```
+
 현재 구성은 **RTSP 12채널**이다. 소스는 두 묶음.
 
 ```bash
@@ -163,6 +175,8 @@ ffprobe -v error rtsp://127.0.0.1:8554/field_16f_n   # 스트림이 잡히면 OK
 
 ```bash
 # 멀티카메라 시스템 (:8900)
+#   GPU_DEVICES 는 **그 서버의 실제 인덱스**로 바꿀 것 (nvidia-smi -L 로 확인).
+#   여기 1 은 이 서버 기준이며, GPU 1장짜리 서버라면 0 이다.
 INGEST_BACKEND=deepstream GPU_DEVICES=1 \
   pm2 start tools/run_system_server.sh --name macs-system
 
@@ -250,6 +264,17 @@ GPU 1장당 총 처리량 상한   ≈ 75~78 fps
 실무 설계선               채널수 × fps ≤ 70
 현재 구성                 12ch × 5fps = 60 fps  (여유 있음)
 ```
+
+## 막히면 볼 곳
+
+| 증상 | 문서 |
+|---|---|
+| OS 레벨(드라이버·conda·docker·ffmpeg·node) 부터 필요 | [설치-맨서버-부트스트랩.md](설치-맨서버-부트스트랩.md) |
+| GPU 아키텍처가 다름 · 처리량 재측정 | [이관가이드-다른-GPU-서버로.md](이관가이드-다른-GPU-서버로.md) |
+| DS 워커가 안 뜸 · 배치·엔진 문제 | `system/ingest_ds/README.md` |
+| RTSP 송출·mediamtx | [RTSP-송출서버-구성.md](RTSP-송출서버-구성.md) |
+| 현장 NVR(H.265·VBR·세션) | [현장-NVR-RTSP-수집-대응계획.md](현장-NVR-RTSP-수집-대응계획.md) |
+| 서비스 실행·환경변수 전반 | `system/README.md` |
 
 ## 재현되지 않는 것 (알고 있을 것)
 
