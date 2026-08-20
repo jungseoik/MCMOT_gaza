@@ -141,27 +141,31 @@ pm2 save
 
 ```bash
 python tools/seed_version.py list          # 보관된 버전 확인
-python tools/seed_version.py show v3       # 내용 미리보기
-python tools/seed_version.py restore v3 --apply
+python tools/seed_version.py show v5       # 내용 미리보기
+python tools/seed_version.py restore v5 --apply
 ```
 
-`v3` 가 현재 운영 구성이다:
+`v5` 가 현재 운영 구성이다 (= `data/seed/` 와 동일. 서버 첫 기동 시 자동 복사되므로
+7단계는 확인용이고, 실험 후 원복할 때 쓴다):
 
 ```
 default  17F     3400x3207  0.02391 m/px (수동 2점)  경로2 구역3 병목2 출입구2
-floor2   16F     2000x1887  0.03662 m/px (CAD 자동)  경로5 구역9 출입구2
-floor3   지상1층  2346x1672  0.04    m/px (CAD 자동)
+floor2   16F     2000x1887  0.03662 m/px (CAD 자동)  경로8 구역9 병목4 출입구2
+floor3   지상1층  2346x1672  0.04    m/px (CAD 자동)  요소 없음
 
 cam01~cam03  17F   매핑 O   (1_v1 · 2_v1 · 3_v1)
 cam04~cam09  16F   매핑 O   (field_16f_*)
 cam10~cam12  지상1층 미매핑·비활성 (field_1f_*)
+유효 ROI 없음 — 대응점 컨벡스 헐이 자동으로 투영 게이트가 된다
 ```
 
 | 버전 | 내용 |
 |---|---|
 | `v1` | 초기 시드 — 17F·19F 시드맵, 카메라 3대 |
 | `v2` | 16F CAD 적용 + 현장 6채널 매핑 (17F 도 CAD 상태) |
-| `v3` | **현재** — 17F 는 시드 도면 3채널, 16F 는 CAD·현장 6채널 |
+| `v3` | 17F 는 시드 도면 3채널, 16F 는 CAD·현장 6채널 |
+| `v4` | ROI 전부 제거 + 16F 병목 4·수동경로 r1~r3 |
+| `v5` | **현재** — 화면 통과선 기능 도입 시점 · cam06 재매핑 |
 
 `restore` 는 되돌리기 직전 상태를 `auto-<타임스탬프>` 로 자동 보관한다.
 세부는 [data/seed_versions/README.md](../data/seed_versions/README.md).
