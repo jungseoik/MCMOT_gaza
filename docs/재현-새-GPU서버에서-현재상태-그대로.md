@@ -184,6 +184,30 @@ curl -s localhost:8900/api/map/state | python -m json.tool | head -20
 
 브라우저: `http://<서버IP>:8900` (접속코드 `macs`)
 
+### RTSP·추론이 정말 되는지 (독립 점검 도구)
+
+운영서버와 별개로 도는 진단 도구. 주소를 주면 실제 검출·추적을 돌려
+연결·fps·검출수를 숫자와 영상으로 남긴다.
+
+```bash
+python tools/rtsp_check.py rtsp://127.0.0.1:8554/field_16f_n     # 한 채널
+python tools/rtsp_check.py --all-registered --sec 10             # 등록분 전부
+python tools/rtsp_check.py rtsp://... --no-video                 # 숫자만
+```
+
+```
+▶ field_16f_n   rtsp://127.0.0.1:8554/field_16f_n
+   연결됨 · 1280x720 · 소스 30fps · 첫 프레임 2.08s
+   추론 3.80fps (목표 5.0 · 달성 76%) · 프레임 46
+   검출 평균 3.96명/프레임 · 고유 트랙 9개
+   영상 results/rtsp_check/field_16f_n_check.mp4
+```
+
+- 결과 mp4 에 ID 박스가 그려져 있어 **탐지가 실제로 되는지 눈으로 확인**된다.
+- **운영 파이프라인과 GPU 를 나눠 쓴다.** 위 76% 는 12채널(60fps)이 돌고 있는
+  상태에서 잰 값 — 셋업 직후(운영 정지 상태)라면 목표 fps 를 채운다.
+- 계정이 든 RTSP 주소는 로그에 `rtsp://***:***@host` 로 마스킹된다.
+
 DS 워커 부하 확인:
 
 ```bash
