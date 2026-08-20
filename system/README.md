@@ -55,6 +55,22 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
 | `ffmpeg` (기본) | 카메라별 ffmpeg-NVDEC → FrameQueue → 호스트 직렬 TRT | **4ch@5fps** (총 ~21fps 포화) | 기존 경로 — 미지정 시 100% 기존 동작 |
 | `deepstream` | GPU별 DS 워커 컨테이너(zero-copy 배치 추론·트래킹) → ZMQ 브리지 | **16ch@5fps/GPU** (총 78.7fps, 20ch부터 5fps 붕괴 · ~54ch에서 1fps) | 선행조건·워커 실행법: [ingest_ds/README.md](ingest_ds/README.md) |
 
+### 추론 프로파일 (검출기·ReID 교체)
+
+검출기·ReID·트래커 조합은 레포 루트 [`model_zoo.py`](../model_zoo.py)에 **프로파일**로
+선언돼 있고, 세 경로(단일영상 `src/inference_gpu.py` · ffmpeg `tracking/analyzer.py` ·
+DS `ingest_ds/worker.py`)가 프로파일 id 하나만 받는다.
+
+| id | 검출 | ReID | 비고 |
+|----|------|------|------|
+| `yolox_fastreid` | YOLOX-X(MOT20) 896×1600 | FastReID SBS-S50 2048d | **기본** — 미설정 시 기존 동작 |
+| `yolo26_clipreid` | YOLO26-L v6.3 640×640 | CLIP-ReID ViT-B/16 768d | det_thresh 0.6 |
+
+- 선택: **UI `① 맵 설정 → [추론 모델]`** (→ `data/infer_profile.json`) · 배포 기본값은 `INFER_PROFILE` 환경변수
+- 전환 시 추론 계층만 재기동. 평가 세션 진행 중이면 409로 거부
+- 엔진 빌드: `bash tools/build_profile_engines.sh [--ds]` (원천 ONNX는 `tools/fetch_assets.sh --onnx`)
+- 설계 [ADR 07](../docs/architecture/07-추론-프로파일-교체구조.md) · 실측 [보고서](../docs/reports/2026-08-20_신규-추론스택-YOLO26-CLIPReID-도입-실측.md)
+
 ```bash
 INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 # 롤백: INGEST_BACKEND 제거(기본 ffmpeg)로 재기동. git 레벨 롤백·제약(스냅샷 폴백,

@@ -104,12 +104,21 @@ docker run --rm --gpus device=<빈GPU> -v "$PWD:/workspace" -w /workspace macs-d
   --minShapes=images:1x3x384x128 --optShapes=images:32x3x384x128 --maxShapes=images:256x3x384x128 \
   --memPoolSize=workspace:4096M'
 ```
+```bash
+# (c) 신규 추론 프로파일(yolo26_clipreid — 선택). 호스트·컨테이너 엔진을 한 번에.
+bash tools/fetch_assets.sh --onnx               # 원천 ONNX (HF backseollgi/MCMOT)
+GPU=<빈GPU> bash tools/build_profile_engines.sh --ds
+```
 > b32 엔진은 원본 서버에서 실측 후 **이득 없음으로 기각**(b16 유지). 굳이 재빌드 불필요.
+> (c)를 건너뛰면 UI `① 맵 설정 → [추론 모델]`에서 신규 조합이 "엔진 없음"으로 비활성 표시될
+> 뿐, 기본 스택(`yolox_fastreid`)으로 정상 동작한다.
 
 ### 2-5. 실행 설정
 - `GPU_DEVICES`를 **§1에서 확인한 실제 빈 GPU 인덱스**로 설정 (`0,1,2,3` 가정 금지).
 - `INGEST_BACKEND=deepstream`(멀티카메라) 또는 미설정(=ffmpeg, 단일/기존).
 - `WORKERS_PER_GPU`는 기본 1 권장(원본 실측: 분할은 5fps 한계를 못 늘림).
+- `INFER_PROFILE`(추론 모델 조합 기본값 — 미설정 시 `yolox_fastreid`). UI에서 고른 값은
+  `data/infer_profile.json`에 남고 git 무시이므로, 이관 후 기본값을 바꾸려면 이 환경변수를 준다.
 - `SESSION_RECORD`(세션 녹화·리플레이, 기본 on). 녹화본은 `data/sites/<site>/sessions/*.db`에
   쌓이는 **런타임 산출물**(git 무시) — 이관 시 옮기지 않아도 되고, 지난 세션 리플레이가 필요하면
   그 `.db`(+`.json`)만 함께 복사. 끄려면 `SESSION_RECORD=0`.

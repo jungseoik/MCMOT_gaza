@@ -137,6 +137,12 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
     except Exception:
         pass
     s.shot("20_metric_help", "aside.side", "지표 설명")
+    # 추론 모델 패널 (v0.0.4) — 검출기·ReID 조합 선택
+    try:
+        pg.locator("#msTabModel").click(); pg.wait_for_timeout(1200)
+        s.shot("20b_model", "aside.side", note="추론 모델 선택")
+    except Exception as e:
+        print(f"  ✗ 20b_model: {type(e).__name__}")
     try:
         pg.locator("#msTabSet").click(); pg.wait_for_timeout(400)
     except Exception:
@@ -206,6 +212,15 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
         pg.locator('#camTools button[data-mode="exline"]').click(timeout=8000)
         pg.wait_for_timeout(800)
         s.shot("29_exline", note="출입구 화면 통과선 모드")
+        # 영역 모드 (v0.0.4) — 문이 화각 가장자리라 선으로 안 잡힐 때
+        try:
+            pg.locator('#exKind button[data-kind="zone"]').click(timeout=4000)
+            pg.wait_for_timeout(700)
+            s.shot("29b_exzone", note="출입구 화면 영역 모드")
+            pg.locator('#exKind button[data-kind="line"]').click()
+            pg.wait_for_timeout(300)
+        except Exception as e:
+            print(f"  ✗ 29b_exzone: {type(e).__name__}")
         pg.locator('#camTools button[data-mode="pair"]').click()
         pg.wait_for_timeout(300)
     except Exception as e:
