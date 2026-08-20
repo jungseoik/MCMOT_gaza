@@ -988,6 +988,8 @@ Views.cams = (() => {
       pvSet("pv4", s.frames ? s.det.toFixed(2) : "—");
       pvSet("pv5", s.frames ? s.tracks : "—");
       pvSet("pv6", s.first_latency != null ? s.first_latency + "s" : "—");
+      // 미리보기는 운영과 같은 프로파일로 돈다 — 어느 모델로 잡은 결과인지 표기
+      pvSet("pv7", s.profile || "—");
       $("pvErr").textContent = s.error || "";
       if (!s.running) pvHalt(false);
     }
