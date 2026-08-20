@@ -141,27 +141,31 @@ pm2 save
 
 ```bash
 python tools/seed_version.py list          # 보관된 버전 확인
-python tools/seed_version.py show v3       # 내용 미리보기
-python tools/seed_version.py restore v3 --apply
+python tools/seed_version.py show v5       # 내용 미리보기
+python tools/seed_version.py restore v5 --apply
 ```
 
-`v3` 가 현재 운영 구성이다:
+`v5` 가 현재 운영 구성이다 (= `data/seed/` 와 동일. 서버 첫 기동 시 자동 복사되므로
+7단계는 확인용이고, 실험 후 원복할 때 쓴다):
 
 ```
 default  17F     3400x3207  0.02391 m/px (수동 2점)  경로2 구역3 병목2 출입구2
-floor2   16F     2000x1887  0.03662 m/px (CAD 자동)  경로5 구역9 출입구2
-floor3   지상1층  2346x1672  0.04    m/px (CAD 자동)
+floor2   16F     2000x1887  0.03662 m/px (CAD 자동)  경로8 구역9 병목4 출입구2
+floor3   지상1층  2346x1672  0.04    m/px (CAD 자동)  요소 없음
 
 cam01~cam03  17F   매핑 O   (1_v1 · 2_v1 · 3_v1)
 cam04~cam09  16F   매핑 O   (field_16f_*)
 cam10~cam12  지상1층 미매핑·비활성 (field_1f_*)
+유효 ROI 없음 — 대응점 컨벡스 헐이 자동으로 투영 게이트가 된다
 ```
 
 | 버전 | 내용 |
 |---|---|
 | `v1` | 초기 시드 — 17F·19F 시드맵, 카메라 3대 |
 | `v2` | 16F CAD 적용 + 현장 6채널 매핑 (17F 도 CAD 상태) |
-| `v3` | **현재** — 17F 는 시드 도면 3채널, 16F 는 CAD·현장 6채널 |
+| `v3` | 17F 는 시드 도면 3채널, 16F 는 CAD·현장 6채널 |
+| `v4` | ROI 전부 제거 + 16F 병목 4·수동경로 r1~r3 |
+| `v5` | **현재** — 화면 통과선 기능 도입 시점 · cam06 재매핑 |
 
 `restore` 는 되돌리기 직전 상태를 `auto-<타임스탬프>` 로 자동 보관한다.
 세부는 [data/seed_versions/README.md](../data/seed_versions/README.md).
@@ -179,6 +183,30 @@ curl -s localhost:8900/api/map/state | python -m json.tool | head -20
 ```
 
 브라우저: `http://<서버IP>:8900` (접속코드 `macs`)
+
+### RTSP·추론이 정말 되는지 (독립 점검 도구)
+
+운영서버와 별개로 도는 진단 도구. 주소를 주면 실제 검출·추적을 돌려
+연결·fps·검출수를 숫자와 영상으로 남긴다.
+
+```bash
+python tools/rtsp_check.py rtsp://127.0.0.1:8554/field_16f_n     # 한 채널
+python tools/rtsp_check.py --all-registered --sec 10             # 등록분 전부
+python tools/rtsp_check.py rtsp://... --no-video                 # 숫자만
+```
+
+```
+▶ field_16f_n   rtsp://127.0.0.1:8554/field_16f_n
+   연결됨 · 1280x720 · 소스 30fps · 첫 프레임 2.08s
+   추론 3.80fps (목표 5.0 · 달성 76%) · 프레임 46
+   검출 평균 3.96명/프레임 · 고유 트랙 9개
+   영상 results/rtsp_check/field_16f_n_check.mp4
+```
+
+- 결과 mp4 에 ID 박스가 그려져 있어 **탐지가 실제로 되는지 눈으로 확인**된다.
+- **운영 파이프라인과 GPU 를 나눠 쓴다.** 위 76% 는 12채널(60fps)이 돌고 있는
+  상태에서 잰 값 — 셋업 직후(운영 정지 상태)라면 목표 fps 를 채운다.
+- 계정이 든 RTSP 주소는 로그에 `rtsp://***:***@host` 로 마스킹된다.
 
 DS 워커 부하 확인:
 

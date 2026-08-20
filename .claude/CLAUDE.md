@@ -37,6 +37,7 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 | `docs/reports/` | YOLO26·해상도·다채널 비교 실측 보고서 + 요구사항 점검 + 벤치 스크립트 |
 | `docs/guide/` | **사용 가이드 허브(3종)** — 단일영상-분석-MVP(:8000) · 멀티카메라-시스템 4대지표(:8900) · 도면-편집기(:8910). 각 하위폴더 README + img (스크린샷 기반) |
 | `docs/optimization-report.md` | 추론 최적화 보고서 |
+| `tools/rtsp_check.py` | **RTSP·추론 독립 점검** — 운영서버 없이 주소만으로 연결·fps·검출수 측정 + ID 오버레이 mp4. 새 서버 이관 확인용 |
 | `docs/재현-새-GPU서버에서-현재상태-그대로.md` | **새 서버/노트북에서 현재 운영상태 그대로 재현** — clone + HF 토큰만으로 12채널·17F/16F 도면·편집기까지. `tools/fetch_assets.sh` + `tools/seed_version.py restore v3 --apply` |
 | `docs/설치-맨서버-부트스트랩.md` | **순정 우분투(드라이버만) 0단계 시스템 준비** — conda·docker·nvidia-container-toolkit·ffmpeg·node/pm2·CAD 복붙 체크리스트 + 기능별 필수의존 표 + 재현 판정. 대용량은 `tools/fetch_assets.sh`(HF `backseollgi/MCMOT`) |
 | `docs/이관가이드-다른-GPU-서버로.md` | **다른 GPU 서버 이관 체크리스트** — 현 기준은 전부 Blackwell(sm_120). 다른 아키텍처(RTX 5000 Ada 등)면 TRT 엔진 재빌드·한계 재측정·`GPU_DEVICES` 실인덱스 확인 필수 |
