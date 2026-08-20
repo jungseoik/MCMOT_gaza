@@ -83,14 +83,55 @@ field/encoded/1F/*.mp4 · 16F/*.mp4          현장 RTSP 송출본  (MCMOT, 토�
 
 ## 4. TRT 엔진 빌드 (GPU마다 필수)
 
-엔진은 GPU 아키텍처에 종속이라 **옮겨 쓸 수 없다.** ONNX에서 다시 빌드한다.
+엔진은 **GPU 아키텍처·TRT 버전에 종속**이라 파일로 옮겨 쓸 수 없다. 반드시
+그 서버에서 다시 빌드한다. ONNX(3단계에서 받은 것)가 원천이다.
+
+### 4-1. 호스트 엔진 (단일영상·미리보기용)
 
 ```bash
-python src/build_trt.py                 # YOLOX + FastReID
-bash tools/setup_rfdetr.sh              # RF-DETR (투트랙 검출기, 선택)
+python src/build_trt.py                 # YOLOX + FastReID → external/weights/trt/
+bash tools/setup_rfdetr.sh              # RF-DETR (선택)
 ```
 
-DeepStream 인제스트를 쓸 거면 배치 엔진도 필요하다 → `system/ingest_ds/README.md`
+### 4-2. DeepStream 컨테이너 (다채널 운영용)
+
+12채널 구성은 DeepStream 백엔드를 쓴다. **이미지는 43.5GB 라 배포하지 않고
+레포에서 빌드**한다(GPU 1장 기준 빌드 수십 분).
+
+```bash
+docker build -t macs-deepstream:9.0 system/ingest_ds/docker
+```
+
+컨테이너 TRT(10.14.1)와 호스트 conda TRT(10.16.1)는 **서로 호환되지 않는다.**
+그래서 배치 엔진은 컨테이너 안 trtexec 로 따로 빌드해 `trt_ds/` 에 둔다:
+
+```bash
+mkdir -p external/weights/trt_ds
+docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace macs-deepstream:9.0 bash -c '
+/usr/src/tensorrt/bin/trtexec --onnx=external/weights/trt/yolox_mot20_dynamic.onnx \
+  --saveEngine=external/weights/trt_ds/yolox_mot20_fp16_dyn_b16.engine --fp16 \
+  --minShapes=images:1x3x896x1600 --optShapes=images:8x3x896x1600 --maxShapes=images:16x3x896x1600 \
+  --memPoolSize=workspace:8192M
+/usr/src/tensorrt/bin/trtexec --onnx=external/weights/trt/fastreid_sbs_s50.onnx \
+  --saveEngine=external/weights/trt_ds/fastreid_sbs_s50_fp16_dyn_b256.engine --fp16 \
+  --minShapes=images:1x3x384x128 --optShapes=images:32x3x384x128 --maxShapes=images:256x3x384x128 \
+  --memPoolSize=workspace:4096M'
+```
+
+9채널 이상이면 b32 엔진도 만든다(엔진당 ~1.5분):
+
+```bash
+docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace \
+    macs-deepstream:9.0 bash docs/reports/bench/build_b32_engines.sh
+cp external/weights/trt_ds/yolox_mot20_fp16_dyn_b32o32.engine \
+   external/weights/trt_ds/yolox_mot20_fp16_dyn_b32.engine
+```
+
+세부·트러블슈팅은 `system/ingest_ds/README.md`.
+
+> **docker 권한**: pm2 데몬이 docker 그룹 없이 떠 있으면 워커가
+> `permission denied … docker.sock` 으로 죽는다. `tools/run_system_server.sh`
+> 가 `sg docker` 로 보충하지만, `usermod -aG docker $USER` 후 재로그인이 확실하다.
 
 ## 5. RTSP 송출 띄우기 (12채널 소스)
 
