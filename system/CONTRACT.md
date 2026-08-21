@@ -1,4 +1,46 @@
-# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.11)
+# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.12)
+
+> **v1.12 개정 (2026-08-21 — CBS 영역 형상·그룹 집계 / SEI 문별 폭·기준)**
+> 요지: 4대 지표의 "사람이 넣는 값"을 실제 현장 형상에 맞춘다. CBS는 병목을
+> **부채꼴**로 그리고 **묶어서** 보고, SEI는 **문마다** 유효폭·통과기준을 준다.
+> - 스키마(`config/schema.py`):
+>   · `AreaShape{kind,center,radius,radius_in,a0,sweep,segments}` 신설.
+>     `Bottleneck.shape`가 sector면 **로드·저장마다 polygon을 재생성**한다
+>     (파라미터가 진실, polygon은 계약상 정본 — 엔진은 polygon만 본다).
+>     생성식은 `config/shapes.py:sector_polygon()` 한 곳.
+>   · `Bottleneck.group: str` — CBS 집계 그룹 라벨(빈 문자열=미분류).
+>   · `ExitLine.width_m` (유효폭 수동값 [m], None=도면 자동) ·
+>     `ExitLine.q_design` (문별 [인/분/m], None=사이트 전역값).
+>   · **`ExitLine.design_capacity`는 파생 필드로 격하** — `SiteConfig`
+>     검증기(`_derive_exit_capacity`)가 `max(1, round(W_eff × q))`로 로드·저장마다
+>     채운다. 폭을 못 구하면(축척 없음 + 수동폭 없음) 손대지 않는다.
+>     기존 값과 충돌 없음(프론트가 쓰던 식과 동일 — 라이브 설정 재계산 결과 일치).
+> - `contracts.py`:
+>   · `BottleneckState.cbs: float|None` — 라이브 스냅샷의 병목별 CBS 진행값
+>     (세션 없으면 None). 진행 중 선택 합산용.
+>   · `BottleneckMetric.group` · **`BottleneckGroupMetric`** 신설
+>     `{group, members, count, cbs_sum, cbs_mean, cbs_max, peak_density,
+>     over_threshold_sec, risk_level}` → `EvaluationResult.bottleneck_groups[]`
+>     (라벨 있는 병목만). 중요도는 이미 $w_k$에 반영돼 있어 재가중하지 않는다.
+>   · `ExitMetric.width_m` · `width_manual` · `q_design` — C_j 근거 기록.
+> - API: `POST /api/session/{id}/replay` body의 `exits:{id:{...}}`가
+>   **`width_m`·`q_design`** 를 받는다(주면 C_j 재파생, `design_capacity`를 직접
+>   주면 그 값이 최종). `thresholds.q_design` 변경도 C_j에 반영된다 — v1.12
+>   이전에는 스냅샷 C_j가 그대로여서 q_design을 바꿔도 SEI가 안 변했다.
+>   세션 CSV export에 `bottleneck_group` 행 추가.
+> - **녹화 스키마 2 (버그 수정)**: `recorder.py` `tracks`에 **bbox 4열**
+>   (`x1,y1,x2,y2`) 추가. 화면 **영역** 출입구(`ZoneGate`)는 발끝점이 문틀에
+>   잘리는 것을 bbox 겹침으로 보정하는데, 리플레이가 bbox를 더미(0,0,0,0)로
+>   재생해 그 보정이 죽어 있었다 — 16F 실측 라이브 19명 → 리플레이 6명.
+>   bbox 없는 옛 녹화(schema 1)는 더미로 재생(하위호환).
+>   회귀: `tests/system/test_replay.py::test_replay_camera_zone_exit_needs_bbox`.
+> - 프론트: 맵 설정에 **[병목 부채꼴]** 도구(3클릭: 꼭짓점→반경·시작각→끝각,
+>   목록에서 반경·각도 재조절) · 병목 행 **그룹** 입력 · 출입구 행 **W(m)·q**
+>   인라인 입력(+↺ 도면 자동 복귀, C_j 실시간 표시). 운영뷰 CBS 카드에
+>   **선택 체크박스 + 선택 집계 줄 + 그룹 프리셋 칩**, SEI 카드 출구 행에
+>   `폭 3.57m(수동) × 6인/분/m` 근거 표시.
+> - 하위호환: `shape`·`group`·`width_m`·`q_design` 모두 미지정 시 v1.11과 동일 동작.
+
 
 > **v1.11 개정 (2026-08-18 — 건물 드릴: 전 층 공유 세션·4대지표 롤업·전 층 리플레이)**
 > 설계: `docs/architecture/06-건물-드릴-세션-4대지표-롤업-설계.md`. 요지: 훈련 1건 =
