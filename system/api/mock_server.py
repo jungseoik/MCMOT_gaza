@@ -44,6 +44,7 @@ from system.config.schema import (
 )
 from system.config.store import SiteStore
 from system.contracts import (
+    BottleneckGroupMetric,
     BottleneckMetric,
     BottleneckState,
     CameraState,
@@ -360,30 +361,51 @@ class SessionSim:
                     if person_metrics else None)
         # ---- bottleneck_metrics (CBS)
         bn_metrics = []
+        bn_group = {b.id: b.group for b in (site.bottlenecks if site else [])}
         for bid, acc in self._bn.items():
             cbs = round(acc["cbs"], 2)
             risk = "low" if cbs < 5 else ("mid" if cbs < 20 else "high")
             bn_metrics.append(BottleneckMetric(
                 bottleneck_id=bid, peak_density=round(acc["peak"], 2),
-                over_threshold_sec=acc["over_sec"], cbs=cbs, risk_level=risk))
+                over_threshold_sec=acc["over_sec"], cbs=cbs, risk_level=risk,
+                group=bn_group.get(bid, "")))
+        # ---- bottleneck_groups (CBS 그룹 집계, v1.12) — 라벨 있는 것만
+        bn_groups = []
+        for g in dict.fromkeys(m.group for m in bn_metrics if m.group):
+            ms = [m for m in bn_metrics if m.group == g]
+            cs = [m.cbs for m in ms]
+            bn_groups.append(BottleneckGroupMetric(
+                group=g, members=[m.bottleneck_id for m in ms], count=len(ms),
+                cbs_sum=round(sum(cs), 2), cbs_mean=round(sum(cs) / len(cs), 2),
+                cbs_max=max(cs),
+                peak_density=max(m.peak_density for m in ms),
+                over_threshold_sec=max(m.over_threshold_sec for m in ms),
+                risk_level=max(ms, key=lambda m: ("low", "mid", "high").index(
+                    m.risk_level)).risk_level))
         # ---- exit_metrics (SEI)
         exits = site.exits if site else []
         actual = {e.id: sim_obj.exit_counts.get(e.id, [0, 0])[1] for e in exits}
         tot = sum(actual.values())
         csum = sum(e.design_capacity or 0 for e in exits)
+        mpp = site.map.resolve_m_per_px() if (site and site.map) else None
+        qdef = site.thresholds.q_design if site else 60.0
         exit_metrics = [ExitMetric(
             exit_id=e.id, actual_count=actual[e.id],
             design_capacity=e.design_capacity,
             actual_share=round(actual[e.id] / tot, 3) if tot > 0 else None,
             design_share=(round((e.design_capacity or 0) / csum, 3)
-                          if csum > 0 else None)) for e in exits]
+                          if csum > 0 else None),
+            width_m=e.effective_width_m(mpp),
+            width_manual=bool(e.width_m),
+            q_design=e.effective_q_design(qdef)) for e in exits]
         self.result = EvaluationResult(
             session_id=lv.session_id,
             calibration_version=self._site_version,
             config_version=self._site_version,
             alarm_ts=lv.alarm_ts, alarm_origin=lv.alarm_origin, ended_at=now,
             zone_metrics=zone_metrics, person_metrics=person_metrics,
-            bottleneck_metrics=bn_metrics, exit_metrics=exit_metrics,
+            bottleneck_metrics=bn_metrics, bottleneck_groups=bn_groups,
+            exit_metrics=exit_metrics,
             sei=lv.sei, epfi_avg=epfi_avg, cbs_total=lv.cbs_total,
             quality={"camera_coverage": 1.0, "unmapped_point_ratio": 0.02,
                      "global_id_confidence": 0.9, "missing_interval_sec": 0.0,
@@ -559,8 +581,13 @@ class Simulator:
                     over = dens > b.rho_crit
             else:                       # 축척 없으면 인원수 기반 폴백
                 over = cnt > 5
-            bottlenecks.append(BottleneckState(id=b.id, count=cnt,
-                                               density=dens, over=over))
+            # 세션 중이면 병목별 CBS 진행값도 (v1.12 — 선택 합산 UI 확인용).
+            # SessionSim은 이 모듈의 전역 `session` — Simulator보다 뒤에 만들어
+            # 지므로 참조는 호출 시점에 해석된다.
+            acc = session._bn.get(b.id) if session.live else None
+            bottlenecks.append(BottleneckState(
+                id=b.id, count=cnt, density=dens, over=over,
+                cbs=(round(acc["cbs"], 3) if acc else None)))
 
         # ---- exits (방향성 통과선: prev→cur 세그먼트 교차)
         exits = []

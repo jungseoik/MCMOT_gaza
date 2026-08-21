@@ -1155,7 +1155,9 @@ async def session_replay(session_id: str, request: Request,
 
     body(모두 선택): {thresholds:{v_th,a_th,r_th,dt_hold,d_allow,min_conf,q_design},
       rho_crit(전역 병목 임계), bottlenecks:{id:{rho_crit,weight}},
-      exits:{id:{design_capacity}}, fps(재생 샘플 격자, 기본 5)}
+      exits:{id:{width_m,q_design,design_capacity}} — 폭·기준을 주면 C_j를
+      다시 파생하고, design_capacity를 직접 주면 그 값이 최종(v1.12),
+      fps(재생 샘플 격자, 기본 5)}
     """
     fid = rt.resolve_floor(floor)
     db = _session_db_path(session_id, fid)
@@ -1214,6 +1216,9 @@ def session_export(format: str = "json", floor: str = DEFAULT_FLOOR_ID):
         for bm in res.bottleneck_metrics:
             for k, v in bm.model_dump().items():
                 w.writerow(["bottleneck", bm.bottleneck_id, k, v])
+        for bg in res.bottleneck_groups:            # CBS 그룹 집계 (v1.12)
+            for k, v in bg.model_dump().items():
+                w.writerow(["bottleneck_group", bg.group, k, v])
         for em in res.exit_metrics:
             for k, v in em.model_dump().items():
                 w.writerow(["exit", em.exit_id, k, v])

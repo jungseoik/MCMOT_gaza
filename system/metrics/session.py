@@ -38,6 +38,7 @@ import numpy as np
 
 from system.config.schema import Bottleneck, GridConfig, Zone
 from system.contracts import (
+    BottleneckGroupMetric,
     BottleneckMetric,
     EvaluationResult,
     ExitMetric,
@@ -151,8 +152,15 @@ class EvaluationSession:
         # 병목·출구 설정 사본
         self._bn_cfg: list[tuple[Bottleneck, float | None]] = list(
             engine._bottlenecks)
+        # 출구: C_j는 SiteConfig 검증기가 W_eff×q_design 으로 채워둔 파생값.
+        # 근거(폭·기준·수동여부)도 같이 들고 결과에 실어준다 (v1.12).
         self._exit_cfg: list[tuple[str, int | None]] = [
             (ex.id, ex.design_capacity) for ex in site.exits]
+        self._exit_basis: dict[str, tuple[float | None, bool, float]] = {
+            ex.id: (ex.effective_width_m(self.m_per_px),
+                    ex.width_m is not None and ex.width_m > 0,
+                    ex.effective_q_design(self.thresholds.q_design))
+            for ex in site.exits}
 
         # 누적 상태
         self.persons: dict[str, _PersonAcc] = {}
@@ -375,6 +383,41 @@ class EvaluationSession:
     def _cbs_total(self) -> float:
         return sum(acc.cbs for acc in self.bns.values())
 
+    def cbs_by_bottleneck(self) -> dict[str, float]:
+        """병목별 CBS 진행값 — 라이브 스냅샷에서 그룹/선택 합산용 (v1.12)."""
+        return {bid: acc.cbs for bid, acc in self.bns.items()}
+
+    _RISK_ORDER = {"low": 0, "mid": 1, "high": 2}
+
+    def _bn_groups(self, metrics: list[BottleneckMetric]
+                   ) -> list[BottleneckGroupMetric]:
+        """그룹 라벨별 CBS 집계 (라벨이 빈 병목은 제외 — 묶은 것만 보여준다)."""
+        order: list[str] = []
+        buckets: dict[str, list[BottleneckMetric]] = {}
+        for m in metrics:
+            if not m.group:
+                continue
+            if m.group not in buckets:
+                buckets[m.group] = []
+                order.append(m.group)
+            buckets[m.group].append(m)
+        out = []
+        for g in order:
+            ms = buckets[g]
+            cbss = [m.cbs for m in ms]
+            worst = max(ms, key=lambda m: self._RISK_ORDER.get(m.risk_level, 0))
+            out.append(BottleneckGroupMetric(
+                group=g,
+                members=[m.bottleneck_id for m in ms],
+                count=len(ms),
+                cbs_sum=sum(cbss),
+                cbs_mean=sum(cbss) / len(cbss),
+                cbs_max=max(cbss),
+                peak_density=max(m.peak_density for m in ms),
+                over_threshold_sec=max(m.over_threshold_sec for m in ms),
+                risk_level=worst.risk_level))
+        return out
+
     def _person_metric(self, p: _PersonAcc) -> PersonMetric:
         """EPFI_i = max(0, 1 − ∫d_i dt / (T_i·d_allow)) × 100.
         T_i < MIN_TRACK_DURATION_SEC·경로 미배정·축척 없음 → epfi=None."""
@@ -473,8 +516,11 @@ class EvaluationSession:
                 peak_density=round(self.bns[b.id].peak, 4),
                 over_threshold_sec=self.bns[b.id].over_sec,
                 cbs=self.bns[b.id].cbs,
-                risk_level=_risk(self.bns[b.id].cbs))
+                risk_level=_risk(self.bns[b.id].cbs),
+                group=b.group)
             for b, _area in self._bn_cfg]
+
+        bottleneck_groups = self._bn_groups(bottleneck_metrics)
 
         # 출구 분포 (C_j 설정 출구만) — exit_metrics에는 전 출구 포함
         dist_pairs = [(eid, self._eng._exits[eid].out_count, cj)
@@ -487,10 +533,13 @@ class EvaluationSession:
             ec = self._eng._exits.get(eid)
             e = ec.out_count if ec is not None else 0
             in_dist = cj is not None
+            w, w_manual, q = self._exit_basis.get(eid, (None, False, 0.0))
             exit_metrics.append(ExitMetric(
                 exit_id=eid, actual_count=e, design_capacity=cj,
                 actual_share=(e / sum_e) if in_dist and sum_e > 0 else None,
-                design_share=(cj / sum_c) if in_dist and sum_c > 0 else None))
+                design_share=(cj / sum_c) if in_dist and sum_c > 0 else None,
+                width_m=(round(w, 3) if w is not None else None),
+                width_manual=w_manual, q_design=q))
 
         quality: dict[str, Any] = {
             "unmapped_point_ratio": (
@@ -513,6 +562,7 @@ class EvaluationSession:
             zone_metrics=zone_metrics,
             person_metrics=person_metrics,
             bottleneck_metrics=bottleneck_metrics,
+            bottleneck_groups=bottleneck_groups,
             exit_metrics=exit_metrics,
             sei=self._sei(),
             epfi_avg=self._epfi_avg(),

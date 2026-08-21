@@ -11,6 +11,8 @@ import math
 
 from pydantic import BaseModel, Field, model_validator
 
+from system.config.shapes import sector_polygon
+
 Point = tuple[float, float]
 
 DEFAULT_FLOOR_ID = "default"   # 층 미지정·기존 단일도면 사이트의 기본 층 id (하위호환)
@@ -69,13 +71,59 @@ class Zone(BaseModel):
     node_id: str | None = None  # IDR 공간그래프 연결 노드 (없으면 중심점에서 최근접 노드)
 
 
+class AreaShape(BaseModel):
+    """영역을 만든 도형 파라미터 (재편집용, v1.12).
+
+    polygon이 계약상 정본이고 이건 "어떻게 만들었나"의 기록이다. kind가
+    "sector"면 로드·저장 시 polygon을 이 파라미터로 다시 생성한다 → 반경·
+    각도만 고쳐도 영역이 정확히 갱신된다(다시 찍을 필요 없음).
+    kind가 "polygon"(기본)이면 polygon을 그대로 둔다 = 기존 자유 다각형.
+    """
+    kind: str = "polygon"            # polygon | sector
+    center: Point | None = None      # 부채꼴 꼭짓점 (맵 px)
+    radius: float | None = None      # 외곽 반경 (맵 px)
+    radius_in: float = 0.0           # 내부 반경 (0=꽉 찬 부채꼴)
+    a0: float | None = None          # 시작각 (rad)
+    sweep: float | None = None       # 스윕각 (rad, 부호=회전방향)
+    segments: int = Field(default=24, ge=3, le=180)
+
+    def is_sector(self) -> bool:
+        return (self.kind == "sector" and self.center is not None
+                and self.radius is not None and self.radius > self.radius_in
+                and self.a0 is not None and self.sweep not in (None, 0))
+
+    def build_polygon(self) -> list[Point] | None:
+        """파라미터 → polygon. sector가 아니거나 값이 부족하면 None."""
+        if not self.is_sector():
+            return None
+        return sector_polygon(self.center, self.radius, self.a0, self.sweep,
+                              self.segments, self.radius_in)
+
+
 class Bottleneck(BaseModel):
-    """병목 후보영역 polygon (맵 px) + 임계밀도·가중치."""
+    """병목 후보영역 polygon (맵 px) + 임계밀도·가중치.
+
+    polygon은 자유 다각형이거나 부채꼴(`shape.kind="sector"`)에서 생성된
+    것이다 — 실제 병목은 문 앞에서 부채꼴로 생기므로(v1.12).
+    `group`은 여러 병목을 하나로 묶어 보기 위한 라벨 — 전체 평균만으로는
+    "어느 문이 더 중요한가"가 묻히기 때문(CBS 그룹 집계, v1.12).
+    """
     id: str
     name: str = ""
     polygon: list[Point] = Field(min_length=3)
     rho_crit: float = Field(default=2.0, gt=0)  # 명/m²
     weight: float = Field(default=1.0, gt=0)
+    shape: AreaShape | None = None      # 생성 도형(부채꼴 등). None=자유 다각형
+    group: str = ""                     # 집계 그룹 라벨 (빈 문자열=미분류)
+
+    @model_validator(mode="after")
+    def _rebuild_from_shape(self):
+        """부채꼴이면 polygon을 파라미터에서 재생성 (파라미터가 진실)."""
+        if self.shape is not None:
+            pts = self.shape.build_polygon()
+            if pts is not None:
+                self.polygon = pts
+        return self
 
 
 class ExitLine(BaseModel):
@@ -94,7 +142,17 @@ class ExitLine(BaseModel):
     name: str = ""
     line: tuple[Point, Point]
     inside: Point
-    design_capacity: int | None = None  # 설계 총인원(명) — SEI용 예약
+    # --- SEI 설계 통과용량 C_j = W_eff × q_design (v1.12) ---
+    # W_eff는 도면 축척으로 자동 산출되지만(선 길이 × m_per_px) 도면과 실제
+    # 문 폭이 다를 수 있어 사람이 덮어쓸 수 있어야 한다. q_design도 문마다
+    # 다르다(계단 vs 주출입구) — 사이트 전역값만으로는 표현이 안 된다.
+    width_m: float | None = Field(default=None, gt=0)   # 유효폭 수동값 [m].
+                                        # None=도면 자동(선 길이×m_per_px)
+    q_design: float | None = Field(default=None, gt=0)  # 이 문의 단위폭당
+                                        # 설계 통과기준 [인/분/m]. None=사이트값
+    design_capacity: int | None = None  # C_j [인/분] — 위 둘에서 **파생**.
+                                        # SiteConfig 검증기가 로드·저장마다
+                                        # 다시 채운다(직접 편집 대상 아님)
     count_cam: str | None = None        # 카운트 담당 카메라 id (없으면 맵 카운트)
     cam_line: tuple[Point, Point] | None = None   # 그 카메라 화면 px 통과선
     cam_inside: Point | None = None               # 그 카메라 화면 px '안쪽' 점
@@ -105,6 +163,32 @@ class ExitLine(BaseModel):
     cam_zone_dwell: int = 2                       # 진입 후 이 프레임 수만큼 머물면 집계
                                                   # (5fps 실측: 3이면 발끝 잘린 궤적을
                                                   #  놓친다 — 접촉이 2프레임뿐)
+
+    def auto_width_m(self, m_per_px: float | None) -> float | None:
+        """도면 축척 기준 유효폭 — 통과선 길이(px) × m_per_px."""
+        if not m_per_px:
+            return None
+        d = math.dist(tuple(self.line[0]), tuple(self.line[1]))
+        return d * m_per_px if d > 0 else None
+
+    def effective_width_m(self, m_per_px: float | None) -> float | None:
+        """실제 계산에 쓰는 유효폭 — 수동값이 있으면 그것이 우선."""
+        if self.width_m is not None and self.width_m > 0:
+            return float(self.width_m)
+        return self.auto_width_m(m_per_px)
+
+    def effective_q_design(self, q_default: float) -> float:
+        """이 문의 단위폭당 설계 통과기준 — 미지정이면 사이트 전역값."""
+        return float(self.q_design) if self.q_design else float(q_default)
+
+    def resolve_capacity(self, m_per_px: float | None,
+                         q_default: float) -> int | None:
+        """C_j = W_eff × q_design [인/분]. 폭을 못 구하면 None(SEI 분포 제외)."""
+        w = self.effective_width_m(m_per_px)
+        q = self.effective_q_design(q_default)
+        if w is None or w <= 0 or q <= 0:
+            return None
+        return max(1, int(round(w * q)))
 
     def counts_in_camera(self) -> bool:
         """카운트를 화면 좌표에서 하는가 (선 또는 영역)."""
@@ -209,6 +293,26 @@ class SiteConfig(BaseModel):
                 graph=self.graph, alarm_origins=self.alarm_origins,
                 grid=self.grid,
             )]
+        return self
+
+    @model_validator(mode="after")
+    def _derive_exit_capacity(self):
+        """출구 C_j = W_eff × q_design 을 로드·저장 시점에 파생 산출 (v1.12).
+
+        C_j를 사람이 직접 넣던 필드에서 **파생값**으로 바꾼다 — 예전에는
+        프론트 save()가 계산해 넣어서, API로 직접 넣은 설정이나 축척이 나중에
+        잡힌 층은 C_j가 비어 SEI 분포에서 조용히 빠졌다. 사람이 조절하는 값은
+        폭(width_m)과 기준(q_design)이고 C_j는 그 결과다.
+        폭을 못 구하는 층(축척 미지정 + 수동폭 없음)은 기존 값을 건드리지 않는다.
+        """
+        q_default = self.thresholds.q_design
+        groups = [(self.exits, self.map)] + [(fl.exits, fl.map) for fl in self.floors]
+        for exits, mp in groups:
+            mpp = mp.resolve_m_per_px() if mp else None
+            for ex in exits:
+                cap = ex.resolve_capacity(mpp, q_default)
+                if cap is not None:
+                    ex.design_capacity = cap
         return self
 
     def get_floor(self, floor_id: str | None = None) -> Floor:

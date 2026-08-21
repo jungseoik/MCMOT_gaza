@@ -75,6 +75,9 @@ class BottleneckState(BaseModel):
     count: int = 0
     density: float | None = None
     over: bool = False                 # rho_crit 초과 여부
+    cbs: float | None = None           # 세션 중 이 병목의 CBS 진행값 (v1.12 —
+                                       # 그룹/선택 합산을 라이브에서도 하려면
+                                       # 병목별 값이 필요하다). 세션 없으면 None
 
 
 class ExitState(BaseModel):
@@ -136,15 +139,38 @@ class BottleneckMetric(BaseModel):
     over_threshold_sec: float = 0.0
     cbs: float = 0.0                           # ∫max(0,ρ−ρcrit)·w dt
     risk_level: str = "low"                    # low | mid | high
+    group: str = ""                            # 집계 그룹 라벨 (v1.12)
+
+
+class BottleneckGroupMetric(BaseModel):
+    """CBS 그룹 집계 (v1.12) — 병목 몇 개를 묶어 본 값.
+
+    전체 합/평균 하나로는 "어느 계단·어느 문이 문제였나"가 묻힌다.
+    합계는 그 그룹이 만든 총 혼잡, 평균은 그룹 내 병목 1개당 평균이다.
+    """
+    group: str
+    members: list[str] = []
+    count: int = 0
+    cbs_sum: float = 0.0                       # Σ CBS (그룹 총 혼잡)
+    cbs_mean: float = 0.0                      # 그룹 내 병목 1개당 평균
+    cbs_max: float = 0.0                       # 그룹 내 최악 병목
+    peak_density: float = 0.0                  # 그룹 내 최대 순간밀도
+    over_threshold_sec: float = 0.0            # 그룹 내 최대 초과시간
+    risk_level: str = "low"                    # 그룹 내 최악 등급
 
 
 class ExitMetric(BaseModel):
     """SEI — 출구별 실제·설계 분포."""
     exit_id: str
     actual_count: int = 0                      # E_j (고유 최초통과)
-    design_capacity: int | None = None         # C_j (사람 입력)
+    design_capacity: int | None = None         # C_j [인/분] = W_eff × q_design
     actual_share: float | None = None
     design_share: float | None = None
+    # C_j 근거 (v1.12) — 어떤 폭·기준으로 나온 값인지 결과에 남긴다.
+    # "정확한 값이 들어갔나"를 리포트에서 되짚을 수 있어야 한다.
+    width_m: float | None = None               # 계산에 쓰인 W_eff [m]
+    width_manual: bool = False                 # True=사람이 지정, False=도면 자동
+    q_design: float | None = None               # 계산에 쓰인 q [인/분/m]
 
 
 class EvaluationResult(BaseModel):
@@ -159,6 +185,7 @@ class EvaluationResult(BaseModel):
     zone_metrics: list[ZoneMetric] = []
     person_metrics: list[PersonMetric] = []
     bottleneck_metrics: list[BottleneckMetric] = []
+    bottleneck_groups: list[BottleneckGroupMetric] = []   # 그룹 집계 (v1.12)
     exit_metrics: list[ExitMetric] = []
     sei: float | None = None                   # None = insufficient_data
     epfi_avg: float | None = None

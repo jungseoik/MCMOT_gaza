@@ -35,11 +35,38 @@ def _apply_overrides(site: SiteConfig, ov: dict) -> None:
             b.rho_crit = float(patch["rho_crit"])
         if patch.get("weight") is not None:
             b.weight = float(patch["weight"])
-    # 출구별 설계용량 오버라이드
+    # 출구별 오버라이드 — 유효폭·q_design 을 바꾸면 C_j를 다시 파생하고,
+    # design_capacity를 직접 주면 그것이 최종값이다(파생보다 우선, v1.12).
+    mpp = site.map.resolve_m_per_px() if site.map else None
     for eid, patch in (ov.get("exits") or {}).items():
         e = next((e for e in site.exits if e.id == eid), None)
-        if e is not None and patch.get("design_capacity") is not None:
+        if e is None:
+            continue
+        if patch.get("width_m") is not None:
+            e.width_m = float(patch["width_m"]) or None
+        if patch.get("q_design") is not None:
+            e.q_design = float(patch["q_design"]) or None
+        if patch.get("width_m") is not None or patch.get("q_design") is not None:
+            cap = e.resolve_capacity(mpp, site.thresholds.q_design)
+            if cap is not None:
+                e.design_capacity = cap
+        if patch.get("design_capacity") is not None:
             e.design_capacity = int(patch["design_capacity"])
+    # 전역 q_design 변경도 C_j에 반영해야 한다 — thresholds만 바꾸고 파생을
+    # 안 돌리면 SEI가 옛 C_j로 계산돼 "재계산했는데 안 바뀐다"가 된다.
+    if (ov.get("thresholds") or {}).get("q_design") is not None:
+        for e in site.exits:
+            if _capacity_overridden(ov, e.id):
+                continue                      # 직접 지정한 C_j는 건드리지 않음
+            cap = e.resolve_capacity(mpp, site.thresholds.q_design)
+            if cap is not None:
+                e.design_capacity = cap
+
+
+def _capacity_overridden(ov: dict, eid: str) -> bool:
+    """이 출구에 design_capacity 직접 오버라이드가 있었나."""
+    p = (ov.get("exits") or {}).get(eid) or {}
+    return p.get("design_capacity") is not None
 
 
 def _lite_frame(ms) -> dict:
@@ -60,7 +87,7 @@ def _lite_frame(ms) -> dict:
         "zones": [{"id": z.id, "count": z.count, "density": z.density}
                   for z in ms.zones],
         "bottlenecks": [{"id": b.id, "count": b.count, "density": b.density,
-                         "over": b.over} for b in ms.bottlenecks],
+                         "over": b.over, "cbs": b.cbs} for b in ms.bottlenecks],
         "exits": [{"id": e.id, "in_count": e.in_count, "out_count": e.out_count}
                   for e in ms.exits],
         "sess": None if sess is None else {
@@ -76,7 +103,8 @@ def run_replay(db_path, overrides: dict | None = None, fps: float = 5.0):
     """녹화 db를 재생 → (result, timeline, frames, meta).
 
     frames: fps 격자로 샘플된 경량 MapState 리스트 (2D 재생용).
-    overrides: {thresholds:{v_th,...}, rho_crit, bottlenecks:{id:{...}}, exits:{id:{...}}}
+    overrides: {thresholds:{v_th,...}, rho_crit, bottlenecks:{id:{rho_crit,weight}},
+                exits:{id:{width_m,q_design,design_capacity}}}
     """
     meta = recorder.load_meta(db_path)
     site = SiteConfig.model_validate(meta["site_view"])

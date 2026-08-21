@@ -494,13 +494,18 @@ class MetricsEngine:
                 density = (round(n / area, 3) if area and area > 0 else None)
                 zones.append(ZoneState(id=z.id, count=n, density=density))
 
+            # 세션 중이면 병목별 CBS 진행값도 실어준다 (v1.12 — 그룹/선택 합산)
+            cbs_live = (self._session.cbs_by_bottleneck()
+                        if self._session is not None else {})
             bottlenecks = []
             for b, area in self._bottlenecks:
                 n = sum(1 for p in positions if point_in_polygon(p, b.polygon))
                 density = (round(n / area, 3) if area and area > 0 else None)
                 over = density is not None and density > b.rho_crit
+                cbs = cbs_live.get(b.id)
                 bottlenecks.append(BottleneckState(
-                    id=b.id, count=n, density=density, over=over))
+                    id=b.id, count=n, density=density, over=over,
+                    cbs=(round(cbs, 3) if cbs is not None else None)))
 
             exits = [ExitState(id=eid, in_count=ec.in_count,
                                out_count=ec.out_count)

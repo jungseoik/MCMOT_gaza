@@ -165,14 +165,101 @@ class TestCBS:
         assert bm.risk_level == "high"           # 최대 CBS 병목 → high
         assert res.cbs_total == pytest.approx(18.0)
 
+    # ------------------------------------- 그룹 집계 (v1.12: 선택 병목 합산·평균)
+
+    def test_group_aggregate_sum_and_mean(self):
+        """같은 group 라벨 병목들의 합계·평균·최악값 집계.
+
+        b1(폭 2m² 안에 8명, w=2)만 초과 → CBS 18.0, b2는 0.
+        전체 평균(9.0) 하나로는 "b1이 문제"가 묻히지만, 그룹 집계는 합계와
+        1개당 평균을 같이 준다."""
+        b2 = Bottleneck(id="b2", rho_crit=1.0, weight=2.0, group="계단A",
+                        polygon=[(600, 600), (800, 600), (800, 800), (600, 800)])
+        b1 = BN.model_copy(update={"group": "계단A"})
+        eng = MetricsEngine(make_site(bottlenecks=[b1, b2]), [make_cam()])
+        eng.start_session((100, 500), t_alarm=100.0)
+        self.feed_static(eng, 8, 100.0, 110.0)
+        res = eng.stop_session()
+        assert res.cbs_total == pytest.approx(18.0)
+        assert len(res.bottleneck_groups) == 1
+        g = res.bottleneck_groups[0]
+        assert g.group == "계단A"
+        assert g.members == ["b1", "b2"]
+        assert g.count == 2
+        assert g.cbs_sum == pytest.approx(18.0)
+        assert g.cbs_mean == pytest.approx(9.0)
+        assert g.cbs_max == pytest.approx(18.0)
+        assert g.over_threshold_sec == pytest.approx(9.0)
+        assert g.risk_level == "high"
+
+    def test_ungrouped_bottleneck_not_in_groups(self):
+        """라벨 없는 병목은 그룹 목록에 안 나온다 (묶은 것만 본다)."""
+        eng = MetricsEngine(make_site(bottlenecks=[BN]), [make_cam()])
+        eng.start_session((100, 500), t_alarm=100.0)
+        self.feed_static(eng, 8, 100.0, 110.0)
+        res = eng.stop_session()
+        assert res.bottleneck_groups == []
+        assert res.bottleneck_metrics[0].group == ""
+
+    def test_live_snapshot_carries_per_bottleneck_cbs(self):
+        """라이브 스냅샷에 병목별 CBS — 진행 중에도 선택 합산이 되도록."""
+        eng = MetricsEngine(make_site(bottlenecks=[BN]), [make_cam()])
+        eng.start_session((100, 500), t_alarm=100.0)
+        self.feed_static(eng, 8, 100.0, 110.0)
+        st = eng.snapshot()
+        assert st.bottlenecks[0].cbs == pytest.approx(18.0)   # 종료 전 진행값
+        eng.stop_session()
+        assert eng.snapshot().bottlenecks[0].cbs is None       # 세션 없음
+
+    # ------------------------------------- 부채꼴 영역 (v1.12)
+
+    def test_sector_shape_generates_polygon(self):
+        """부채꼴 파라미터가 polygon을 만든다 — 면적이 해석값에 수렴."""
+        import math
+
+        from system.config.schema import AreaShape
+        from system.config.shapes import sector_area_px2
+        from system.spatial import polygon_area_px2
+        bn = Bottleneck(id="b9", polygon=[(0, 0), (1, 0), (1, 1)],
+                        shape=AreaShape(kind="sector", center=(500, 500),
+                                        radius=200, a0=0.0,
+                                        sweep=math.pi / 2, segments=64))
+        assert len(bn.polygon) == 66                     # 꼭짓점 + 호 65점
+        assert bn.polygon[0] == (500, 500)
+        area = polygon_area_px2(bn.polygon)
+        assert area == pytest.approx(sector_area_px2(200, math.pi / 2), rel=1e-3)
+
+    def test_sector_reedit_rebuilds_polygon(self):
+        """반경만 고쳐 다시 검증하면 polygon이 갱신된다 (다시 찍지 않아도 됨)."""
+        import math
+
+        from system.config.schema import AreaShape
+        from system.spatial import polygon_area_px2
+
+        def bn(radius):                        # 같은 부채꼴, 반경만 다르게
+            return Bottleneck.model_validate({
+                "id": "b1", "polygon": [(0, 0), (1, 0), (1, 1)],
+                "shape": {"kind": "sector", "center": (0, 0), "radius": radius,
+                          "a0": 0.0, "sweep": math.pi, "segments": 8}})
+        assert polygon_area_px2(bn(200).polygon) == pytest.approx(
+            polygon_area_px2(bn(100).polygon) * 4, rel=1e-6)   # 면적 ∝ r²
+
+    def test_free_polygon_untouched(self):
+        """shape 없는 자유 다각형은 그대로 (하위호환)."""
+        pts = [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)]
+        assert Bottleneck(id="b1", polygon=pts).polygon == pts
+
 
 # ================================================================ SEI (FR-07)
 
 
+# C_j는 파생값이다 (v1.12) — 사람이 넣는 건 폭(width_m, 미지정 시 도면 자동)과
+# 문별 기준(q_design). 선 길이 200px × 0.01 = 폭 2.0 m 이므로
+# q_design 30/20 → C_j 60/40 (예전 수동 design_capacity 60/40과 같은 분포).
 E1 = ExitLine(id="e1", line=((300, 400), (300, 600)), inside=(250, 500),
-              design_capacity=60)
+              q_design=30)
 E2 = ExitLine(id="e2", line=((700, 400), (700, 600)), inside=(650, 500),
-              design_capacity=40)
+              q_design=20)
 
 
 class TestSEI:
@@ -226,21 +313,75 @@ class TestSEI:
         assert em["e1"].actual_count == 1                    # 고유 최초 out만
 
     def test_exit_without_capacity_excluded_from_distribution(self):
-        """C_j 미설정 출구는 분포에서 제외, exit_metrics에는 포함."""
-        e3 = ExitLine(id="e3", line=((500, 100), (500, 200)),
-                      inside=(450, 150))                     # 용량 미설정
-        eng = MetricsEngine(make_site(exits=[E1, E2, e3]), [make_cam()])
+        """폭을 못 구하는 출구(축척 없음·수동폭 없음)는 분포 제외, 목록엔 포함.
+
+        축척이 없으면 도면 자동폭이 안 나온다. 그때도 수동폭을 넣은 출구는
+        C_j가 살아 분포를 구성한다 — 폭 지정이 축척 없이도 통하는지 함께 본다."""
+        noscale = SiteConfig(site_id="test", version=1,
+                             map=MapSpec(image="map.png", w=1000, h=1000),
+                             exits=[
+                                 ExitLine(id="e1", line=((300, 400), (300, 600)),
+                                          inside=(250, 500), width_m=2.0, q_design=30),
+                                 ExitLine(id="e2", line=((700, 400), (700, 600)),
+                                          inside=(650, 500), width_m=2.0, q_design=20),
+                                 ExitLine(id="e3", line=((500, 100), (500, 200)),
+                                          inside=(450, 150))])   # 폭 산출 불가
+        eng = MetricsEngine(noscale, [make_cam()])
         eng.start_session((500, 500), t_alarm=0.0)
         self.cross_out(eng, 1, [260, 340], t0=1.0)           # e1 out 1명
         self.cross_out(eng, 2, [460, 540], y=150.0, t0=2.0)  # e3 out 1명
         res = eng.stop_session()
+        em = {m.exit_id: m for m in res.exit_metrics}
+        assert em["e1"].design_capacity == 60                # 수동폭 × 문별 q
+        assert em["e2"].design_capacity == 40
         # 분포는 e1·e2만: (1.0, 0.0) vs (0.6, 0.4) → SEI 60
         assert res.sei == pytest.approx(60.0)
-        em = {m.exit_id: m for m in res.exit_metrics}
         assert em["e3"].actual_count == 1
         assert em["e3"].design_capacity is None
         assert em["e3"].actual_share is None
         assert em["e3"].design_share is None
+
+    # ------------------------------------- C_j 파생 (v1.12: W_eff × q_design)
+
+    def test_capacity_auto_from_drawing_scale(self):
+        """폭·기준 미지정 → 도면 축척으로 자동 산출: 200px×0.01 = 2m × 60 = 120."""
+        e = ExitLine(id="e1", line=((300, 400), (300, 600)), inside=(250, 500))
+        site = make_site(exits=[e])
+        assert site.exits[0].design_capacity == 120
+        assert site.exits[0].auto_width_m(M_PER_PX) == pytest.approx(2.0)
+
+    def test_capacity_uses_manual_width_over_drawing(self):
+        """수동폭이 도면 자동폭을 대체 — 도면과 실제 문 폭이 다를 때."""
+        e = ExitLine(id="e1", line=((300, 400), (300, 600)), inside=(250, 500),
+                     width_m=1.2)
+        site = make_site(exits=[e])
+        assert site.exits[0].effective_width_m(M_PER_PX) == pytest.approx(1.2)
+        assert site.exits[0].design_capacity == 72           # 1.2 × 60
+
+    def test_capacity_per_exit_q_design(self):
+        """문별 q_design이 사이트 전역값을 덮는다 (계단 45 vs 주출입구 60)."""
+        stair = ExitLine(id="s1", line=((300, 400), (300, 600)),
+                         inside=(250, 500), q_design=45)
+        main = ExitLine(id="m1", line=((700, 400), (700, 600)), inside=(650, 500))
+        site = make_site(exits=[stair, main])
+        cap = {e.id: e.design_capacity for e in site.exits}
+        assert cap == {"s1": 90, "m1": 120}                  # 2m × 45 / 2m × 60
+
+    def test_capacity_basis_reported_in_result(self):
+        """결과에 C_j 근거(폭·수동여부·기준)가 남는다 — 리포트 역추적용."""
+        e1 = ExitLine(id="e1", line=((300, 400), (300, 600)), inside=(250, 500),
+                      width_m=1.5, q_design=40)
+        e2 = ExitLine(id="e2", line=((700, 400), (700, 600)), inside=(650, 500))
+        eng = MetricsEngine(make_site(exits=[e1, e2]), [make_cam()])
+        eng.start_session((500, 500), t_alarm=0.0)
+        self.cross_out(eng, 1, [260, 340], t0=1.0)
+        res = eng.stop_session()
+        em = {m.exit_id: m for m in res.exit_metrics}
+        assert (em["e1"].width_m, em["e1"].width_manual,
+                em["e1"].q_design) == (1.5, True, 40.0)
+        assert em["e1"].design_capacity == 60                # 1.5 × 40
+        assert (em["e2"].width_m, em["e2"].width_manual,
+                em["e2"].q_design) == (2.0, False, 60.0)
 
 
 # ================================================================ IDR (FR-03·04)
