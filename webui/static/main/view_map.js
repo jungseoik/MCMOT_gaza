@@ -19,7 +19,7 @@ Views.map = (() => {
     document.querySelectorAll("#mapTools .tag-btn").forEach((b) =>
       b.classList.toggle("on", b.dataset.tool === t));
     draft = (t === "pan" || t === "graph") ? null : { pts: [], inside: null };
-    graphSel = null;
+    graphSel = null; hoverPt = null;
     if (mc) { mc.freehand = (t === "route"); mc.render(); }
     hint();
   }
@@ -34,6 +34,7 @@ Views.map = (() => {
       route: "피난경로: 클릭으로 꼭짓점 추가, 드래그로 자유곡선. 더블클릭 또는 [완료]로 종료 (2점 이상).",
       zone: "구역: 꼭짓점을 클릭으로 추가, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
       bottleneck: "병목: 꼭짓점 클릭 + 임계밀도 입력, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
+      bnsector: "병목 부채꼴: ① 문·계단 위치(꼭짓점) ② 반경·시작방향 ③ 끝방향 — 3번째 클릭에 생성. 반경·각도는 목록에서 다시 조절합니다.",
       exit: "출입구: 통과선 2점 클릭 → 세 번째 클릭이 '안쪽' 지점 (자동 완료).",
       graph: "공간그래프(IDR): 빈 곳 클릭=노드 추가 · 노드 클릭 2회=엣지 연결 · 노드 더블클릭=삭제. 복도 교차점·문 위치를 잇는 '걷는 거리' 그래프.",
     };
@@ -83,6 +84,92 @@ Views.map = (() => {
     return true;
   }
 
+  // ------------------------------------------------------- 출구 설계용량 C_j
+  // C_j = W_eff × q_design. 규칙은 백엔드 schema.py ExitLine 과 같아야 한다 —
+  // 저장하면 백엔드가 같은 식으로 다시 계산해 덮는다(진실은 백엔드).
+  function autoWidthM(ex) {
+    const mpp = mPerPx();
+    if (!mpp || !ex.line || ex.line.length < 2) return null;
+    const d = Math.hypot(ex.line[1][0] - ex.line[0][0],
+                         ex.line[1][1] - ex.line[0][1]);
+    return d > 0 ? d * mpp : null;
+  }
+
+  function effWidthM(ex) {
+    return (ex.width_m != null && ex.width_m > 0) ? ex.width_m : autoWidthM(ex);
+  }
+
+  function effQ(ex) {
+    if (ex.q_design != null && ex.q_design > 0) return ex.q_design;
+    const t = App.site && App.site.thresholds;
+    return (t && t.q_design) || 60;
+  }
+
+  function capacityOf(ex) {
+    const w = effWidthM(ex), q = effQ(ex);
+    return (w > 0 && q > 0) ? Math.max(1, Math.round(w * q)) : null;
+  }
+
+  // ------------------------------------------------------------ 부채꼴 영역
+  // 병목은 실제로 문·계단 앞에서 부채꼴로 생긴다. 자유 다각형으로 찍으면
+  // 매번 모양이 달라지고 나중에 반경·각도를 못 고치므로, 파라미터를 저장하고
+  // polygon은 거기서 생성한다. 생성식은 백엔드 system/config/shapes.py 와
+  // 동일해야 한다 — 저장 시 백엔드가 같은 식으로 다시 만들어 덮는다.
+  const SECTOR_SEG = 24;
+  let hoverPt = null;                               // 부채꼴 미리보기용 커서
+
+  function sectorPoly(c, r, a0, sweep, seg, ri) {
+    seg = Math.max(3, Math.min(180, seg || SECTOR_SEG));
+    ri = ri || 0;
+    const arc = [];
+    for (let i = 0; i <= seg; i++) {
+      const a = a0 + sweep * i / seg;
+      arc.push([c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]);
+    }
+    if (ri > 0) {
+      for (let i = seg; i >= 0; i--) {
+        const a = a0 + sweep * i / seg;
+        arc.push([c[0] + ri * Math.cos(a), c[1] + ri * Math.sin(a)]);
+      }
+      return arc;
+    }
+    return [[c[0], c[1]]].concat(arc);
+  }
+
+  // 세 번째 점 방향까지의 스윕각 — 짧은 쪽(|sweep| ≤ π)으로 잡는다.
+  function sweepTo(c, a0, p) {
+    const a1 = Math.atan2(p[1] - c[1], p[0] - c[0]);
+    let sw = a1 - a0;
+    while (sw > Math.PI) sw -= 2 * Math.PI;
+    while (sw < -Math.PI) sw += 2 * Math.PI;
+    return sw;
+  }
+
+  function draftSector(endPt) {
+    if (!draft || draft.pts.length < 2) return null;
+    const c = draft.pts[0], p1 = draft.pts[1];
+    const r = Math.hypot(p1[0] - c[0], p1[1] - c[1]);
+    if (r <= 0) return null;
+    const a0 = Math.atan2(p1[1] - c[1], p1[0] - c[0]);
+    const sw = endPt ? sweepTo(c, a0, endPt) : 0;
+    return { center: c, radius: r, a0: a0, sweep: sw, segments: SECTOR_SEG,
+             radius_in: 0 };
+  }
+
+  function shapePoly(sh) {
+    return sectorPoly(sh.center, sh.radius, sh.a0, sh.sweep, sh.segments,
+                      sh.radius_in);
+  }
+
+  function onHover(p) {                             // 부채꼴 그리는 중에만 재렌더
+    if (tool !== "bnsector" || !draft || draft.pts.length !== 2) {
+      if (hoverPt) { hoverPt = null; return true; }
+      return false;
+    }
+    hoverPt = [p.x, p.y];
+    return true;
+  }
+
   // ------------------------------------------------------------ 드로잉
   function onClick(p) {
     if (tool === "graph") { graphClick(p); return; }
@@ -100,6 +187,16 @@ Views.map = (() => {
       }
       if (draft.pts.length < 2) draft.pts.push([px, py]);
       if (draft.pts.length === 2) applyScale();
+    } else if (tool === "bnsector") {
+      if (draft.pts.length < 2) {
+        draft.pts.push([p.x, p.y]);
+        hint(draft.pts.length === 1
+          ? "부채꼴 반경·시작방향 지점을 클릭하세요."
+          : "이제 끝방향 지점을 클릭하면 생성됩니다 (반대편으로 벌어집니다).");
+      } else {
+        draft.pts.push([p.x, p.y]);
+        finishDraft();
+      }
     } else if (tool === "exit") {
       if (draft.pts.length < 2) {
         draft.pts.push([p.x, p.y]);
@@ -180,6 +277,16 @@ Views.map = (() => {
       const rho = parseFloat($("rhoCrit").value) || 2.0;
       s.bottlenecks.push({ id: nextId(s.bottlenecks, "b"), name, polygon: pts,
                            rho_crit: rho, weight: 1.0 });
+    } else if (tool === "bnsector") {
+      const sh = draftSector(draft.pts[2]);
+      if (!sh || !sh.sweep) { hint("부채꼴은 3점(꼭짓점·반경·끝방향)이 필요합니다.", true); return; }
+      const rho = parseFloat($("rhoCrit").value) || 2.0;
+      s.bottlenecks.push({
+        id: nextId(s.bottlenecks, "b"), name, polygon: shapePoly(sh),
+        rho_crit: rho, weight: 1.0, group: "",
+        shape: { kind: "sector", center: sh.center, radius: sh.radius,
+                 radius_in: 0, a0: sh.a0, sweep: sh.sweep, segments: sh.segments },
+      });
     } else if (tool === "exit") {
       if (pts.length < 2 || !draft.inside) { hint("통과선 2점 + 안쪽 1점이 필요합니다.", true); return; }
       s.exits.push({ id: nextId(s.exits, "e"), name, line: [pts[0], pts[1]],
@@ -207,6 +314,21 @@ Views.map = (() => {
     if (!draft || !draft.pts.length) return;
     const { ctx } = g;
     const col = MC_COLORS[tool] || "#fff";
+    if (tool === "bnsector") {                      // 부채꼴 미리보기
+      const sh = draftSector(draft.pts[2] || hoverPt);
+      ctx.strokeStyle = MC_COLORS.bottleneck; ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      if (sh && sh.sweep) {
+        mcPath(g, shapePoly(sh), true);
+        ctx.stroke();
+      } else if (draft.pts.length >= 2) {           // 반경선만
+        mcPath(g, draft.pts.slice(0, 2), false);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      mcNumbered(g, draft.pts, MC_COLORS.bottleneck);
+      return;
+    }
     mcPath(g, draft.pts, tool === "zone" || tool === "bottleneck");
     ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
     ctx.stroke(); ctx.setLineDash([]);
@@ -265,47 +387,102 @@ Views.map = (() => {
     };
     fill("listRoutes", "cntRoutes", s.routes, MC_COLORS.route, (e) => `${e.points.length}점`);
     fill("listZones", "cntZones", s.zones, MC_COLORS.zone, (e) => `${e.polygon.length}점`);
-    // 병목 — rho_crit·weight 인라인 편집
+    // 병목 — rho_crit·weight·그룹 인라인 편집 (+부채꼴이면 반경·각도)
     (function fillBns() {
       const box = $("listBottlenecks");
+      const mpp = mPerPx();
       box.innerHTML = "";
       $("cntBottlenecks").textContent = s.bottlenecks.length;
       s.bottlenecks.forEach((bn, i) => {
         const div = document.createElement("div");
         div.className = "elitem elitem-bn";
+        const sec = bn.shape && bn.shape.kind === "sector" ? bn.shape : null;
+        // 부채꼴은 반경(축척 있으면 m, 없으면 px)·각도(°)를 그대로 고친다 —
+        // polygon은 그 값에서 다시 생성되므로 다시 찍을 필요가 없다.
+        const rDisp = sec ? (mpp ? sec.radius * mpp : sec.radius) : 0;
         div.innerHTML =
           `<span class="swatch" style="background:${MC_COLORS.bottleneck}"></span>` +
-          `<span class="nm">${bn.name || bn.id}</span>` +
+          `<span class="nm">${bn.name || bn.id}${sec ? " <i class=\"mtag\">부채꼴</i>" : ""}</span>` +
           `<label class="bfield" title="임계밀도 (명/m²)">ρcrit ` +
-            `<input type="number" class="bni" min="0.1" step="0.1" value="${bn.rho_crit}"> 명/m²</label>` +
+            `<input type="number" class="bni r" min="0.1" step="0.1" value="${bn.rho_crit}"> 명/m²</label>` +
           `<label class="bfield" title="가중치 w_k">w ` +
-            `<input type="number" class="bni" min="0.01" step="0.1" value="${bn.weight}"></label>` +
+            `<input type="number" class="bni w" min="0.01" step="0.1" value="${bn.weight}"></label>` +
+          (sec
+            ? `<label class="bfield" title="부채꼴 반경">r ` +
+                `<input type="number" class="bni rad" min="0.1" step="${mpp ? "0.1" : "5"}" ` +
+                `value="${rDisp.toFixed(mpp ? 2 : 0)}"> ${mpp ? "m" : "px"}</label>` +
+              `<label class="bfield" title="부채꼴 벌어진 각도">각 ` +
+                `<input type="number" class="bni ang" min="1" max="360" step="5" ` +
+                `value="${Math.round(Math.abs(sec.sweep) * 180 / Math.PI)}"> °</label>`
+            : "") +
+          `<label class="bfield grp" title="CBS 집계 그룹 — 같은 라벨끼리 합계·평균을 따로 봅니다">그룹 ` +
+            `<input type="text" class="bni gp" placeholder="(미분류)" value="${bn.group || ""}"></label>` +
           `<button class="del" title="삭제">🗑</button>`;
-        const [rhoIn, wIn] = div.querySelectorAll("input");
-        rhoIn.oninput = () => { const v = parseFloat(rhoIn.value); if (v > 0) s.bottlenecks[i].rho_crit = v; };
-        wIn.oninput   = () => { const v = parseFloat(wIn.value);   if (v > 0) s.bottlenecks[i].weight   = v; };
+        const q = (c) => div.querySelector("input." + c);
+        q("r").oninput = () => { const v = parseFloat(q("r").value); if (v > 0) s.bottlenecks[i].rho_crit = v; };
+        q("w").oninput = () => { const v = parseFloat(q("w").value); if (v > 0) s.bottlenecks[i].weight = v; };
+        q("gp").oninput = () => { s.bottlenecks[i].group = q("gp").value.trim(); };
+        if (sec) {
+          const regen = () => {
+            const rv = parseFloat(q("rad").value), av = parseFloat(q("ang").value);
+            if (!(rv > 0) || !(av > 0)) return;
+            const sh = s.bottlenecks[i].shape;
+            sh.radius = mpp ? rv / mpp : rv;
+            sh.sweep = Math.sign(sh.sweep || 1) * Math.min(av, 360) * Math.PI / 180;
+            s.bottlenecks[i].polygon = shapePoly(sh);
+            if (mc) mc.render();
+          };
+          q("rad").oninput = regen; q("ang").oninput = regen;
+        }
         div.querySelector(".del").onclick = () => { s.bottlenecks.splice(i, 1); refresh(); };
         box.appendChild(div);
       });
     })();
-    // 출입구 — W_eff(m) · 계산 C_j 표시
+    // 출입구 — 유효폭 W(도면 자동 / 수동)·문별 q_design 인라인 편집 + C_j 표시.
+    // C_j = W × q 는 파생값이라 직접 못 고친다. 사람이 조절하는 건 폭과 기준이다.
     (function fillExits() {
-      const mpp = mPerPx();
-      const qd = parseFloat($("thQd").value) || 60;
       const box = $("listExits"); box.innerHTML = "";
       $("cntExits").textContent = s.exits.length;
       s.exits.forEach((ex, i) => {
-        let meta = "통과선";
-        if (mpp && ex.line && ex.line.length === 2) {
-          const dx = ex.line[1][0] - ex.line[0][0], dy = ex.line[1][1] - ex.line[0][1];
-          const w = Math.sqrt(dx * dx + dy * dy) * mpp;
-          meta = `W ${w.toFixed(2)}m · C ${Math.max(1, Math.round(w * qd))}명/분`;
-        }
-        // 카운트 출처 — 맵 선인지, 어느 카메라 화면인지
-        meta += (ex.count_cam && ex.cam_line) ? ` · ${ex.count_cam} 화면 카운트`
-                                              : " · 맵 카운트";
-        box.appendChild(elItem(ex.name || ex.id, meta, MC_COLORS.exit,
-          () => { s.exits.splice(i, 1); refresh(); }));
+        const div = document.createElement("div");
+        div.className = "elitem elitem-ex";
+        const aw = autoWidthM(ex);                 // 도면 축척 기준 폭
+        const manual = ex.width_m != null && ex.width_m > 0;
+        const w = effWidthM(ex), q = effQ(ex), cj = capacityOf(ex);
+        const src = manual
+          ? `수동 (도면 ${aw != null ? aw.toFixed(2) + "m" : "—"})`
+          : (aw != null ? "도면 자동" : "폭 불명 — 직접 입력 필요");
+        div.innerHTML =
+          `<span class="swatch" style="background:${MC_COLORS.exit}"></span>` +
+          `<span class="nm">${ex.name || ex.id}</span>` +
+          `<label class="bfield" title="유효폭 W_eff — 비우면 도면 축척으로 자동 계산">W ` +
+            `<input type="number" class="bni wm" min="0.05" step="0.05" ` +
+            `placeholder="${aw != null ? aw.toFixed(2) : "?"}" ` +
+            `value="${manual ? ex.width_m : ""}"> m</label>` +
+          `<button class="tag-btn rst" title="도면 자동값으로 되돌리기"${manual ? "" : " disabled"}>↺</button>` +
+          `<label class="bfield" title="이 문의 단위폭당 설계 통과기준 — 비우면 사이트 전역값">q ` +
+            `<input type="number" class="bni qd" min="1" step="1" ` +
+            `placeholder="${(s.thresholds && s.thresholds.q_design) || 60}" ` +
+            `value="${ex.q_design != null ? ex.q_design : ""}"> 인/분/m</label>` +
+          `<span class="exmeta">C ${cj != null ? cj + "명/분" : "—"} · ${src}` +
+            `${(ex.count_cam && (ex.cam_line || ex.cam_zone)) ? ` · ${ex.count_cam} 화면 카운트` : " · 맵 카운트"}</span>` +
+          `<button class="del" title="삭제">🗑</button>`;
+        const wIn = div.querySelector("input.wm"), qIn = div.querySelector("input.qd");
+        wIn.onchange = () => {
+          const v = parseFloat(wIn.value);
+          s.exits[i].width_m = v > 0 ? v : null;
+          refreshLists();
+        };
+        qIn.onchange = () => {
+          const v = parseFloat(qIn.value);
+          s.exits[i].q_design = v > 0 ? v : null;
+          refreshLists();
+        };
+        div.querySelector(".rst").onclick = () => {
+          s.exits[i].width_m = null; refreshLists();
+        };
+        div.querySelector(".del").onclick = () => { s.exits.splice(i, 1); refresh(); };
+        box.appendChild(div);
       });
     })();
     // 공간그래프 — 노드·엣지 요약 1행 + 전체 지우기
@@ -471,17 +648,12 @@ Views.map = (() => {
     const cellM = parseFloat($("gridCellSize").value);
     if (cellM > 0) s.grid = { ...(s.grid || {}), cell_size_m: cellM };
     // alarm_origins는 이미 s.alarm_origins 직접 수정 중이므로 별도 처리 불필요
-    // 출입구 design_capacity 자동 계산: 선 길이(px) × m_per_px × q_design
-    const mpp = mPerPx();
-    if (mpp && s.exits) {
-      const qd = s.thresholds.q_design;
-      s.exits.forEach((ex) => {
-        if (!ex.line || ex.line.length < 2) return;
-        const dx = ex.line[1][0] - ex.line[0][0], dy = ex.line[1][1] - ex.line[0][1];
-        const w_eff_m = Math.sqrt(dx * dx + dy * dy) * mpp;
-        ex.design_capacity = Math.max(1, Math.round(w_eff_m * qd));
-      });
-    }
+    // 출입구 C_j = W_eff × q_design (문별 폭·기준 반영). 백엔드도 저장 시
+    // 같은 식으로 다시 계산하므로 여기 값은 저장 전 표시용이다.
+    (s.exits || []).forEach((ex) => {
+      const cj = capacityOf(ex);
+      if (cj != null) ex.design_capacity = cj;
+    });
     // 다중 도면: 별칭된 최상위 공간요소를 현재 층에 반영 후, floors 통째로 저장.
     // (top-level만 보내면 백엔드 재승격으로 다른 층이 사라짐 — floors 포함 필수)
     App.syncFloor();
@@ -525,7 +697,7 @@ Views.map = (() => {
     if (inited) return;
     inited = true;
     mc = new MapCanvas($("mapSetupCv"), {
-      onClick, onDragDraw,
+      onClick, onDragDraw, onHover,
       onDragEnd: () => {},
       onDblClick: (p) => {
         if (tool === "graph") { graphDblClick(p); return; }

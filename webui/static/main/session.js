@@ -10,6 +10,7 @@ const Session = (() => {
   let timeline = [];       // TimelinePoint[]
   let personSeries = null; // {gid: {route_id, series: [[t, d_m],...]}} — v1.4
   let lastSiteV = 0;       // 최신 site_version (설정 변경 경고용)
+  let liveBns = null;      // 최근 MapState.bottlenecks — 병목별 CBS 진행값 (v1.12)
   let placing = false;     // 경보 위치 클릭 대기 (레거시 — addingOrigin으로 대체)
   let addingOrigin = false;    // + 추가 모드: 맵 클릭 → pendingOrigins에 추가
   let pendingOrigins = [];    // [[x,y], ...] — 세션 시작 전 경보 발생원 목록 (세션 한 회용)
@@ -45,6 +46,7 @@ const Session = (() => {
   /** SSE MapState 수신 시 view_live가 호출. */
   function onState(st) {
     if (st && st.site_version) lastSiteV = st.site_version;
+    if (st && st.bottlenecks) liveBns = st.bottlenecks;
     const s = st && st.session;
     if (s && s.session_id !== stoppedId) {
       const wasNew = !live;
@@ -526,8 +528,21 @@ const Session = (() => {
       const dbox = $("seiDeltas");
       if (!dbox) return;
       const worstIdx = deltas.reduce((mi, d, i) => Math.abs(d) > Math.abs(deltas[mi]) ? i : mi, 0);
+      const basis = {};                       // C_j 근거 (결과에 남은 폭·기준)
+      if (result) result.exit_metrics.forEach((m) => { basis[m.exit_id] = m; });
       dbox.innerHTML = deltas.map((d, i) => {
         const cj = cCounts[i], ej = aCounts[i];
+        // C_j가 어떤 폭·기준에서 나왔는지 한 줄 — "정확한 값이 들어갔나" 확인용
+        const bm = basis[exits[i].id] || exits[i];
+        const bw = bm.width_m != null ? bm.width_m
+                 : (exits[i].width_m != null ? exits[i].width_m : null);
+        const bq = bm.q_design != null ? bm.q_design
+                 : (exits[i].q_design != null ? exits[i].q_design
+                    : ((App.site && App.site.thresholds) || {}).q_design);
+        const bmanual = bm.width_manual || (exits[i].width_m != null);
+        const why = bw != null
+          ? `폭 ${bw.toFixed(2)}m${bmanual ? "(수동)" : ""} × ${bq}인/분/m`
+          : "폭 미확정 — 분포 제외";
         // 발산형 바: 중심(50%)에서 좌(under) 또는 우(over)로 뻗음
         const halfPct = Math.min(Math.abs(d) / DELTA_MAX_SCALE * 50, 50).toFixed(1);
         const posStyle = d >= 0
@@ -540,6 +555,7 @@ const Session = (() => {
           <div class="sei-dlab">
             <div>${labels[i]}</div>
             <div class="sei-dcnt">${ej}명 / ${cj != null ? cj + '명' : '—'}</div>
+            <div class="sei-dwhy" title="C_j = 유효폭 × q_design">${why}</div>
           </div>
           <div class="sei-dbar-wrap sei-diverge">
             <div class="sei-div-center"></div>
@@ -622,6 +638,28 @@ const Session = (() => {
     ctx.lineTo(W - PAD_R, PAD_T + plotH); ctx.stroke();
   }
 
+  // ---------------------------------- CBS 선택 집계 (v1.12)
+  // 전체 합계 하나로는 "어느 문·계단이 문제였나"가 묻힌다. 병목을 골라
+  // 그 묶음의 합계·평균·최악을 본다. 그룹 라벨(맵 설정)은 빠른 선택용 프리셋.
+  let cbsSel = null;            // Set(bottleneck_id) | null = 전체
+
+  /** 병목별 CBS 진행값 — 종료 후엔 결과, 진행 중엔 라이브 스냅샷. */
+  function cbsPerBn() {
+    const out = {};
+    if (result) {
+      result.bottleneck_metrics.forEach((m) => { out[m.bottleneck_id] = m.cbs; });
+    } else {
+      (liveBns || []).forEach((b) => {
+        if (b.cbs != null) out[b.id] = b.cbs;
+      });
+    }
+    return out;
+  }
+
+  function cbsSelected(bns) {
+    return bns.filter((b) => !cbsSel || cbsSel.has(b.id));
+  }
+
   function renderCbs() {
     const cbs = live ? live.cbs_total : result.cbs_total;
     $("cbsVal").textContent = fmt1(cbs);
@@ -632,16 +670,65 @@ const Session = (() => {
     if (!bns.length) { box.innerHTML = `<div class="mnote">병목 없음 — 맵 설정에서 추가</div>`; return; }
     const resBn = {};
     if (result) result.bottleneck_metrics.forEach((m) => { resBn[m.bottleneck_id] = m; });
-    box.innerHTML = bns.map((b) => {
-      const m = resBn[b.id];
-      const last = timeline.length ? (timeline[timeline.length - 1].bottleneck_density || {})[b.id] : null;
-      const tail = m ? `CBS ${fmt1(m.cbs)} · <span class="risk ${m.risk_level}">${m.risk_level}</span>`
-                     : (last != null ? `${fmt1(last)}/m²` : "—");
-      return `<div class="bnrow">
-        <div class="bnlab"><span>${nameOf(bns, b.id)}</span><span class="bnval t-num">${tail}</span></div>
-        <canvas class="bnspark" data-bn="${b.id}"></canvas>
-      </div>`;
-    }).join("");
+    const per = cbsPerBn();
+    const groups = [...new Set(bns.map((b) => b.group).filter(Boolean))];
+    const sel = cbsSelected(bns);
+
+    // 선택 집계 — 합계·1개당 평균·최악 병목
+    const vals = sel.map((b) => per[b.id] || 0);
+    const sum = vals.reduce((a, v) => a + v, 0);
+    const worstI = vals.reduce((mi, v, i) => (v > vals[mi] ? i : mi), 0);
+    const overs = sel.map((b) => (resBn[b.id] ? resBn[b.id].over_threshold_sec : 0));
+    const aggr = !sel.length
+      ? `<span class="cbs-agg-none">선택된 병목 없음</span>`
+      : `<b class="t-num">합계 ${fmt1(sum)}</b>` +
+        `<span>평균 <span class="t-num">${fmt1(sum / sel.length)}</span></span>` +
+        `<span>최악 <span class="t-num">${fmt1(vals[worstI])}</span> ` +
+          `(${nameOf(bns, sel[worstI].id)})</span>` +
+        (result ? `<span>초과 <span class="t-num">${fmt1(Math.max(...overs))}</span>s</span>` : "");
+
+    box.innerHTML =
+      `<div class="cbs-sel">` +
+        `<button class="tag-btn cbs-g${cbsSel ? "" : " on"}" data-g="">전체 ${bns.length}</button>` +
+        groups.map((g) => {
+          const ids = bns.filter((b) => b.group === g).map((b) => b.id);
+          const on = cbsSel && ids.length === cbsSel.size && ids.every((i) => cbsSel.has(i));
+          return `<button class="tag-btn cbs-g${on ? " on" : ""}" data-g="${g}">${g} ${ids.length}</button>`;
+        }).join("") +
+      `</div>` +
+      `<div class="cbs-agg">선택 ${sel.length}/${bns.length} · ${aggr}</div>` +
+      bns.map((b) => {
+        const m = resBn[b.id];
+        const last = timeline.length ? (timeline[timeline.length - 1].bottleneck_density || {})[b.id] : null;
+        const tail = m ? `CBS ${fmt1(m.cbs)} · <span class="risk ${m.risk_level}">${m.risk_level}</span>`
+                       : (per[b.id] != null ? `CBS ${fmt1(per[b.id])}`
+                          : (last != null ? `${fmt1(last)}/m²` : "—"));
+        const on = !cbsSel || cbsSel.has(b.id);
+        return `<div class="bnrow${on ? "" : " off"}">
+          <div class="bnlab">
+            <label class="cbs-ck"><input type="checkbox" data-bn="${b.id}"${on ? " checked" : ""}>
+              ${nameOf(bns, b.id)}${b.group ? ` <i class="mtag">${b.group}</i>` : ""}</label>
+            <span class="bnval t-num">${tail}</span>
+          </div>
+          <canvas class="bnspark" data-bn="${b.id}"></canvas>
+        </div>`;
+      }).join("");
+
+    box.querySelectorAll(".cbs-g").forEach((btn) => {
+      btn.onclick = () => {
+        const g = btn.dataset.g;
+        cbsSel = g ? new Set(bns.filter((b) => b.group === g).map((b) => b.id)) : null;
+        renderCbs();
+      };
+    });
+    box.querySelectorAll(".cbs-ck input").forEach((ck) => {
+      ck.onchange = () => {
+        if (!cbsSel) cbsSel = new Set(bns.map((b) => b.id));
+        if (ck.checked) cbsSel.add(ck.dataset.bn); else cbsSel.delete(ck.dataset.bn);
+        if (cbsSel.size === bns.length) cbsSel = null;     // 전체면 필터 해제
+        renderCbs();
+      };
+    });
     box.querySelectorAll(".bnspark").forEach((cv) => {
       const bid = cv.dataset.bn;
       const b = bns.find((x) => x.id === bid);

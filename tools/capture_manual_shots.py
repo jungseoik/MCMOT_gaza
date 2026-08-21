@@ -118,6 +118,7 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
     for name, label, note in (("13_scale", "축척 2점", "축척 지정"),
                               ("14_zone", "구역 IDR", "구역 드로잉"),
                               ("15_bottleneck", "병목 CBS", "병목 드로잉"),
+                              ("15b_bn_sector", "병목 부채꼴", "병목 부채꼴 드로잉"),
                               ("16_exit", "출입구 SEI", "출입구 드로잉"),
                               ("17_route", "피난경로 EPFI", "경로 드로잉"),
                               ("18_graph", "그래프 IDR", "공간 그래프")):
@@ -131,6 +132,8 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
         pg.locator("#msTabSet").click(); pg.wait_for_timeout(600)
     except Exception:
         pass
+    # 병목 그룹·출입구 유효폭/q_design 인라인 편집 (v0.0.5)
+    s.shot("18b_bn_exit_fields", "aside.side", "병목 그룹 · 출입구 W·q 입력")
     s.shot("19_thresholds", "aside.side", "판정 임계값")
     try:
         pg.locator("#msTabHelp").click(); pg.wait_for_timeout(600)
@@ -249,6 +252,11 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
         except Exception:
             pass
         s.shot("34_metric_session", "#liveSide", "세션 중 4대 지표")
+    # CBS 선택 집계 (v0.0.5) — 병목 선택 칩·집계 줄
+    try:
+        s.shot("34b_cbs_select", "#cbsBn", note="CBS 병목 선택 집계")
+    except Exception as e:
+        print(f"  ✗ 34b_cbs_select: {type(e).__name__}")
         s.shot("35_session_running", note="평가 세션 진행 중")
         res = api("/api/session/stop", "POST")
         print(f"  · 세션 종료: {res['session_id']}")

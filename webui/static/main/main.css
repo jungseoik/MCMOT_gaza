@@ -92,7 +92,15 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .elitem .meta{ color:var(--text-3); font-size:13px; }
 .elitem .del{ background:none; border:0; color:var(--text-3); cursor:pointer; font-size:15px; }
 .elitem .del:hover{ color:var(--pia-coral); }
-.elitem-bn{ flex-wrap:wrap; row-gap:4px; }
+.elitem-bn, .elitem-ex{ flex-wrap:wrap; row-gap:4px; }
+/* 그룹 입력은 둘째 줄 대부분을 차지하고 삭제 버튼이 그 옆에 남는다
+   (100%를 주면 🗑 가 세 번째 줄로 밀려나 행이 3줄이 된다) */
+.elitem-bn .bfield.grp{ flex:1 1 60%; }
+.elitem-bn .bfield.grp .bni{ flex:1; width:auto; text-align:left; }
+.elitem-ex .exmeta{ flex:1 1 70%; color:var(--text-3); font-size:12px; }
+.elitem-ex .rst{ padding:0 5px; height:22px; line-height:20px; font-size:11px; }
+.elitem-ex .rst:disabled{ opacity:.3; cursor:default; }
+.elitem-ex .bni{ width:52px; }
 /* 추론 모델 패널 — 키:값 스펙 줄 */
 .spec{ display:flex; gap:10px; padding:3px 0; border-bottom:1px solid var(--stroke-1); }
 .spec:last-of-type{ border-bottom:0; margin-bottom:6px; }
@@ -125,6 +133,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .sei-drow.sei-worst{ background:rgba(255,255,255,.04); }
 .sei-dlab{ font-size:12px; color:var(--text-2); width:80px; flex-shrink:0; overflow:hidden; display:flex; flex-direction:column; gap:2px; }
 .sei-dcnt{ font-size:11px; color:var(--text-3); font-family:var(--font-num); white-space:nowrap; }
+.sei-dwhy{ font-size:10px; color:var(--text-3); opacity:.75; white-space:nowrap; }
 .sei-dbar-wrap{ flex:1; height:9px; background:var(--bg-3); border-radius:3px; overflow:hidden; }
 .sei-dbar-wrap.sei-diverge{ position:relative; }
 .sei-div-center{ position:absolute; left:50%; top:0; bottom:0; width:1px; background:rgba(255,255,255,.18); z-index:1; }
@@ -341,6 +350,18 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 
 /* CBS 병목 목록 */
 .mbnlist{ display:flex; flex-direction:column; gap:8px; min-height:0; }
+/* CBS 병목 선택 집계 (v1.12) */
+.cbs-sel{ display:flex; flex-wrap:wrap; gap:4px; margin-bottom:5px; }
+.cbs-sel .tag-btn{ font-size:11px; padding:1px 7px; }
+.cbs-agg{ display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; font-size:12px;
+  color:var(--text-3); background:var(--bg-2); border:1px solid var(--stroke-1);
+  border-radius:var(--r-md); padding:5px 8px; margin-bottom:7px; }
+.cbs-agg b{ color:#FF6F21; font-size:13px; }
+.cbs-agg .t-num{ color:var(--text-1); }
+.cbs-agg-none{ color:var(--text-3); font-style:italic; }
+.cbs-ck{ display:flex; align-items:center; gap:5px; cursor:pointer; min-width:0; }
+.cbs-ck input{ accent-color:#FF6F21; width:12px; height:12px; margin:0; cursor:pointer; }
+.bnrow.off{ opacity:.4; }
 .bnrow{ display:flex; flex-direction:column; gap:3px; }
 .bnlab{ display:flex; justify-content:space-between; font-size:13px; color:var(--text-2); gap:6px; }
 .bnval{ color:var(--text-1); }

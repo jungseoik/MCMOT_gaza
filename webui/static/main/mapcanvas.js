@@ -132,7 +132,12 @@ class MapCanvas {
   }
 
   _mm(e) {
-    if (!this._down) return;
+    // 드래그 중이 아닐 때의 커서 추적 — 부채꼴처럼 "다음 클릭 전 미리보기"가
+    // 필요한 도구만 쓴다. onHover가 true를 돌려줄 때만 재렌더(비용 방지).
+    if (!this._down) {
+      if (this.opts.onHover && this.opts.onHover(this.toMap(e))) this.render();
+      return;
+    }
     const dx = e.clientX - this._down.x, dy = e.clientY - this._down.y;
     if (Math.hypot(dx, dy) > 5) this._moved = true;
     if (this._drawing) {
