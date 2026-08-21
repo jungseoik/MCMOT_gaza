@@ -88,3 +88,39 @@ def test_recompute_rho_crit_changes_cbs(tmp_path):
     r_hi, *_ = run_replay(db, {"rho_crit": 2.0}, 5.0)     # 임계 초과 없음
     r_lo, *_ = run_replay(db, {"rho_crit": 0.5}, 5.0)     # 임계 초과 → 누적
     assert r_lo.cbs_total > r_hi.cbs_total
+
+
+def test_replay_camera_zone_exit_needs_bbox(tmp_path):
+    """화면 영역 출입구(ZoneGate) 카운트가 리플레이에서 재현된다 (v1.12).
+
+    ZoneGate는 발끝점이 문틀에 잘리는 것을 bbox 겹침으로 보정한다. 녹화가
+    bbox를 안 남기면 그 보정이 죽어 통과 인원이 리플레이에서 빠진다
+    (16F 실측: 라이브 19명 → 리플레이 6명). bbox를 기록하므로 일치해야 한다.
+    """
+    from system.config.schema import ExitLine
+    # 화면 영역: 카메라 px (0..200, 0..200). 발끝점은 영역 밖으로만 두고
+    # bbox 절반이 영역과 겹치게 만들어 "bbox 보정으로만 잡히는" 통과를 만든다.
+    ex = ExitLine(id="e1", line=((300, 400), (300, 600)), inside=(250, 500),
+                  width_m=2.0, q_design=30, count_cam="cam01",
+                  cam_zone=[(0, 0), (200, 0), (200, 200), (0, 200)],
+                  cam_zone_dwell=2)
+    site, cam = make_site(exits=[ex]), make_cam()
+    db = tmp_path / "sess.db"
+
+    def feed(e):
+        from system.contracts import TrackedObject
+        for k in range(10):
+            ts = 100.0 + k * 0.2
+            # k<3: 영역에서 완전히 떨어짐(밖에서 본 이력) / 이후: bbox만 겹침
+            if k < 3:
+                bbox = (400.0, 400.0, 460.0, 500.0); foot = (430.0, 500.0)
+            else:
+                bbox = (100.0, 100.0, 260.0, 260.0); foot = (240.0, 260.0)
+            e.on_tracks("cam01", ts, [TrackedObject(
+                cam_id="cam01", local_track_id=1, foot_uv=foot,
+                bbox_xyxy=bbox, conf=0.9, ts=ts)])
+
+    orig = _record(db, site, cam, feed)
+    assert orig.exit_metrics[0].actual_count == 1, "bbox 보정 통과가 라이브에서 안 잡힘"
+    result, *_ = run_replay(db, {}, 5.0)
+    assert result.exit_metrics[0].actual_count == 1, "리플레이에서 통과가 누락됨(bbox 미기록)"

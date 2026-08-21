@@ -4,8 +4,13 @@ SQLite에 append 기록하고, 리플레이/재계산 시 그대로 되읽는다
 설계 근거: docs/architecture/05-세션-녹화-리플레이-지표재계산-설계.md
 
 무엇을 녹화하나:
-- `tracks` 테이블에 프레임별 원본 트랙 (call_seq, ts, cam_id, local_id, u, v, conf).
-  **min_conf 필터 이전의 raw 관측**을 저장한다 → 재생 시 min_conf도 바꿔 재계산 가능.
+- `tracks` 테이블에 프레임별 원본 트랙 (call_seq, ts, cam_id, local_id, u, v, conf,
+  **bbox x1,y1,x2,y2**). **min_conf 필터 이전의 raw 관측**을 저장한다 → 재생 시
+  min_conf도 바꿔 재계산 가능.
+  bbox를 기록하는 이유(v1.12): 화면 **영역** 출입구(ZoneGate)는 발끝점이 문틀에
+  잘리는 것을 bbox 겹침으로 보정한다. bbox를 더미로 재생하면 그 보정이 죽어
+  통과 인원이 실제의 1/3까지 빠지고 SEI가 틀어진다(16F 실측: 라이브 19명 →
+  리플레이 6명). bbox 없는 옛 녹화(schema 1)는 더미로 재생된다(하위호환).
 - `meta` 테이블에 세션 시작 시점 스냅샷 (그 층의 공간요소 SiteConfig 뷰·카메라·
   경보원·alarm_ts·축척). 재생은 이 스냅샷으로 엔진을 그대로 복원한다.
 
@@ -28,7 +33,7 @@ from system.contracts import TrackedObject
 
 logger = logging.getLogger("system.metrics.recorder")
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"         # 2: tracks에 bbox 4열 추가 (v1.12)
 _COMMIT_EVERY = 200          # 이만큼 on_tracks 호출마다 commit (I/O 완충)
 _BUFFER_FLUSH = 500          # 버퍼 행이 이만큼 쌓이면 executemany
 
@@ -56,7 +61,11 @@ class SessionRecorder:
               local_id INTEGER NOT NULL,
               u        REAL    NOT NULL,
               v        REAL    NOT NULL,
-              conf     REAL
+              conf     REAL,
+              x1       REAL,
+              y1       REAL,
+              x2       REAL,
+              y2       REAL
             );
             """
         )
@@ -78,8 +87,10 @@ class SessionRecorder:
         self._call_seq += 1
         for tr in tracks:
             u, v = tr.foot_uv
+            x1, y1, x2, y2 = tr.bbox_xyxy
             self._buf.append((seq, float(ts), cam_id, int(tr.local_track_id),
-                              float(u), float(v), float(tr.conf)))
+                              float(u), float(v), float(tr.conf),
+                              float(x1), float(y1), float(x2), float(y2)))
         if len(self._buf) >= _BUFFER_FLUSH:
             self._flush()
         if seq % _COMMIT_EVERY == 0:
@@ -89,8 +100,8 @@ class SessionRecorder:
         if not self._buf:
             return
         self._con.executemany(
-            "INSERT INTO tracks(call_seq, ts, cam_id, local_id, u, v, conf) "
-            "VALUES(?,?,?,?,?,?,?)", self._buf)
+            "INSERT INTO tracks(call_seq, ts, cam_id, local_id, u, v, conf,"
+            " x1, y1, x2, y2) VALUES(?,?,?,?,?,?,?,?,?,?,?)", self._buf)
         self._buf.clear()
 
     def close(self) -> None:
@@ -134,17 +145,21 @@ def iter_calls(db_path: str | Path) -> Iterator[tuple[str, float, list[TrackedOb
     """call_seq 순서대로 (cam_id, ts, [TrackedObject...]) 묶음을 재생.
 
     원래 on_tracks 호출 단위(같은 call_seq)를 그대로 복원한다 → 엔진에 다시
-    흘려보내면 결정적으로 동일 결과. bbox는 지표 계산에 미사용이라 더미."""
+    흘려보내면 결정적으로 동일 결과. bbox는 화면 영역 출입구(ZoneGate) 판정에
+    쓰이므로 있으면 그대로 복원하고, 없는 옛 녹화(schema 1)는 더미로 채운다."""
     con = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
     try:
+        has_bbox = any(r[1] == "x1" for r in
+                       con.execute("PRAGMA table_info(tracks)"))
         cur = con.execute(
-            "SELECT call_seq, ts, cam_id, local_id, u, v, conf "
-            "FROM tracks ORDER BY call_seq")
+            "SELECT call_seq, ts, cam_id, local_id, u, v, conf, "
+            + ("x1, y1, x2, y2 " if has_bbox else "0, 0, 0, 0 ")
+            + "FROM tracks ORDER BY call_seq")
         cur_seq = None
         cam_id = None
         ts = 0.0
         batch: list[TrackedObject] = []
-        for seq, row_ts, cid, lid, u, v, conf in cur:
+        for seq, row_ts, cid, lid, u, v, conf, x1, y1, x2, y2 in cur:
             if cur_seq is None:
                 cur_seq = seq
             if seq != cur_seq:
@@ -154,7 +169,8 @@ def iter_calls(db_path: str | Path) -> Iterator[tuple[str, float, list[TrackedOb
             cam_id, ts = cid, row_ts
             batch.append(TrackedObject(
                 cam_id=cid, local_track_id=int(lid), foot_uv=(u, v),
-                bbox_xyxy=(0.0, 0.0, 0.0, 0.0), conf=conf, ts=row_ts))
+                bbox_xyxy=(x1 or 0.0, y1 or 0.0, x2 or 0.0, y2 or 0.0),
+                conf=conf, ts=row_ts))
         if batch:
             yield cam_id, ts, batch
     finally:
