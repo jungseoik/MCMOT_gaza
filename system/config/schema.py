@@ -296,7 +296,11 @@ class SiteConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _derive_exit_capacity(self):
+    def _derive_exit_capacity_validator(self):
+        self.derive_exit_capacity()
+        return self
+
+    def derive_exit_capacity(self) -> None:
         """출구 C_j = W_eff × q_design 을 로드·저장 시점에 파생 산출 (v1.12).
 
         C_j를 사람이 직접 넣던 필드에서 **파생값**으로 바꾼다 — 예전에는
@@ -304,6 +308,10 @@ class SiteConfig(BaseModel):
         잡힌 층은 C_j가 비어 SEI 분포에서 조용히 빠졌다. 사람이 조절하는 값은
         폭(width_m)과 기준(q_design)이고 C_j는 그 결과다.
         폭을 못 구하는 층(축척 미지정 + 수동폭 없음)은 기존 값을 건드리지 않는다.
+
+        검증기 외에 `store.save_site()`도 이걸 부른다 — 설정을 in-place로 고쳐
+        저장하는 경로(예: `PUT /api/site/floor-elements`)는 검증기를 다시 타지
+        않아서, 저장 시점에 한 번 더 돌려야 파생값이 항상 맞는다.
         """
         q_default = self.thresholds.q_design
         groups = [(self.exits, self.map)] + [(fl.exits, fl.map) for fl in self.floors]
@@ -313,7 +321,6 @@ class SiteConfig(BaseModel):
                 cap = ex.resolve_capacity(mpp, q_default)
                 if cap is not None:
                     ex.design_capacity = cap
-        return self
 
     def get_floor(self, floor_id: str | None = None) -> Floor:
         """floor_id에 해당하는 층. None이면 'default', 없으면 첫 층.

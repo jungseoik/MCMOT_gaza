@@ -108,6 +108,10 @@ class SiteStore:
         if bump_version:
             prev = self.load_site(cfg.site_id)
             cfg.version = (prev.version if prev else 0) + 1
+        # 출구 C_j(=W_eff×q_design) 파생 — in-place로 고쳐 저장하는 경로
+        # (예: PUT /api/site/floor-elements)는 pydantic 검증기를 다시 타지 않아
+        # 여기서 한 번 더 돌려야 저장본·메모리 설정이 어긋나지 않는다 (v1.12).
+        cfg.derive_exit_capacity()
         self._atomic_write(self._site_json(cfg.site_id), cfg.model_dump())
         return cfg
 
