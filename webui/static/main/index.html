@@ -44,7 +44,7 @@
             <button class="tag-btn" data-tool="route" title="정렬도·EPFI·피난개시 판정의 기준선">피난경로 <i class="mtag">EPFI</i></button>
             <button class="tag-btn" data-tool="zone" title="피난개시 판정·IDR 산출 단위 (+실시간 재실·밀도)">구역 <i class="mtag">IDR</i></button>
             <button class="tag-btn" data-tool="bottleneck" title="임계밀도 초과 혼잡 누적 → CBS">병목 <i class="mtag">CBS</i></button>
-            <button class="tag-btn" data-tool="bnsector" title="문·계단 앞 부채꼴 병목 — ①문 위치 클릭(출입구에 자동 스냅) ②사람이 퍼지는 쪽 클릭. 각도는 툴바 [부채꼴 각도], 반경·각도는 목록에서도 조절">병목 부채꼴 <i class="mtag">CBS</i></button>
+            <button class="tag-btn" data-tool="bnsector" title="문·계단 앞 부채꼴 병목 — ①꼭짓점(문) ②반경·시작방향 ③끝방향. 반경·각도는 목록에서 다시 조절">병목 부채꼴 <i class="mtag">CBS</i></button>
             <button class="tag-btn" data-tool="exit" title="방향성 통과 카운트 → 출구 활용 효율 SEI">출입구 <i class="mtag">SEI</i></button>
             <button class="tag-btn" data-tool="graph" title="경보→구역 보행거리 그래프 (IDR 거리항)">그래프 <i class="mtag">IDR</i></button>
           </div>
@@ -53,7 +53,6 @@
           </span>
           <span class="fieldlab">격자 셀 <input id="gridCellSize" type="number" min="0.5" step="0.5" value="2.0" title="IDR 격자 BFS 셀 크기 (m)" style="width:52px"/> m</span>
           <span class="fieldlab">임계밀도 <input id="rhoCrit" type="number" min="0.1" step="0.1" value="2.0" /> 명/m²</span>
-          <span class="fieldlab">부채꼴 각도 <input id="sectorAngle" type="number" min="5" max="360" step="5" value="90" title="병목 부채꼴이 벌어지는 각도 (문 앞 통상 60~120°)" style="width:52px" /> °</span>
           <span class="fieldlab">이름 <input id="elName" type="text" placeholder="(선택)" style="width:110px" /></span>
           <button class="tag-btn" id="drawDone">완료 ⏎</button>
           <button class="tag-btn" id="drawCancel">취소 Esc</button>
