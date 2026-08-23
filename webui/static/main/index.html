@@ -60,6 +60,7 @@
           <span class="fieldlab hidden" id="fldRho">임계밀도 <i class="mtag">CBS</i> <input id="rhoCrit" type="number" min="0.1" step="0.1" value="2.0" /> 명/m²</span>
           <span class="tb-none" id="optNone">도구를 고르면 그 도구가 쓰는 값이 여기 표시됩니다.</span>
           <span class="vsep"></span>
+          <button class="tag-btn" id="drawUndo" title="마지막 작업 되돌리기 — 그리는 중이면 찍은 점부터, 아니면 요소 추가·삭제 순으로">↶ 실행취소 <kbd>Ctrl+Z</kbd></button>
           <button class="tag-btn" id="drawDone">완료 ⏎</button>
           <button class="tag-btn" id="drawCancel">취소 Esc</button>
           <span class="sp"></span>
@@ -352,7 +353,7 @@
                      title="영역에 이 프레임 수만큼 머물면 집계 (5fps 기준 2 권장)"></label>
             <button class="tag-btn" id="exLineClear" title="이 출입구의 화면 집계 해제 — 맵 카운트로 되돌림">해제</button>
           </span>
-          <button class="tag-btn" id="pairUndo">↶ 마지막 취소</button>
+          <button class="tag-btn" id="pairUndo" title="마지막으로 찍은 점 되돌리기">↶ 실행취소 <kbd>Ctrl+Z</kbd></button>
           <button class="tag-btn" id="pairClear">지우기</button>
           <button class="tag-btn" id="hullRoi" title="cctv_pts 컨벡스 헐로 유효 ROI 자동 설정 — 대응점 범위 밖 탐지 제외">커버리지→ROI 자동설정</button>
           <span class="tb-none hidden" id="camOptNone">이동 모드 — 휠 줌·드래그 팬으로 화면만 움직입니다.</span>

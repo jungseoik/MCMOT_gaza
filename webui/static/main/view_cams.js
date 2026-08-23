@@ -945,6 +945,15 @@ Views.cams = (() => {
       renderSel();
     };
     $("pairUndo").onclick = undo;
+    // Ctrl+Z — ① 맵 설정과 동일 규칙(이 화면이 열려 있고 입력 포커스가 아닐 때)
+    window.addEventListener("keydown", (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
+      if (App.view !== "cams" || !sel) return;
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      e.preventDefault();
+      undo();
+    });
     $("pairClear").onclick = clearAll;
     $("mappingSave").onclick = saveMapping;
     // min_conf는 카메라 목록 행 인라인 편집(renderList의 applyMinConf)으로 이동.

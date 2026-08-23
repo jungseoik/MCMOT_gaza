@@ -63,6 +63,68 @@ Views.map = (() => {
     el.textContent = H[tool] || "";
   }
 
+  // ------------------------------------------------------------ 실행취소
+  // CAD 편집기(:8910)와 같은 방식 — 되돌릴 수 있는 동작만 op 로그에 쌓는다.
+  // 요소 추가/삭제와 통째로 바뀌는 것(그래프·축척)만 담고, 인라인 숫자 편집은
+  // 담지 않는다(키 입력마다 스택이 쌓여 되돌리기가 쓸모없어진다).
+  const UNDO_MAX = 60;
+  let undoStack = [];
+
+  const LISTS = {
+    route:      () => App.site.routes,
+    zone:       () => App.site.zones,
+    bottleneck: () => App.site.bottlenecks,
+    exit:       () => App.site.exits,
+  };
+  const KIND_LABEL = { route: "피난경로", zone: "구역", bottleneck: "병목", exit: "출입구" };
+
+  function pushOp(op) {
+    undoStack.push(op);
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+    syncUndoBtn();
+  }
+  const pushAdd = (kind) => pushOp({ t: kind, i: LISTS[kind]().length - 1, add: true });
+  const pushDel = (kind, i, v) => pushOp({ t: kind, i, v, add: false });
+  const snap = (o) => JSON.parse(JSON.stringify(o == null ? null : o));
+  const pushSnap = (t, v) => pushOp({ t, v: snap(v) });
+
+  function syncUndoBtn() {
+    const b = $("drawUndo");
+    if (!b) return;
+    const n = undoStack.length + (draft && draft.pts.length ? 1 : 0);
+    b.disabled = n === 0;
+  }
+
+  function undo() {
+    // 그리는 중이면 찍던 점부터 하나씩 — 요소를 통째로 날리는 것보다 자연스럽다
+    if (draft && draft.pts.length) {
+      if (draft.inside) draft.inside = null;
+      else draft.pts.pop();
+      hint(`점 취소 — ${draft.pts.length}점 남음`);
+      refresh(); syncUndoBtn();
+      return;
+    }
+    const op = undoStack.pop();
+    if (!op) { hint("되돌릴 작업이 없습니다."); return; }
+    if (op.t === "graph") {
+      App.site.graph = op.v || { nodes: [], edges: [] };
+      graphSel = null;
+      hint("공간그래프 되돌림");
+    } else if (op.t === "scale") {
+      if (App.site.map) {
+        App.site.map.scale = op.v ? op.v.scale : null;
+        App.site.map.m_per_px = op.v ? op.v.m_per_px : null;
+      }
+      hint("축척 되돌림");
+    } else {
+      const arr = LISTS[op.t] && LISTS[op.t]();
+      if (!arr) return;
+      if (op.add) { arr.splice(op.i, 1); hint(`${KIND_LABEL[op.t]} 추가 되돌림`); }
+      else { arr.splice(op.i, 0, op.v); hint(`${KIND_LABEL[op.t]} 삭제 되돌림`); }
+    }
+    refresh(); syncUndoBtn();
+  }
+
   // ------------------------------------------------------------ 공간그래프
   let graphSel = null;                              // 엣지 연결용 선택 노드 id
 
@@ -75,6 +137,7 @@ Views.map = (() => {
   function graphClick(p) {
     const s = App.site;
     if (!s.graph) s.graph = { nodes: [], edges: [] };
+    pushSnap("graph", s.graph);                     // 노드·엣지 변경 전 상태
     const hit = nearNode(p);
     if (!hit) {                                     // 빈 곳 → 노드 추가
       s.graph.nodes.push({ id: nextId(s.graph.nodes, "n"), xy: [p.x, p.y] });
@@ -92,6 +155,7 @@ Views.map = (() => {
       else { s.graph.edges.push([a, b]); hint(`엣지 ${a}–${b} 연결 — 계속 연결하거나 빈 곳을 클릭하세요.`); }
       graphSel = hit.id;                            // 연쇄 연결 편의
     }
+    if (JSON.stringify(s.graph) !== before) pushOp({ t: "graph", v: JSON.parse(before) });
     refresh();
   }
 
@@ -99,6 +163,7 @@ Views.map = (() => {
     const s = App.site;
     const hit = s.graph && nearNode(p);
     if (!hit) return false;
+    pushSnap("graph", s.graph);
     s.graph.nodes = s.graph.nodes.filter((n) => n.id !== hit.id);
     s.graph.edges = s.graph.edges.filter((e) => e[0] !== hit.id && e[1] !== hit.id);
     if (graphSel === hit.id) graphSel = null;
@@ -277,6 +342,7 @@ Views.map = (() => {
         + `(되돌리려면 CAD 도면을 다시 적용해야 합니다)\n\n계속할까요?`);
       if (!ok) { draft.pts = []; setTool("pan"); hint("축척을 그대로 두었습니다."); return; }
     }
+    pushSnap("scale", { scale: mm.scale, m_per_px: mm.m_per_px });
     mm.scale = { p1: draft.pts[0], p2: draft.pts[1], meters: m };
     mm.m_per_px = null;                              // 수동 축척이 자동값을 대체
     setTool("pan");
@@ -291,14 +357,17 @@ Views.map = (() => {
     if (tool === "route") {
       if (pts.length < 2) { hint("경로는 2점 이상이어야 합니다.", true); return; }
       s.routes.push({ id: nextId(s.routes, "r"), name, points: pts });
+      pushAdd("route");
     } else if (tool === "zone") {
       if (pts.length < 3) { hint("구역 polygon은 3점 이상이어야 합니다.", true); return; }
       s.zones.push({ id: nextId(s.zones, "z"), name, polygon: pts });
+      pushAdd("zone");
     } else if (tool === "bottleneck") {
       if (pts.length < 3) { hint("병목 polygon은 3점 이상이어야 합니다.", true); return; }
       const rho = parseFloat($("rhoCrit").value) || 2.0;
       s.bottlenecks.push({ id: nextId(s.bottlenecks, "b"), name, polygon: pts,
                            rho_crit: rho, weight: 1.0 });
+      pushAdd("bottleneck");
     } else if (tool === "bnsector") {
       const sh = draftSector(draft.pts[2]);
       if (!sh || !sh.sweep) { hint("부채꼴은 3점(꼭짓점·반경·끝방향)이 필요합니다.", true); return; }
@@ -309,10 +378,12 @@ Views.map = (() => {
         shape: { kind: "sector", center: sh.center, radius: sh.radius,
                  radius_in: 0, a0: sh.a0, sweep: sh.sweep, segments: sh.segments },
       });
+      pushAdd("bottleneck");
     } else if (tool === "exit") {
       if (pts.length < 2 || !draft.inside) { hint("통과선 2점 + 안쪽 1점이 필요합니다.", true); return; }
       s.exits.push({ id: nextId(s.exits, "e"), name, line: [pts[0], pts[1]],
                      inside: draft.inside, design_capacity: null });
+      pushAdd("exit");
     } else { return; }
     $("elName").value = "";
     draft = { pts: [], inside: null };
@@ -407,8 +478,8 @@ Views.map = (() => {
         elItem(e.name || e.id, metaFn(e), color,
                () => { list.splice(i, 1); refresh(); })));
     };
-    fill("listRoutes", "cntRoutes", s.routes, MC_COLORS.route, (e) => `${e.points.length}점`);
-    fill("listZones", "cntZones", s.zones, MC_COLORS.zone, (e) => `${e.polygon.length}점`);
+    fill("listRoutes", "cntRoutes", s.routes, MC_COLORS.route, (e) => `${e.points.length}점`, "route");
+    fill("listZones", "cntZones", s.zones, MC_COLORS.zone, (e) => `${e.polygon.length}점`, "zone");
     // 병목 — rho_crit·weight·그룹 인라인 편집 (+부채꼴이면 반경·각도)
     (function fillBns() {
       const box = $("listBottlenecks");
@@ -456,7 +527,10 @@ Views.map = (() => {
           };
           q("rad").oninput = regen; q("ang").oninput = regen;
         }
-        div.querySelector(".del").onclick = () => { s.bottlenecks.splice(i, 1); refresh(); };
+        div.querySelector(".del").onclick = () => {
+          pushDel("bottleneck", i, snap(s.bottlenecks[i]));
+          s.bottlenecks.splice(i, 1); refresh();
+        };
         box.appendChild(div);
       });
     })();
@@ -534,7 +608,10 @@ Views.map = (() => {
           qIn.value = effQ(s.exits[i]);
           sync();
         };
-        div.querySelector(".del").onclick = () => { s.exits.splice(i, 1); refresh(); };
+        div.querySelector(".del").onclick = () => {
+          pushDel("exit", i, snap(s.exits[i]));
+          s.exits.splice(i, 1); refresh();
+        };
         box.appendChild(div);
       });
     })();
@@ -545,7 +622,10 @@ Views.map = (() => {
     $("cntGraph").textContent = gr.nodes.length;
     if (gr.nodes.length) {
       gbox.appendChild(elItem("공간그래프", `노드 ${gr.nodes.length} · 엣지 ${gr.edges.length}`,
-        MC_COLORS.graph, () => { s.graph = { nodes: [], edges: [] }; graphSel = null; refresh(); }));
+        MC_COLORS.graph, () => {
+          pushSnap("graph", s.graph);
+          s.graph = { nodes: [], edges: [] }; graphSel = null; refresh();
+        }));
     }
     $("graphMeta").textContent = gr.nodes.length
       ? "IDR 최단거리는 이 그래프 위에서 계산 (미지정 시 직선거리 폴백)"
@@ -569,7 +649,7 @@ Views.map = (() => {
     $("thQd").value = t.q_design != null ? t.q_design : 60;
   }
 
-  function refresh() { refreshLists(); renderFloorPanel(); if (mc) mc.render(); }
+  function refresh() { refreshLists(); renderFloorPanel(); syncUndoBtn(); if (mc) mc.render(); }
 
   // ------------------------------------------------------------ 추론 모델
   // 검출기·ReID 조합(백엔드 model_zoo.py의 '프로파일')을 여기서 고른다.
@@ -762,6 +842,18 @@ Views.map = (() => {
       b.onclick = () => setTool(b.dataset.tool));
     $("drawDone").onclick = finishDraft;
     $("drawCancel").onclick = cancelDraft;
+    $("drawUndo").onclick = undo;
+    // Ctrl+Z — 이 화면이 열려 있고 입력칸에 포커스가 없을 때만
+    // (텍스트 입력 중의 Ctrl+Z는 브라우저 기본 되돌리기를 그대로 둔다)
+    window.addEventListener("keydown", (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
+      if (App.view !== "map") return;
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      e.preventDefault();
+      undo();
+    });
+    syncUndoBtn();
     // 우측 패널: [설정] · [추론 모델] · [지표 설명] 토글
     const MS_TABS = { set: "mapSetPanel", model: "mapModelPanel", help: "mapHelpPanel" };
     const MS_BTN = { set: "msTabSet", model: "msTabModel", help: "msTabHelp" };
