@@ -322,6 +322,7 @@
       </aside>
 
       <div class="canvaswrap">
+        <!-- 윗줄: 대상 카메라 + 무엇을 지정할지(모드) + 저장 -->
         <div class="toolbar" id="mapToolbar2">
           <span class="fieldlab" id="selCamLabel">카메라를 선택하세요</span>
           <span class="fieldlab hidden" id="mapFloorLab">매핑 층
@@ -333,6 +334,13 @@
             <button class="tag-btn" data-mode="exline" title="출입구 통과 카운트를 카메라 화면에서 판정 — 문 앞이 대응점 범위 밖이라 맵에 안 잡힐 때">출입구 통과선</button>
             <button class="tag-btn" data-mode="pan">이동</button>
           </div>
+          <span class="sp"></span>
+          <button class="btn primary sm" id="mappingSave">매핑 저장</button>
+        </div>
+        <!-- 아랫줄: 고른 모드가 쓰는 값·편집 액션 + (우측) 보기·카메라 점검.
+             ① 맵 설정과 같은 규칙 — 지금 쓰는 것만 띄운다. -->
+        <div class="toolbar sub" id="camToolOpts">
+          <span class="tb-lab">모드 값</span>
           <span class="fieldlab hidden" id="exLineWrap">출입구
             <select id="exLineSel" title="이 카운트를 담당할 출입구"></select>
             <span class="seg" id="exKind">
@@ -346,17 +354,17 @@
           </span>
           <button class="tag-btn" id="pairUndo">↶ 마지막 취소</button>
           <button class="tag-btn" id="pairClear">지우기</button>
-          <span class="vsep"></span>
           <button class="tag-btn" id="hullRoi" title="cctv_pts 컨벡스 헐로 유효 ROI 자동 설정 — 대응점 범위 밖 탐지 제외">커버리지→ROI 자동설정</button>
-          <span class="vsep"></span>
+          <span class="tb-none hidden" id="camOptNone">이동 모드 — 휠 줌·드래그 팬으로 화면만 움직입니다.</span>
+          <span class="sp"></span>
+          <span class="tb-lab">보기</span>
           <button class="tag-btn" id="covAllBtn" title="이 층 모든 카메라의 대응점과 커버 영역을 맵에 함께 표시 — 겹침·빈틈 확인용">전체 커버리지</button>
-          <span class="vsep"></span>
           <button class="tag-btn" id="mapRotBtn" title="맵 도면만 90°씩 돌려서 봅니다. 저장되는 좌표는 그대로입니다.">도면 회전 0°</button>
           <button class="tag-btn hidden" id="mapRotReset" title="원래 방향으로">원래대로</button>
           <span class="vsep"></span>
+          <span class="tb-lab">카메라</span>
           <button class="tag-btn" id="camPreview" title="등록 전/후 임의 주소를 추론까지 돌려 확인 — 저장되지 않습니다">미리보기 ▶</button>
           <button class="tag-btn" id="camRetest">연결 테스트 ↻</button>
-          <button class="btn primary sm" id="mappingSave">매핑 저장</button>
         </div>
         <div class="hint" id="camHint">좌측 카메라 프레임 → 우측 맵 순서로 같은 지점을 번갈아 클릭하세요 (최소 4쌍).</div>
         <div class="duo">

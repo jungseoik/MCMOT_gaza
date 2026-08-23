@@ -550,12 +550,29 @@ Views.cams = (() => {
     if (w) w.style.display = (exKind === "zone") ? "" : "none";
   }
 
+  // 모드별로 아랫줄에 띄울 편집 액션 (①맵 설정 툴바와 같은 규칙 — 지금 쓰는 것만)
+  const MODE_OPTS = {
+    pair:   ["pairUndo", "pairClear", "hullRoi"],
+    roi:    ["pairUndo", "pairClear", "hullRoi"],
+    exline: ["exLineWrap", "pairUndo"],
+    pan:    [],
+  };
+
+  function syncModeOpts() {
+    const on = MODE_OPTS[mode] || [];
+    // exLineWrap 의 표시는 renderExLineUI 소관 — 여기선 나머지만 만진다.
+    ["pairUndo", "pairClear", "hullRoi"].forEach((id) =>
+      $(id).classList.toggle("hidden", !on.includes(id)));
+    $("camOptNone").classList.toggle("hidden", mode !== "pan");
+  }
+
   function setMode(m) {
     mode = m;
     if (typeof syncExKind === "function") syncExKind();
     if (typeof renderExLineUI === "function") renderExLineUI();
     document.querySelectorAll("#camTools .tag-btn").forEach((b) =>
       b.classList.toggle("on", b.dataset.mode === m));
+    syncModeOpts();
     hint();
     renderSel();
   }
