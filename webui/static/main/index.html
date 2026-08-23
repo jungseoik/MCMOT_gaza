@@ -108,6 +108,9 @@
           <div class="group">
             <div class="gtitle">출입구 <i class="mtag">SEI 산출용</i> <span class="cnt" id="cntExits">0</span></div>
             <div id="listExits" class="ellist"></div>
+            <div class="grow gnote">설계 통과용량 <b>C = W × q</b>. <b>W</b>를 비우면 도면 축척으로
+              자동 계산, <b>q</b>를 비우면 아래 [판정 임계값]의 기본값을 씁니다 —
+              회색으로 보이는 숫자가 그 자동·기본값입니다.</div>
           </div>
           <div class="group">
             <div class="gtitle">공간그래프 <i class="mtag">IDR 거리항 (레거시)</i> <span class="cnt" id="cntGraph">0</span></div>
@@ -155,11 +158,14 @@
             </div>
 
             <div class="th-metric">
-              <div class="th-metric-hd"><i class="mtag">SEI</i> 설계 통과기준</div>
+              <div class="th-metric-hd"><i class="mtag">SEI</i> 설계 통과기준 <span class="th-sub">기본값</span></div>
               <div class="th-params">
                 <div class="th-param">
                   <label>q_design <input id="thQd" type="number" min="1" step="5" value="60" /> 인/분/m</label>
-                  <div class="th-pdesc">단위 유효폭(m)당 설계 통과율 — 출구폭 × q_design = 설계인원. 일반복도 60, 계단 45</div>
+                  <div class="th-pdesc">단위 유효폭(m)당 설계 통과율. <b>여기 값은 [출입구] 목록의 q 칸을
+                    비워둔 문에만 적용되는 기본값</b>입니다 — 문마다 다르면 그 목록에서 개별로 지정하세요.
+                    설계 통과용량 C는 <b>문별</b>로 <code>유효폭 W × 그 문의 q</code>로 산출됩니다.
+                    일반복도 60, 계단 45.</div>
                 </div>
               </div>
             </div>
