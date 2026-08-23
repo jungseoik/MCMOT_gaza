@@ -48,15 +48,22 @@
             <button class="tag-btn" data-tool="exit" title="방향성 통과 카운트 → 출구 활용 효율 SEI">출입구 <i class="mtag">SEI</i></button>
             <button class="tag-btn" data-tool="graph" title="경보→구역 보행거리 그래프 (IDR 거리항)">그래프 <i class="mtag">IDR</i></button>
           </div>
-          <span class="fieldlab">실거리 <input id="scaleMeters" type="number" min="0.1" step="0.1" value="10" /> m
+        </div>
+        <!-- 둘째 줄: 지금 고른 도구가 쓰는 값만 보여준다(도구별 전환) + 표시 토글.
+             모든 값을 한 줄에 늘어놓으면 어느 게 지금 쓰이는 값인지 안 보인다. -->
+        <div class="toolbar sub" id="mapToolOpts">
+          <span class="tb-lab" id="optLab">도구 값</span>
+          <span class="fieldlab hidden" id="fldName">이름 <input id="elName" type="text" placeholder="(선택)" style="width:110px" /></span>
+          <span class="fieldlab hidden" id="fldScale">실거리 <input id="scaleMeters" type="number" min="0.1" step="0.1" value="10" /> m
             <button class="tag-btn" id="scaleSnap" title="축척 2점 클릭 시 수평·수직 자동 스냅 토글">스냅 OFF</button>
           </span>
-          <span class="fieldlab">격자 셀 <input id="gridCellSize" type="number" min="0.5" step="0.5" value="2.0" title="IDR 격자 BFS 셀 크기 (m)" style="width:52px"/> m</span>
-          <span class="fieldlab">임계밀도 <input id="rhoCrit" type="number" min="0.1" step="0.1" value="2.0" /> 명/m²</span>
-          <span class="fieldlab">이름 <input id="elName" type="text" placeholder="(선택)" style="width:110px" /></span>
+          <span class="fieldlab hidden" id="fldRho">임계밀도 <i class="mtag">CBS</i> <input id="rhoCrit" type="number" min="0.1" step="0.1" value="2.0" /> 명/m²</span>
+          <span class="tb-none" id="optNone">도구를 고르면 그 도구가 쓰는 값이 여기 표시됩니다.</span>
+          <span class="vsep"></span>
           <button class="tag-btn" id="drawDone">완료 ⏎</button>
           <button class="tag-btn" id="drawCancel">취소 Esc</button>
-          <span class="vsep"></span>
+          <span class="sp"></span>
+          <span class="tb-lab">보기</span>
           <button class="tag-btn" id="gridToggle" title="현재 축척으로 미터 격자·스케일바 표시 (표시 전용 — 저장되지 않음)">미터 격자</button>
         </div>
         <div class="hint" id="mapHint">맵 이미지를 업로드하고 요소를 그리세요. 축척은 CAD 도면이면 자동으로 잡히고, 그렇지 않을 때만 [축척 2점]으로 직접 지정합니다. (휠: 줌 · 드래그: 팬 · 더블클릭/⏎: 완료)</div>
@@ -138,6 +145,16 @@
                 <div class="th-param">
                   <label>dt_hold <input id="thDt" type="number" step="0.5" /> s</label>
                   <div class="th-pdesc">연속 유지 시간 — 세 조건이 이 시간 이상 지속돼야 피난개시 확정</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="th-metric">
+              <div class="th-metric-hd"><i class="mtag">IDR</i> 거리 산출</div>
+              <div class="th-params">
+                <div class="th-param">
+                  <label>격자 셀 <input id="gridCellSize" type="number" min="0.5" step="0.5" value="2.0" /> m</label>
+                  <div class="th-pdesc">경보 발생원→구역 보행거리를 재는 배경 격자의 셀 크기. 작을수록 정밀하지만 계산량이 늡니다</div>
                 </div>
               </div>
             </div>

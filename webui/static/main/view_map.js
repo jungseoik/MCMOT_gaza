@@ -14,12 +14,34 @@ Views.map = (() => {
   let gridOn = false;            // 미터 격자·스케일바 표시 (표시 전용, 저장 안 됨)
 
   // ------------------------------------------------------------ 도구
+  // 도구별로 둘째 줄에 띄울 입력 (없는 도구는 안내문만)
+  const TOOL_OPTS = {
+    scale:      ["fldScale"],
+    route:      ["fldName"],
+    zone:       ["fldName"],
+    bottleneck: ["fldName", "fldRho"],
+    bnsector:   ["fldName", "fldRho"],
+    exit:       ["fldName"],
+  };
+
+  function syncToolOpts() {
+    const on = TOOL_OPTS[tool] || [];
+    ["fldName", "fldScale", "fldRho"].forEach((id) =>
+      $(id).classList.toggle("hidden", !on.includes(id)));
+    $("optNone").classList.toggle("hidden", on.length > 0);
+    // 완료/취소는 그리는 중에만 의미가 있다 (이동·그래프 도구엔 없음)
+    const drawing = !(tool === "pan" || tool === "graph");
+    $("drawDone").classList.toggle("hidden", !drawing);
+    $("drawCancel").classList.toggle("hidden", !drawing);
+  }
+
   function setTool(t) {
     tool = t;
     document.querySelectorAll("#mapTools .tag-btn").forEach((b) =>
       b.classList.toggle("on", b.dataset.tool === t));
     draft = (t === "pan" || t === "graph") ? null : { pts: [], inside: null };
     graphSel = null; hoverPt = null;
+    syncToolOpts();
     if (mc) { mc.freehand = (t === "route"); mc.render(); }
     hint();
   }
@@ -443,43 +465,74 @@ Views.map = (() => {
     (function fillExits() {
       const box = $("listExits"); box.innerHTML = "";
       $("cntExits").textContent = s.exits.length;
+      const qdef = (s.thresholds && s.thresholds.q_design) || 60;
       s.exits.forEach((ex, i) => {
         const div = document.createElement("div");
         div.className = "elitem elitem-ex";
         const aw = autoWidthM(ex);                 // 도면 축척 기준 폭
-        const manual = ex.width_m != null && ex.width_m > 0;
-        const w = effWidthM(ex), q = effQ(ex), cj = capacityOf(ex);
-        const src = manual
-          ? `수동 (도면 ${aw != null ? aw.toFixed(2) + "m" : "—"})`
-          : (aw != null ? "도면 자동" : "폭 불명 — 직접 입력 필요");
+        // 입력칸에는 **지금 실제로 쓰이는 값**을 넣는다. 비워두고 placeholder로
+        // 자동값을 보여주면, 스피너(▲)를 누를 때 빈 값=0에서 시작해 min부터
+        // 올라간다(4.98m 문에서 0.05가 찍힘). 상속값인지는 회색으로 구분한다.
+        const meta = (e) => {
+          const a = autoWidthM(e), man = e.width_m != null && e.width_m > 0;
+          const cj = capacityOf(e);
+          const src = man ? `수동 (도면 ${a != null ? a.toFixed(2) + "m" : "—"})`
+                          : (a != null ? "도면 자동" : "폭 불명 — 직접 입력 필요");
+          return `C ${cj != null ? cj + "명/분" : "—"} · ${src}`
+               + `${(e.count_cam && (e.cam_line || e.cam_zone))
+                    ? ` · ${e.count_cam} 화면 카운트` : " · 맵 카운트"}`;
+        };
+        const w = effWidthM(ex), q = effQ(ex);
+        const wMan = ex.width_m != null && ex.width_m > 0;
+        const qMan = ex.q_design != null && ex.q_design > 0;
         div.innerHTML =
           `<span class="swatch" style="background:${MC_COLORS.exit}"></span>` +
           `<span class="nm">${ex.name || ex.id}</span>` +
-          `<label class="bfield" title="유효폭 W_eff — 비우면 도면 축척으로 자동 계산">W ` +
-            `<input type="number" class="bni wm" min="0.05" step="0.05" ` +
-            `placeholder="${aw != null ? aw.toFixed(2) : "?"}" ` +
-            `value="${manual ? ex.width_m : ""}"> m</label>` +
-          `<button class="tag-btn rst" title="도면 자동값으로 되돌리기"${manual ? "" : " disabled"}>↺</button>` +
-          `<label class="bfield" title="이 문의 단위폭당 설계 통과기준 — 비우면 사이트 전역값">q ` +
-            `<input type="number" class="bni qd" min="1" step="1" ` +
-            `placeholder="${(s.thresholds && s.thresholds.q_design) || 60}" ` +
-            `value="${ex.q_design != null ? ex.q_design : ""}"> 인/분/m</label>` +
-          `<span class="exmeta">C ${cj != null ? cj + "명/분" : "—"} · ${src}` +
-            `${(ex.count_cam && (ex.cam_line || ex.cam_zone)) ? ` · ${ex.count_cam} 화면 카운트` : " · 맵 카운트"}</span>` +
+          `<label class="bfield" title="유효폭 W_eff — 회색이면 도면 축척 자동값. 고치면 그 값이 쓰입니다">W ` +
+            `<input type="number" class="bni wm${wMan ? "" : " auto"}" min="0.05" step="0.05" ` +
+            `value="${w != null ? w.toFixed(2) : ""}"> m</label>` +
+          `<button class="tag-btn rst wrst" title="도면 자동값${aw != null ? ` (${aw.toFixed(2)}m)` : ""}으로 되돌리기"` +
+            `${wMan ? "" : " disabled"}>↺</button>` +
+          `<label class="bfield" title="이 문의 단위폭당 설계 통과기준 — 회색이면 사이트 기본값">q ` +
+            `<input type="number" class="bni qd${qMan ? "" : " auto"}" min="1" step="1" ` +
+            `value="${q}"> 인/분/m</label>` +
+          `<button class="tag-btn rst qrst" title="사이트 기본값 (${qdef})으로 되돌리기"` +
+            `${qMan ? "" : " disabled"}>↺</button>` +
+          `<span class="exmeta">${meta(ex)}</span>` +
           `<button class="del" title="삭제">🗑</button>`;
         const wIn = div.querySelector("input.wm"), qIn = div.querySelector("input.qd");
-        wIn.onchange = () => {
+        const wRst = div.querySelector(".wrst"), qRst = div.querySelector(".qrst");
+        // 스피너를 연속으로 누르려면 행을 다시 그리면 안 된다(포커스가 날아간다)
+        // → 목록 전체 refresh 대신 이 행의 표시만 갱신한다.
+        const sync = () => {
+          const e = s.exits[i];
+          const wm = e.width_m != null && e.width_m > 0;
+          const qm = e.q_design != null && e.q_design > 0;
+          wIn.classList.toggle("auto", !wm);
+          qIn.classList.toggle("auto", !qm);
+          wRst.disabled = !wm; qRst.disabled = !qm;
+          div.querySelector(".exmeta").textContent = meta(e);
+        };
+        wIn.oninput = () => {
           const v = parseFloat(wIn.value);
           s.exits[i].width_m = v > 0 ? v : null;
-          refreshLists();
+          sync();
         };
-        qIn.onchange = () => {
+        qIn.oninput = () => {
           const v = parseFloat(qIn.value);
           s.exits[i].q_design = v > 0 ? v : null;
-          refreshLists();
+          sync();
         };
-        div.querySelector(".rst").onclick = () => {
-          s.exits[i].width_m = null; refreshLists();
+        wRst.onclick = () => {
+          s.exits[i].width_m = null;
+          const a = autoWidthM(s.exits[i]);
+          wIn.value = a != null ? a.toFixed(2) : "";
+          sync();
+        };
+        qRst.onclick = () => {
+          s.exits[i].q_design = null;
+          qIn.value = effQ(s.exits[i]);
+          sync();
         };
         div.querySelector(".del").onclick = () => { s.exits.splice(i, 1); refresh(); };
         box.appendChild(div);

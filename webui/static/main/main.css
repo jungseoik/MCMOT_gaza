@@ -41,6 +41,12 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .toolbar input[type=number], .toolbar input[type=text]{ width:64px; height:28px; background:var(--bg-3);
   color:var(--text-1); border:1px solid var(--stroke-3); border-radius:var(--r-sm); padding:0 7px;
   font-family:var(--font-num); font-size:12px; }
+/* 둘째 줄 — 도구별 값 + 표시 토글 (첫 줄은 도구, 값은 여기로 분리) */
+.toolbar.sub{ padding:6px 10px; margin-top:-4px; background:var(--bg-2); }
+.toolbar.sub .fieldlab{ font-size:13px; color:var(--text-2); }
+.tb-lab{ font-size:11px; font-weight:600; color:var(--text-3); letter-spacing:.03em;
+  border:1px solid var(--stroke-2); border-radius:999px; padding:2px 8px; }
+.tb-none{ font-size:12px; color:var(--text-3); font-style:italic; }
 .hint{ font-size:12px; color:var(--text-3); padding:0 4px; min-height:16px; }
 .hint.warn{ color:var(--warning); }
 
@@ -101,6 +107,10 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .elitem-ex .rst{ padding:0 5px; height:22px; line-height:20px; font-size:11px; }
 .elitem-ex .rst:disabled{ opacity:.3; cursor:default; }
 .elitem-ex .bni{ width:52px; }
+/* 상속값(도면 자동폭·사이트 기본 q)은 회색 — 지금 쓰이는 값을 그대로 띄우되
+   "직접 넣은 값"과 구분한다. 빈 칸 + placeholder로 두면 스피너가 0부터 오른다. */
+.bni.auto{ color:var(--text-3); }
+.elitem-ex .bni.auto{ border-style:dashed; }
 /* 추론 모델 패널 — 키:값 스펙 줄 */
 .spec{ display:flex; gap:10px; padding:3px 0; border-bottom:1px solid var(--stroke-1); }
 .spec:last-of-type{ border-bottom:0; margin-bottom:6px; }
