@@ -396,26 +396,20 @@
       </aside>
 
       <div class="canvaswrap">
-        <!-- 윗줄: 훈련 제어 — 시작·종료 버튼이 같은 자리에서 바뀐다.
-             예전엔 시작은 아랫줄, 종료는 윗줄이라 상태에 따라 버튼이 점프했다. -->
-        <div class="toolbar" id="liveCtlBar">
-          <button class="btn primary sm" id="sessBtn">🔔 경보 시작</button>
+        <div class="toolbar">
           <button class="btn stop sm hidden" id="sessStopBtn">⏹ 세션 종료</button>
-          <span class="vsep"></span>
-          <span id="alarmSetup" class="alarm-inline">
-            <span class="alarm-setup-label">경보 발생원</span>
-            <div id="alarmOriginList" class="alarm-origin-list"></div>
-            <button id="alarmAddBtn" class="alarm-add-btn tag-btn">+ 추가</button>
-            <button id="alarmClearBtn" class="tag-btn" title="경보 발생원 전체 삭제">전체삭제</button>
-          </span>
           <span class="fieldlab" id="sessHint"></span>
-        </div>
-        <!-- 아랫줄: 보는 방식 (①·② 화면과 같은 규칙) -->
-        <div class="toolbar sub" id="liveViewBar">
-          <span class="tb-lab">보기</span>
+          <span class="sp"></span>
           <button class="tag-btn" id="graphToggle" title="IDR 공간그래프 표시">공간그래프</button>
           <button class="tag-btn" id="hullToggle" title="카메라 매핑 커버리지 표시 (대응점 컨벡스 헐)">커버리지</button>
           <span class="fieldlab" title="객체 위치 보간 렌더링 목표 fps">보간 <input id="fpsInput" type="number" min="1" max="30" step="1" value="20" style="width:46px" /> fps</span>
+        </div>
+        <div id="alarmSetup" class="alarm-setup">
+          <button class="btn primary sm" id="sessBtn">🔔 경보 시작</button>
+          <span class="alarm-setup-label">경보 발생원</span>
+          <div id="alarmOriginList" class="alarm-origin-list"></div>
+          <button id="alarmAddBtn" class="alarm-add-btn tag-btn">+ 추가</button>
+          <button id="alarmClearBtn" class="tag-btn" title="경보 발생원 전체 삭제">전체삭제</button>
         </div>
         <div class="hint" id="liveHint">SSE 실시간 맵 — 객체 점·방향, 구역/병목 상태, 통과 카운트. (휠: 줌 · 드래그: 팬)</div>
         <canvas id="liveCv" class="mapcv"></canvas>
