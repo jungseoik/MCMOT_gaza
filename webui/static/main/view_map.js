@@ -34,7 +34,7 @@ Views.map = (() => {
       route: "피난경로: 클릭으로 꼭짓점 추가, 드래그로 자유곡선. 더블클릭 또는 [완료]로 종료 (2점 이상).",
       zone: "구역: 꼭짓점을 클릭으로 추가, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
       bottleneck: "병목: 꼭짓점 클릭 + 임계밀도 입력, 더블클릭 또는 [완료]로 닫기 (3점 이상).",
-      bnsector: "병목 부채꼴: ① 문·계단 위치(꼭짓점) ② 반경·시작방향 ③ 끝방향 — 3번째 클릭에 생성. 반경·각도는 목록에서 다시 조절합니다.",
+      bnsector: "병목 부채꼴: ① 문·계단 위치 클릭(출입구 근처면 문 중앙에 자동 스냅) → ② 사람이 퍼지는 쪽 클릭. 벌어지는 각도는 툴바 [부채꼴 각도], 반경·각도는 만든 뒤 목록에서도 조절됩니다.",
       exit: "출입구: 통과선 2점 클릭 → 세 번째 클릭이 '안쪽' 지점 (자동 완료).",
       graph: "공간그래프(IDR): 빈 곳 클릭=노드 추가 · 노드 클릭 2회=엣지 연결 · 노드 더블클릭=삭제. 복도 교차점·문 위치를 잇는 '걷는 거리' 그래프.",
     };
@@ -136,24 +136,37 @@ Views.map = (() => {
     return [[c[0], c[1]]].concat(arc);
   }
 
-  // 세 번째 점 방향까지의 스윕각 — 짧은 쪽(|sweep| ≤ π)으로 잡는다.
-  function sweepTo(c, a0, p) {
-    const a1 = Math.atan2(p[1] - c[1], p[0] - c[0]);
-    let sw = a1 - a0;
-    while (sw > Math.PI) sw -= 2 * Math.PI;
-    while (sw < -Math.PI) sw += 2 * Math.PI;
-    return sw;
+  function sectorDeg() {                            // 툴바 [부채꼴 각도]
+    const v = parseFloat($("sectorAngle").value);
+    return (v > 0 && v <= 360) ? v : 90;
   }
 
+  /** 꼭짓점 ①에서 커서 ②로 향하는 대칭 부채꼴.
+   *  커서 방향 = 부채꼴 **중심선**, 커서까지 거리 = 반경, 각도는 툴바 값.
+   *  ("시작각→끝각"으로 받으면 방향이 뒤집히고 각도를 눈으로 못 맞춘다) */
   function draftSector(endPt) {
-    if (!draft || draft.pts.length < 2) return null;
-    const c = draft.pts[0], p1 = draft.pts[1];
-    const r = Math.hypot(p1[0] - c[0], p1[1] - c[1]);
+    if (!draft || !draft.pts.length || !endPt) return null;
+    const c = draft.pts[0];
+    const r = Math.hypot(endPt[0] - c[0], endPt[1] - c[1]);
     if (r <= 0) return null;
-    const a0 = Math.atan2(p1[1] - c[1], p1[0] - c[0]);
-    const sw = endPt ? sweepTo(c, a0, endPt) : 0;
-    return { center: c, radius: r, a0: a0, sweep: sw, segments: SECTOR_SEG,
-             radius_in: 0 };
+    const mid = Math.atan2(endPt[1] - c[1], endPt[0] - c[0]);
+    const sweep = sectorDeg() * Math.PI / 180;
+    return { center: c, radius: r, a0: mid - sweep / 2, sweep: sweep,
+             segments: SECTOR_SEG, radius_in: 0 };
+  }
+
+  /** 클릭 지점 근처(화면 16px)의 출입구 중앙 — 병목 꼭짓점은 대개 문이다. */
+  function snapExitMid(p) {
+    const r = 16 / (mc ? mc.s : 1);
+    let best = null, bd = r;
+    (App.site.exits || []).forEach((ex) => {
+      if (!ex.line || ex.line.length < 2) return;
+      const m = [(ex.line[0][0] + ex.line[1][0]) / 2,
+                 (ex.line[0][1] + ex.line[1][1]) / 2];
+      const d = Math.hypot(m[0] - p.x, m[1] - p.y);
+      if (d <= bd) { bd = d; best = { pt: m, name: ex.name || ex.id }; }
+    });
+    return best;
   }
 
   function shapePoly(sh) {
@@ -162,11 +175,15 @@ Views.map = (() => {
   }
 
   function onHover(p) {                             // 부채꼴 그리는 중에만 재렌더
-    if (tool !== "bnsector" || !draft || draft.pts.length !== 2) {
+    if (tool !== "bnsector" || !draft || draft.pts.length !== 1) {
       if (hoverPt) { hoverPt = null; return true; }
       return false;
     }
     hoverPt = [p.x, p.y];
+    const mpp = mPerPx();
+    const r = Math.hypot(p.x - draft.pts[0][0], p.y - draft.pts[0][1]);
+    hint(`반경 ${mpp ? (r * mpp).toFixed(1) + "m" : Math.round(r) + "px"}`
+       + ` · 각도 ${Math.round(sectorDeg())}° — 클릭하면 생성 (각도는 툴바에서 조절)`);
     return true;
   }
 
@@ -188,12 +205,12 @@ Views.map = (() => {
       if (draft.pts.length < 2) draft.pts.push([px, py]);
       if (draft.pts.length === 2) applyScale();
     } else if (tool === "bnsector") {
-      if (draft.pts.length < 2) {
-        draft.pts.push([p.x, p.y]);
-        hint(draft.pts.length === 1
-          ? "부채꼴 반경·시작방향 지점을 클릭하세요."
-          : "이제 끝방향 지점을 클릭하면 생성됩니다 (반대편으로 벌어집니다).");
-      } else {
+      if (!draft.pts.length) {                       // ① 문 위치 (출입구에 스냅)
+        const sn = snapExitMid(p);
+        draft.pts.push(sn ? sn.pt.slice() : [p.x, p.y]);
+        hint(sn ? `'${sn.name}' 문 중앙에 맞췄습니다 — 사람이 퍼지는 쪽을 클릭하세요.`
+                : "사람이 퍼지는 쪽을 클릭하세요 (그 방향이 부채꼴 중심선).");
+      } else {                                       // ② 방향·거리 → 생성
         draft.pts.push([p.x, p.y]);
         finishDraft();
       }
@@ -278,8 +295,8 @@ Views.map = (() => {
       s.bottlenecks.push({ id: nextId(s.bottlenecks, "b"), name, polygon: pts,
                            rho_crit: rho, weight: 1.0 });
     } else if (tool === "bnsector") {
-      const sh = draftSector(draft.pts[2]);
-      if (!sh || !sh.sweep) { hint("부채꼴은 3점(꼭짓점·반경·끝방향)이 필요합니다.", true); return; }
+      const sh = draftSector(draft.pts[1]);
+      if (!sh) { hint("부채꼴은 문 위치와 퍼지는 방향, 2점이 필요합니다.", true); return; }
       const rho = parseFloat($("rhoCrit").value) || 2.0;
       s.bottlenecks.push({
         id: nextId(s.bottlenecks, "b"), name, polygon: shapePoly(sh),
@@ -315,18 +332,18 @@ Views.map = (() => {
     const { ctx } = g;
     const col = MC_COLORS[tool] || "#fff";
     if (tool === "bnsector") {                      // 부채꼴 미리보기
-      const sh = draftSector(draft.pts[2] || hoverPt);
+      const end = draft.pts[1] || hoverPt;
+      const sh = draftSector(end);
       ctx.strokeStyle = MC_COLORS.bottleneck; ctx.lineWidth = 2;
-      ctx.setLineDash([5, 4]);
-      if (sh && sh.sweep) {
+      if (sh) {
+        ctx.setLineDash([5, 4]);
         mcPath(g, shapePoly(sh), true);
         ctx.stroke();
-      } else if (draft.pts.length >= 2) {           // 반경선만
-        mcPath(g, draft.pts.slice(0, 2), false);
-        ctx.stroke();
+        ctx.setLineDash([]);
+        mcPath(g, [sh.center, end], false);          // 중심선(방향) 실선
+        ctx.globalAlpha = 0.5; ctx.stroke(); ctx.globalAlpha = 1;
       }
-      ctx.setLineDash([]);
-      mcNumbered(g, draft.pts, MC_COLORS.bottleneck);
+      mcNumbered(g, draft.pts.slice(0, 1), MC_COLORS.bottleneck);
       return;
     }
     mcPath(g, draft.pts, tool === "zone" || tool === "bottleneck");
