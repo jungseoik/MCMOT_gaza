@@ -58,6 +58,8 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .alarm-setup{ display:flex; align-items:center; gap:10px; flex-wrap:nowrap; flex-shrink:0;
   background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-lg);
   padding:8px 12px; overflow:hidden; }
+/* 훈련 제어 줄 안에 들어간 형태 — 바깥 박스는 툴바가 이미 그리므로 뺀다 */
+.alarm-inline{ display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
 .alarm-setup-label{ font-size:13px; font-weight:600; color:var(--text-2); white-space:nowrap; flex-shrink:0; }
 .alarm-origin-list{ display:flex; flex-wrap:nowrap; gap:6px; flex:1; min-width:0; overflow-x:auto; }
 .alarm-chip{ display:inline-flex; align-items:center; gap:4px; height:26px; padding:0 8px;

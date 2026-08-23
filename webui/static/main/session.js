@@ -152,6 +152,8 @@ const Session = (() => {
     if (!setup || !list) return;
     const isLive = !!live || drillActive;  // 드릴 중엔 어느 층에서든 종료 버튼 노출
     setup.classList.toggle("hidden", isLive);
+    // 시작 버튼은 훈련 제어 줄에 따로 있다(종료 버튼과 같은 자리) — 함께 토글.
+    $("sessBtn").classList.toggle("hidden", isLive);
     $("sessStopBtn").classList.toggle("hidden", !isLive);
     if (isLive) return;
 
