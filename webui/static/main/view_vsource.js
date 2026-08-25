@@ -75,8 +75,24 @@ var VSource = (() => {
           ? `${Math.min(...durs).toFixed(0)}s`
           : `${Math.min(...durs).toFixed(0)}~${Math.max(...durs).toFixed(0)}s`)
       : "—";
+    // 송출만 되고 운영뷰가 비는 상태를 미리 알린다 — 원인 찾기가 제일 어려운 구간이다.
+    const mapped = s.streams.filter((x) => x.cam_mapped && x.cam_enabled).length;
     el.innerHTML = `${s.streams.length}채널 · 영상 ${range} · 사이클 <b>${fmtSec(s.cycle_sec)}</b>`
-      + (s.ok ? "" : `<br><span class="warn">⚠ ${s.problems.join(" / ")}</span>`);
+      + `<br>카메라 매핑 <b class="${mapped === s.streams.length ? "ok" : "warn"}">`
+      + `${mapped}/${s.streams.length}</b>`
+      + (mapped === s.streams.length ? " — 운영 뷰에 바로 표출됩니다"
+                                      : " — 매핑 안 된 채널은 운영 뷰에 안 찍힙니다")
+      + (s.ok ? "" : `<br><span class="warn">⚠ ${s.problems.join(" / ")}</span>`)
+      + ((s.warns || []).length ? `<br><span class="warn">⚠ ${s.warns.join("<br>⚠ ")}</span>` : "");
+  }
+
+  /** 경로별 카메라 상태 한 줄 — 왜 안 뜨는지 바로 보이게. */
+  function camLabel(sc, path) {
+    const st = sc && sc.streams.find((x) => x.path === path);
+    if (!st) return "";
+    if (!st.cam_id) return `<span class="vscam warn">카메라 없음</span>`;
+    const bad = !st.cam_enabled ? "비활성" : (!st.cam_mapped ? "매핑 없음" : null);
+    return `<span class="vscam${bad ? " warn" : ""}">${st.cam_id}${bad ? " · " + bad : " ✓"}</span>`;
   }
 
   // ------------------------------------------------------------ 상태
@@ -87,10 +103,12 @@ var VSource = (() => {
       if (!st || !st.running) {
         box.innerHTML = "";
       } else {
+        const sc = scenarios.find((x) => x.id === st.scenario_id);
         box.innerHTML = (st.streams || []).map((s) =>
           `<div class="vsrow${s.publishing ? " on" : ""}">
              <span class="dot"></span>
              <span class="nm" title="${s.file}">${s.path}</span>
+             ${camLabel(sc, s.path)}
              <span class="pos">${s.pos_sec != null ? s.pos_sec.toFixed(0) + "s" : "종료"}</span>
            </div>`).join("");
       }
@@ -122,6 +140,10 @@ var VSource = (() => {
     const s = current();
     if (!s) return;
     if (!s.ok && !confirm(`이 시나리오에 문제가 있습니다:\n\n${s.problems.join("\n")}\n\n그래도 시도할까요?`)) return;
+    // 매핑이 빠진 채널이 있으면 송출은 되지만 운영 뷰가 빈다 — 미리 알린다.
+    if ((s.warns || []).length && !confirm(
+        `송출은 되지만 운영 뷰에 안 찍히는 채널이 있습니다:\n\n${s.warns.join("\n")}\n\n`
+        + `송출을 켜면 그 화면에서 바로 매핑할 수 있습니다.\n계속할까요?`)) return;
     busy = true;
     msg("송출 시작 중…");
     $("vsStart").disabled = true;

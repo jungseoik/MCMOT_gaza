@@ -1240,8 +1240,12 @@ def session_export(format: str = "json", floor: str = DEFAULT_FLOOR_ID):
 
 @app.get("/api/vsource/scenarios")
 def vsource_scenarios():
-    """시나리오 목록 + 영상 검증(존재·길이·fps·코덱) 결과."""
-    return {"scenarios": [s.to_dict() for s in vscenario.load_all()],
+    """시나리오 목록 + 검증 결과.
+
+    영상(존재·길이·fps·코덱)뿐 아니라 **경로를 보는 카메라**(등록·활성·매핑)까지
+    확인한다 — 송출만 해서는 운영 뷰에 아무것도 안 뜨기 때문이다.
+    """
+    return {"scenarios": [s.to_dict() for s in vscenario.load_all(cameras=rt.cameras())],
             "media_dir": str(vscenario.MEDIA_DIR),
             "scenario_dir": str(vscenario.SCENARIO_DIR)}
 
