@@ -191,6 +191,9 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .vscam{ font-size:11px; color:var(--text-3); border:1px solid var(--stroke-2);
   border-radius:3px; padding:0 4px; white-space:nowrap; }
 .vscam.warn{ color:var(--warning); border-color:var(--warning); }
+.vsrow.clk{ cursor:pointer; }
+.vsrow.clk:hover{ border-color:var(--pia-cyan); }
+.vshint{ font-size:11px; color:var(--text-3); }
 .vschip{ display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:3px 10px;
   border-radius:999px; background:rgba(48,220,251,.12); border:1px solid var(--pia-cyan);
   color:var(--pia-cyan); white-space:nowrap; }

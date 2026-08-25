@@ -104,19 +104,35 @@ var VSource = (() => {
         box.innerHTML = "";
       } else {
         const sc = scenarios.find((x) => x.id === st.scenario_id);
-        box.innerHTML = (st.streams || []).map((s) =>
-          `<div class="vsrow${s.publishing ? " on" : ""}">
+        box.innerHTML = (st.streams || []).map((s) => {
+          const cs = sc && sc.streams.find((x) => x.path === s.path);
+          const cid = cs && cs.cam_id;
+          return `<div class="vsrow${s.publishing ? " on" : ""}${cid ? " clk" : ""}"` +
+            `${cid ? ` data-cam="${cid}" title="클릭하면 ${cid} 매핑 화면으로 이동"` : ""}>
              <span class="dot"></span>
              <span class="nm" title="${s.file}">${s.path}</span>
              ${camLabel(sc, s.path)}
              <span class="pos">${s.pos_sec != null ? s.pos_sec.toFixed(0) + "s" : "종료"}</span>
-           </div>`).join("");
+           </div>`;
+        }).join("");
+        box.querySelectorAll(".vsrow.clk").forEach((row) => {
+          row.onclick = () => {
+            const id = row.dataset.cam;
+            if (typeof Views !== "undefined" && Views.cams && Views.cams.selectCamera) {
+              Views.cams.selectCamera(id);
+              // 가운데(카메라 프레임 | 맵)가 매핑 화면이다 — 거기로 시선을 옮긴다
+              const duo = document.querySelector("#viewCams .duo");
+              if (duo) duo.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          };
+        });
       }
     }
     if (msgEl && st && st.running && !busy && Date.now() >= stickyUntil) {
       const nx = st.next_cycle_in != null
         ? ` · 다음 사이클 ${Math.max(0, Math.round(st.next_cycle_in))}s 후` : "";
-      msgEl.innerHTML = `<span class="ok">송출 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}${nx}`;
+      msgEl.innerHTML = `<span class="ok">송출 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}${nx}`
+        + `<br><span class="vshint">채널을 클릭하면 그 카메라 매핑 화면으로 갑니다</span>`;
     }
     // ③ 운영뷰 칩 — 경보를 언제 누르면 t=0에 맞는지 알려준다
     if (chip) {

@@ -1090,6 +1090,8 @@ Views.cams = (() => {
   }
 
   return { enter, leave: () => {}, renderList,
+           // 훈련영상 송출 패널이 채널 행에서 그 카메라 매핑으로 바로 넘어올 때 쓴다
+           selectCamera: (camId) => select(camId),
            // 테스트용 접근자 — 회전/좌표 왕복 검증에 쓴다(런타임 동작엔 무관)
            __mc: () => mapMc, __mapPts: () => mapPts,
            __clearPairs: () => { mapPts = []; cctvPts = [];
