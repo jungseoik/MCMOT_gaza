@@ -322,15 +322,15 @@
           <!-- 훈련영상 동기 송출 (ADR 08) — 리허설·시연용. 안 켜면 아무 일도 없다. -->
           <div class="group">
             <div class="gtitle">훈련영상 송출 <i class="mtag">리허설</i></div>
-            <div class="grow gnote">영상 파일을 전 채널 <b>같은 시각</b>으로 내보낸다.
+            <div class="grow gnote">여기서 <b>대기 송출</b>(정지화면)을 켜고 매핑한다.
+              <b>훈련 재생은 ③ 운영 뷰의 [경보 시작]</b>이 함께 시작한다 — 경보 시각이 곧 영상 t=0.
               켜는 동안 해당 경로의 pm2 상시송출은 멈추고, 끄면 되돌아온다.</div>
             <select id="vsScenario" title="송출할 훈련영상 묶음"></select>
             <div class="grow" id="vsMeta"></div>
             <label class="vsloop"><input type="checkbox" id="vsLoop" checked />
               사이클마다 전 채널 함께 되감기</label>
             <div class="floor-btns">
-              <button class="btn sm" id="vsStandby" title="첫 프레임을 정지화면으로 내보낸다 — 카메라가 붙어 매핑은 되고 영상은 멈춰 있다. 재생 중 채널을 클릭해도 자동으로 여기로 돌아온다">⏸ 대기 (매핑용)</button>
-              <button class="btn primary sm" id="vsStart" title="본영상을 전 채널 t=0부터 동시에 — 훈련 시작">▶ 훈련 시작</button>
+              <button class="btn primary sm" id="vsStandby" title="첫 프레임을 정지화면으로 내보낸다 — 카메라가 붙어 매핑은 되고 영상은 멈춰 있다">⏸ 대기 송출 (매핑 준비)</button>
               <button class="tag-btn danger" id="vsStop">■ 정지</button>
             </div>
             <div class="grow" id="vsMsg"></div>

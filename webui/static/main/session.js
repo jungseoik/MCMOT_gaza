@@ -184,15 +184,37 @@ const Session = (() => {
     if (onMapRender) onMapRender();
   }
 
-  async function _startWithOrigins(origins) {
+  async function _startWithOrigins(origins, tAlarm) {
     addingOrigin = false;
     try {
-      live = await API.startSession(null, { origins });
+      // tAlarm 이 있으면(리허설) 영상 t=0 과 경보 시각을 같은 값으로 맞춘다
+      live = await API.startSession(null,
+        tAlarm ? { origins, t_alarm: tAlarm } : { origins });
       stoppedId = null; result = null; timeline = []; personSeries = null;
       renderDev(); startPoll(); switchPanel("sess");
       hint(`세션 시작 — ${live.session_id} (경보원 ${origins.length}개)`);
     } catch (e) { hint("세션 시작 실패: " + e.message, true); }
     updateUI();
+  }
+
+  /** 리허설 대기 중이면 경보와 함께 본영상을 튼다 (ADR 08).
+   *
+   *  경보 = 송출 시작이다. 매핑까지는 정지화면으로 멈춰 있다가, 이 버튼을 누른
+   *  순간 전 채널이 t=0부터 함께 흐른다. 리허설을 안 쓰면 아무 일도 안 한다.
+   *  반환값은 경보 시각으로 쓸 t0 (리허설이 아니면 null → 서버가 지금 시각 사용). */
+  async function startRehearsalIfStandby() {
+    try {
+      const st = await (await fetch("/api/vsource/status")).json();
+      if (!st || !st.running || st.mode !== "standby") return null;
+      const r = await fetch("/api/vsource/start", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario_id: st.scenario_id, loop: false }),
+      });
+      if (!r.ok) return null;
+      const d = await r.json();
+      hint(`리허설 영상 재생 시작 — 전 채널 t=0. 카메라 복귀에 20~25초 걸립니다.`);
+      return d.t0 || null;
+    } catch (e) { return null; }
   }
 
   async function onBtn() {
@@ -210,13 +232,14 @@ const Session = (() => {
         hint(`경보 발생원 미지정 층: ${names} — 해당 층으로 이동해 경보 위치를 지정하세요.`, true);
         return;
       }
-      startDrill(parts);
+      startDrill(parts, await startRehearsalIfStandby());
       return;
     }
     // 단일 층(참여 층 ≤1) — 기존 층별 세션.
     syncPending();
     if (!pendingOrigins.length) { hint("경보 발생원을 먼저 추가하세요.", true); return; }
-    _startWithOrigins(pendingOrigins.slice());
+    const t0 = await startRehearsalIfStandby();
+    _startWithOrigins(pendingOrigins.slice(), t0);
   }
 
   /** 맵 클릭 훅 (view_live) — addingOrigin 모드면 경보원 추가 후 true 반환. */
@@ -230,12 +253,13 @@ const Session = (() => {
   }
 
   // ---- 건물 드릴 시작/종료 (ADR 06) --------------------------------
-  async function startDrill(parts) {
+  async function startDrill(parts, tAlarm) {
     addingOrigin = false;
     const payload = {};
     parts.forEach((f) => { payload[f] = (drillOrigins[f] || []).map((o) => [o[0], o[1]]); });
     try {
-      const resp = await API.drillStart(payload);
+      // tAlarm 이 있으면(리허설) 영상 t=0 과 경보 시각을 같은 값으로 맞춘다
+      const resp = await API.drillStart(payload, tAlarm || undefined);
       drillActive = true;
       try { sessionStorage.setItem("macs_drill", resp.session_id); } catch (e) { /* noop */ }
       // 현재 층이 참여 층이면 그 층 세션을 live로 표시(폴링). 아니면 live 없음(다른 층에서 진행).

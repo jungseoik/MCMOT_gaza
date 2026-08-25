@@ -123,7 +123,7 @@ var VSource = (() => {
     if (msgEl && st && st.running && !busy && Date.now() >= stickyUntil) {
       if (st.mode === "standby") {
         msgEl.innerHTML = `<span class="ok">대기 중</span> — 정지화면 (영상 멈춤)`
-          + `<br><span class="vshint">채널을 클릭해 매핑 → 끝나면 [▶ 훈련 시작]</span>`;
+          + `<br><span class="vshint">채널을 클릭해 매핑 → 끝나면 ③ 운영 뷰에서 [경보 시작]</span>`;
       } else {
         msgEl.innerHTML = `<span class="ok">훈련 재생 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}`
           + `<br><span class="vshint">채널을 클릭하면 <b>대기로 돌리고</b> 매핑 화면으로 갑니다</span>`;
@@ -135,7 +135,7 @@ var VSource = (() => {
       chip.classList.toggle("hidden", !on);
       if (on) {
         chip.textContent = st.mode === "standby"
-          ? `⏸ 리허설 대기 중 — ② 에서 [훈련 시작]`
+          ? `⏸ 리허설 대기 중 — [경보 시작]이 영상을 t=0부터 재생합니다`
           : `▶ 리허설 재생 중 · ${fmtSec(st.cycle_pos_sec)}`;
       }
     }
@@ -157,7 +157,7 @@ var VSource = (() => {
       try {
         await jpost("/api/vsource/standby", { scenario_id: st.scenario_id });
         msg(`<span class="ok">대기로 전환</span> — 영상이 멈췄습니다. 매핑하세요.`
-          + `<br>끝나면 [▶ 훈련 시작]으로 처음부터 다시 재생합니다.`, 10);
+          + `<br>끝나면 ③ 운영 뷰 [경보 시작]이 처음부터 다시 재생합니다.`, 10);
       } catch (e) {
         msg(`<span class="warn">전환 실패: ${e.message}</span>`, 12);
       } finally { busy = false; refresh(); }
@@ -181,7 +181,6 @@ var VSource = (() => {
         + `송출을 켜면 그 화면에서 바로 매핑할 수 있습니다.\n계속할까요?`)) return;
     busy = true;
     msg("송출 시작 중…");
-    $("vsStart").disabled = true;
     try {
       const st = await jpost("/api/vsource/start",
         { scenario_id: s.id, loop: $("vsLoop").checked });
@@ -194,7 +193,6 @@ var VSource = (() => {
       msg(`<span class="warn">시작 실패: ${e.message}</span>`, 15);
     } finally {
       busy = false;
-      $("vsStart").disabled = false;
       refresh();
     }
   }
@@ -239,7 +237,6 @@ var VSource = (() => {
     if (inited || !$("vsScenario")) return;
     inited = true;
     $("vsStandby").onclick = standby;
-    $("vsStart").onclick = start;
     $("vsStop").onclick = stop;
     $("vsScenario").onchange = renderMeta;
     loadScenarios().then(refresh);
