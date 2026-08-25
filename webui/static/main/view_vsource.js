@@ -116,25 +116,17 @@ var VSource = (() => {
            </div>`;
         }).join("");
         box.querySelectorAll(".vsrow.clk").forEach((row) => {
-          row.onclick = () => {
-            const id = row.dataset.cam;
-            if (typeof Views !== "undefined" && Views.cams && Views.cams.selectCamera) {
-              Views.cams.selectCamera(id);
-              // 가운데(카메라 프레임 | 맵)가 매핑 화면이다 — 거기로 시선을 옮긴다
-              const duo = document.querySelector("#viewCams .duo");
-              if (duo) duo.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-          };
+          row.onclick = () => gotoMapping(row.dataset.cam);
         });
       }
     }
     if (msgEl && st && st.running && !busy && Date.now() >= stickyUntil) {
       if (st.mode === "standby") {
-        msgEl.innerHTML = `<span class="ok">대기 송출 중</span> — 정지화면 (영상 멈춤)`
+        msgEl.innerHTML = `<span class="ok">대기 중</span> — 정지화면 (영상 멈춤)`
           + `<br><span class="vshint">채널을 클릭해 매핑 → 끝나면 [▶ 훈련 시작]</span>`;
       } else {
         msgEl.innerHTML = `<span class="ok">훈련 재생 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}`
-          + `<br><span class="vshint">채널을 클릭하면 그 카메라 매핑 화면으로 갑니다</span>`;
+          + `<br><span class="vshint">채널을 클릭하면 <b>대기로 돌리고</b> 매핑 화면으로 갑니다</span>`;
       }
     }
     // ③ 운영뷰 칩 — 경보를 언제 누르면 t=0에 맞는지 알려준다
@@ -152,6 +144,30 @@ var VSource = (() => {
   async function refresh() {
     try { renderStatus(await jget("/api/vsource/status")); }
     catch (e) { /* 일시 오류 무시 */ }
+  }
+
+  /** 매핑하러 간다 — 재생 중이면 먼저 대기(정지화면)로 돌린다.
+   *  매핑하려는데 화면이 계속 흐르면 대응점을 찍기 어렵다. "매핑하러 간다"는
+   *  행동 자체가 "멈춰라"는 뜻이므로 여기서 알아서 바꾼다. */
+  async function gotoMapping(camId) {
+    const st = await jget("/api/vsource/status").catch(() => null);
+    if (st && st.running && st.mode === "play") {
+      busy = true;
+      msg("매핑을 위해 대기(정지화면)로 전환 중…");
+      try {
+        await jpost("/api/vsource/standby", { scenario_id: st.scenario_id });
+        msg(`<span class="ok">대기로 전환</span> — 영상이 멈췄습니다. 매핑하세요.`
+          + `<br>끝나면 [▶ 훈련 시작]으로 처음부터 다시 재생합니다.`, 10);
+      } catch (e) {
+        msg(`<span class="warn">전환 실패: ${e.message}</span>`, 12);
+      } finally { busy = false; refresh(); }
+    }
+    if (typeof Views !== "undefined" && Views.cams && Views.cams.selectCamera) {
+      Views.cams.selectCamera(camId);
+      // 가운데(카메라 프레임 | 맵)가 매핑 화면이다 — 거기로 시선을 옮긴다
+      const duo = document.querySelector("#viewCams .duo");
+      if (duo) duo.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
   }
 
   // ------------------------------------------------------------ 제어
