@@ -329,7 +329,8 @@
             <label class="vsloop"><input type="checkbox" id="vsLoop" checked />
               사이클마다 전 채널 함께 되감기</label>
             <div class="floor-btns">
-              <button class="btn primary sm" id="vsStart">▶ 송출 시작</button>
+              <button class="btn sm" id="vsStandby" title="첫 프레임을 정지화면으로 내보낸다 — 카메라가 붙어 매핑은 되고 영상은 멈춰 있다">⏸ 대기 송출</button>
+              <button class="btn primary sm" id="vsStart" title="본영상을 전 채널 t=0부터 동시에 — 훈련 시작">▶ 훈련 시작</button>
               <button class="tag-btn danger" id="vsStop">■ 정지</button>
             </div>
             <div class="grow" id="vsMsg"></div>

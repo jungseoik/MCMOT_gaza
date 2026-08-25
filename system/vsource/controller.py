@@ -30,6 +30,7 @@ logger = logging.getLogger("system.vsource")
 STATE_FILE = Path("data/vsource_state.json")
 LOG_DIR = Path("data/vsource_logs")     # 채널별 퍼블리셔 stderr — 조용히 죽으면
                                         # 원인을 볼 데가 없다(실측으로 겪음)
+STILL_DIR = Path("data/vsource_stills")  # 대기 송출용 첫 프레임 (영상당 1장, 캐시)
 RTSP_HOST = os.environ.get("VSOURCE_RTSP_HOST", "127.0.0.1:8554")
 LEAD_SEC = float(os.environ.get("VSOURCE_LEAD_SEC", "2.0"))   # spawn 여유
 PM2_RESTORE = os.environ.get("VSOURCE_PM2_RESTORE", "1").strip().lower() \
@@ -106,7 +107,72 @@ def _alive(pid: int) -> bool:
         return False
 
 
+def _still_for(file: str, path: str) -> str | None:
+    """영상 첫 프레임을 PNG로 뽑아 캐시. 대기 송출용."""
+    STILL_DIR.mkdir(parents=True, exist_ok=True)
+    out = STILL_DIR / f"{path}.png"
+    try:
+        src_m = Path(file).stat().st_mtime
+        if out.is_file() and out.stat().st_mtime >= src_m:
+            return str(out)
+    except OSError:
+        return None
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+             "-i", file, "-frames:v", "1", str(out)],
+            capture_output=True, timeout=30)
+        return str(out) if r.returncode == 0 and out.is_file() else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _spawn(cmd: list[str], path: str) -> int:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    lf = open(LOG_DIR / f"{path}.log", "w")
+    p = subprocess.Popen(cmd, cwd=os.getcwd(), start_new_session=True,
+                         stdout=lf, stderr=subprocess.STDOUT)
+    lf.close()
+    return p.pid
+
+
 # ------------------------------------------------------------------ 제어
+def standby(scenario_id: str) -> dict:
+    """대기 송출 — 각 채널의 **첫 프레임을 정지화면으로** 계속 내보낸다.
+
+    매핑을 하려면 카메라에 프레임이 들어와야 하는데 본영상을 틀면 시간이
+    흘러버린다. 정지화면이면 카메라가 붙어 매핑은 되고 영상은 멈춰 있다.
+    준비가 끝나면 start()로 t=0부터 본영상을 튼다(전환 실측 1.2초).
+    """
+    s = sc.load(scenario_id)
+    if not s.ok:
+        raise ValueError("시나리오에 문제가 있어 시작할 수 없습니다: "
+                         + " / ".join(s.problems))
+    stop(restore_pm2=False)                  # 곧 다시 내릴 pm2를 복구하지 않는다
+    pm2_stopped = _pm2_stop([st.path for st in s.streams])
+
+    streams, missing = [], []
+    for st in s.streams:
+        still = _still_for(st.file, st.path)
+        if not still:
+            missing.append(st.path)
+            continue
+        pid = _spawn([sys.executable, "-m", "system.vsource.publisher",
+                      "--url", rtsp_url(st.path), "--standby", still], st.path)
+        streams.append({"path": st.path, "file": st.file, "pid": pid,
+                        "duration_sec": st.duration_sec})
+    if missing:
+        logger.warning("[vsource] 첫 프레임 추출 실패: %s", missing)
+
+    state = {"scenario_id": s.id, "scenario_name": s.name, "mode": "standby",
+             "t0": 0.0, "cycle_sec": s.cycle_sec, "loop": False,
+             "started_at": time.time(), "pm2_stopped": pm2_stopped,
+             "streams": streams}
+    _write_state(state)
+    logger.info("[vsource] 대기 송출: %s · %d채널 (정지화면)", s.id, len(streams))
+    return status()
+
+
 def start(scenario_id: str, loop: bool = True) -> dict:
     """시나리오를 동시 송출로 시작. 이미 돌고 있으면 먼저 정지한다."""
     s = sc.load(scenario_id)
@@ -116,10 +182,13 @@ def start(scenario_id: str, loop: bool = True) -> dict:
     if s.cycle_sec <= 0:
         raise ValueError("사이클 길이를 정할 수 없습니다(영상 길이 불명).")
 
-    stop()                                   # 이전 송출·상태 정리 (pm2 복구는 안 함)
+    prev = _read_state()                     # 대기 송출에서 넘어오는 경우 pm2는 이미 내려가 있다
+    stop(restore_pm2=False)                  # 곧 다시 내릴 pm2를 복구하지 않는다
 
     # 같은 경로에 퍼블리셔 둘은 공존 못 한다 — 점유 중인 pm2를 먼저 내린다.
     pm2_stopped = _pm2_stop([st.path for st in s.streams])
+    if prev and prev.get("pm2_stopped"):     # 직전 단계가 내린 것도 복구 목록에 남긴다
+        pm2_stopped = sorted(set(pm2_stopped) | set(prev["pm2_stopped"]))
 
     t0 = time.time() + LEAD_SEC
     streams = []
@@ -129,16 +198,12 @@ def start(scenario_id: str, loop: bool = True) -> dict:
                "--t0", f"{t0:.6f}", "--cycle", f"{s.cycle_sec:.6f}"]
         if loop:
             cmd.append("--loop")
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        lf = open(LOG_DIR / f"{st.path}.log", "w")
-        p = subprocess.Popen(cmd, cwd=os.getcwd(), start_new_session=True,
-                             stdout=lf, stderr=subprocess.STDOUT)
-        lf.close()
-        streams.append({"path": st.path, "file": st.file, "pid": p.pid,
+        streams.append({"path": st.path, "file": st.file,
+                        "pid": _spawn(cmd, st.path),
                         "duration_sec": st.duration_sec})
 
-    state = {"scenario_id": s.id, "scenario_name": s.name, "t0": t0,
-             "cycle_sec": s.cycle_sec, "loop": bool(loop),
+    state = {"scenario_id": s.id, "scenario_name": s.name, "mode": "play",
+             "t0": t0, "cycle_sec": s.cycle_sec, "loop": bool(loop),
              "started_at": time.time(), "pm2_stopped": pm2_stopped,
              "streams": streams}
     _write_state(state)
@@ -194,7 +259,8 @@ def stop(restore_pm2: bool | None = None) -> dict:
             except OSError:
                 continue
         n += 1
-    deadline = time.time() + 4.0              # 종료 대기 후 남으면 강제
+    deadline = time.time() + 1.5              # 종료 대기 후 남으면 강제
+                                              # (퍼블리셔는 SIGTERM에 곧바로 응답한다)
     while time.time() < deadline:
         if not any(_alive(s.get("pid")) for s in st.get("streams", [])):
             break
@@ -236,8 +302,21 @@ def status() -> dict:
         next_at = t0 + (int(elapsed // cycle) + 1) * cycle
     else:
         next_at = None
+    mode = st.get("mode", "play")
+    if mode == "standby":                     # 정지화면 — 시간 개념이 없다
+        return {
+            "running": bool(live), "mode": "standby",
+            "scenario_id": st.get("scenario_id"),
+            "scenario_name": st.get("scenario_name"),
+            "cycle_sec": cycle, "pm2_stopped": st.get("pm2_stopped", []),
+            "streams": [{"path": s["path"], "file": s["file"],
+                         "duration_sec": s.get("duration_sec"),
+                         "publishing": _alive(s.get("pid")), "pos_sec": None}
+                        for s in st.get("streams", [])],
+        }
     return {
         "running": bool(live),
+        "mode": mode,
         "scenario_id": st.get("scenario_id"),
         "scenario_name": st.get("scenario_name"),
         "t0": t0,

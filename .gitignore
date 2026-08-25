@@ -242,3 +242,4 @@ media/vsource/*
 !media/vsource/README.md
 data/vsource_state.json
 data/vsource_logs/
+data/vsource_stills/

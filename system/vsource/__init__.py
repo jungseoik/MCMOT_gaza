@@ -5,8 +5,8 @@
 
 설계: docs/architecture/08-훈련영상-동기송출-설계.md
 """
-from system.vsource.controller import rtsp_url, start, status, stop
+from system.vsource.controller import rtsp_url, standby, start, status, stop
 from system.vsource.scenario import Scenario, Stream, load, load_all
 
-__all__ = ["start", "stop", "status", "rtsp_url",
+__all__ = ["standby", "start", "stop", "status", "rtsp_url",
            "load", "load_all", "Scenario", "Stream"]

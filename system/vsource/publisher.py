@@ -41,6 +41,39 @@ def ffmpeg_cmd(file: str, url: str) -> list[str]:
                           "-f", "rtsp", "-rtsp_transport", "tcp", url]
 
 
+def standby_cmd(still: str, url: str) -> list[str]:
+    """대기 송출 — 첫 프레임 한 장을 계속 내보낸다(영상은 멈춰 있는 셈).
+
+    매핑을 하려면 카메라에 프레임이 들어와야 하는데, 본영상을 틀면 시간이
+    흘러버린다. 정지화면을 물려두면 카메라가 붙어 매핑은 되고 시간은 안 간다.
+    정지화면이라 인코딩 부하는 거의 없다(-tune stillimage).
+    """
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+            "-loop", "1", "-i", still,
+            "-c:v", "libx264", "-profile:v", "baseline", "-preset", "ultrafast",
+            "-tune", "stillimage", "-g", "30", "-keyint_min", "30",
+            "-sc_threshold", "0", "-x264-params", "bframes=0:repeat-headers=1",
+            "-pix_fmt", "yuv420p", "-r", "30", "-an",
+            "-f", "rtsp", "-rtsp_transport", "tcp", url]
+
+
+def run_standby(still: str, url: str) -> int:
+    """정지화면을 계속 송출한다. 컨트롤러가 죽일 때까지."""
+    proc: subprocess.Popen | None = None
+
+    def _bye(*_a):
+        if proc and proc.poll() is None:
+            proc.terminate()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _bye)
+    signal.signal(signal.SIGINT, _bye)
+    while True:                               # ffmpeg가 죽어도 다시 띄운다
+        proc = subprocess.Popen(standby_cmd(still, url))
+        proc.wait()
+        time.sleep(1.0)
+
+
 def run(file: str, url: str, t0: float, cycle_sec: float, loop: bool) -> int:
     """사이클 격자에 맞춰 송출. loop=False면 1회만."""
     proc: subprocess.Popen | None = None
@@ -82,12 +115,18 @@ def run(file: str, url: str, t0: float, cycle_sec: float, loop: bool) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="vsource 채널 퍼블리셔 (컨트롤러가 띄운다)")
-    ap.add_argument("--file", required=True)
+    ap.add_argument("--file", help="본영상 (대기 모드에선 불필요)")
     ap.add_argument("--url", required=True)
-    ap.add_argument("--t0", type=float, required=True, help="동시 시작 시각 (epoch)")
-    ap.add_argument("--cycle", type=float, required=True, help="사이클 길이 (s)")
+    ap.add_argument("--t0", type=float, default=0.0, help="동시 시작 시각 (epoch)")
+    ap.add_argument("--cycle", type=float, default=0.0, help="사이클 길이 (s)")
     ap.add_argument("--loop", action="store_true")
+    ap.add_argument("--standby", metavar="STILL",
+                    help="대기 모드 — 이 이미지를 계속 송출(본영상 대신)")
     a = ap.parse_args()
+    if a.standby:
+        return run_standby(a.standby, a.url)
+    if not a.file:
+        ap.error("--file 이 필요합니다 (대기 모드가 아니면)")
     # 프로세스 그룹은 만들지 않는다 — 컨트롤러가 start_new_session=True 로 띄우므로
     # 이미 세션·그룹 리더다. 여기서 setpgrp()를 부르면 EPERM으로 죽는다(실측).
     return run(a.file, a.url, a.t0, a.cycle, a.loop)

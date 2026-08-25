@@ -129,19 +129,22 @@ var VSource = (() => {
       }
     }
     if (msgEl && st && st.running && !busy && Date.now() >= stickyUntil) {
-      const nx = st.next_cycle_in != null
-        ? ` · 다음 사이클 ${Math.max(0, Math.round(st.next_cycle_in))}s 후` : "";
-      msgEl.innerHTML = `<span class="ok">송출 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}${nx}`
-        + `<br><span class="vshint">채널을 클릭하면 그 카메라 매핑 화면으로 갑니다</span>`;
+      if (st.mode === "standby") {
+        msgEl.innerHTML = `<span class="ok">대기 송출 중</span> — 정지화면 (영상 멈춤)`
+          + `<br><span class="vshint">채널을 클릭해 매핑 → 끝나면 [▶ 훈련 시작]</span>`;
+      } else {
+        msgEl.innerHTML = `<span class="ok">훈련 재생 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}`
+          + `<br><span class="vshint">채널을 클릭하면 그 카메라 매핑 화면으로 갑니다</span>`;
+      }
     }
     // ③ 운영뷰 칩 — 경보를 언제 누르면 t=0에 맞는지 알려준다
     if (chip) {
       const on = !!(st && st.running);
       chip.classList.toggle("hidden", !on);
       if (on) {
-        chip.textContent = st.next_cycle_in != null
-          ? `▶ 리허설 송출 중 · 다음 사이클 ${Math.max(0, Math.round(st.next_cycle_in))}s 후`
-          : `▶ 리허설 송출 중 · ${fmtSec(st.cycle_pos_sec)}`;
+        chip.textContent = st.mode === "standby"
+          ? `⏸ 리허설 대기 중 — ② 에서 [훈련 시작]`
+          : `▶ 리허설 재생 중 · ${fmtSec(st.cycle_pos_sec)}`;
       }
     }
   }
@@ -167,15 +170,35 @@ var VSource = (() => {
       const st = await jpost("/api/vsource/start",
         { scenario_id: s.id, loop: $("vsLoop").checked });
       const n = (st.pm2_stopped || []).length;
-      msg(`<span class="ok">시작됨</span> — ${st.streams.length}채널 동시 송출`
+      msg(`<span class="ok">훈련 시작</span> — ${st.streams.length}채널 t=0 동시 재생`
         + (n ? ` · pm2 ${n}개 정지` : "")
-        + `<br>카메라가 다시 붙는 데 10초쯤 걸립니다.`, 8);
+        + `<br>카메라 전체가 다시 붙는 데 <b>20~25초</b> 걸립니다`
+        + `(영상 앞 여유 구간이 그만큼 필요합니다).`, 12);
     } catch (e) {
       msg(`<span class="warn">시작 실패: ${e.message}</span>`, 15);
     } finally {
       busy = false;
       $("vsStart").disabled = false;
       refresh();
+    }
+  }
+
+  async function standby() {
+    const s = current();
+    if (!s) return;
+    busy = true;
+    msg("대기 송출 준비 중… (첫 프레임 추출)");
+    $("vsStandby").disabled = true;
+    try {
+      const st = await jpost("/api/vsource/standby", { scenario_id: s.id });
+      const n = (st.pm2_stopped || []).length;
+      msg(`<span class="ok">대기 송출 중</span> — ${st.streams.length}채널 정지화면`
+        + (n ? ` · pm2 ${n}개 정지` : "")
+        + `<br>영상은 멈춰 있습니다. 채널을 클릭해 매핑하세요.`, 10);
+    } catch (e) {
+      msg(`<span class="warn">대기 실패: ${e.message}</span>`, 15);
+    } finally {
+      busy = false; $("vsStandby").disabled = false; refresh();
     }
   }
 
@@ -199,6 +222,7 @@ var VSource = (() => {
   function init() {
     if (inited || !$("vsScenario")) return;
     inited = true;
+    $("vsStandby").onclick = standby;
     $("vsStart").onclick = start;
     $("vsStop").onclick = stop;
     $("vsScenario").onchange = renderMeta;

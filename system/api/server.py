@@ -1272,6 +1272,28 @@ async def vsource_start(request: Request):
         raise HTTPException(409, str(e))
 
 
+@app.post("/api/vsource/standby")
+async def vsource_standby(request: Request):
+    """대기 송출 — body {scenario_id}.
+
+    각 채널의 첫 프레임을 정지화면으로 내보낸다. 카메라가 붙어 **매핑은 되고
+    영상은 멈춰 있다**. 준비가 끝나면 /start 로 t=0부터 본영상을 튼다.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    sid = str(body.get("scenario_id") or "").strip()
+    if not sid:
+        raise HTTPException(422, "scenario_id 필요")
+    try:
+        return vsource.standby(sid)
+    except FileNotFoundError:
+        raise HTTPException(404, f"시나리오 없음: {sid}")
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
 @app.post("/api/vsource/stop")
 async def vsource_stop(request: Request):
     """송출 정지 — body {restore_pm2?} (미지정 시 환경변수 기본값)."""
