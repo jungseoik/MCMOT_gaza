@@ -188,10 +188,15 @@ class Runtime:
         return True
 
     def participating_floors(self) -> list[str]:
-        """드릴 참여 층 = 매핑(호모그래피)된 카메라가 ≥1개 있는 층 (추적이 실제로
-        이뤄지는 층). 카메라 없는 층(예: 지상1층)은 제외. floors 순서 유지."""
+        """드릴 참여 층 = 매핑되고 **활성**인 카메라가 ≥1개 있는 층.
+
+        비활성 카메라는 수신 자체를 안 하므로 추적이 일어나지 않는다. 그 층을
+        참여로 세면 경보 원점을 요구하면서 롤업에는 빈 결과가 들어간다
+        (리허설이 다른 층 카메라를 파킹할 때 실제로 걸렸다 — ADR 08 §5-1).
+        카메라 없는 층(예: 지상1층)은 그대로 제외. floors 순서 유지."""
         site, cams = self.site(), self.cameras()
-        have = {site.floor_id_of_camera(c) for c in cams if c.mapping is not None}
+        have = {site.floor_id_of_camera(c) for c in cams
+                if c.mapping is not None and c.enabled}
         return [fl.id for fl in site.floors if fl.id in have]
 
     # ------------------------------------------------------------ 수명주기
@@ -1265,11 +1270,30 @@ async def vsource_start(request: Request):
     if not sid:
         raise HTTPException(422, "scenario_id 필요")
     try:
-        return vsource.start(sid, loop=bool(body.get("loop", True)))
+        return vsource.start(sid, loop=bool(body.get("loop", True)),
+                             cameras=rt.cameras())
     except FileNotFoundError:
         raise HTTPException(404, f"시나리오 없음: {sid}")
     except ValueError as e:
         raise HTTPException(409, str(e))
+
+
+def _vsource_park(cam_id: str, enabled: bool) -> None:
+    """리허설 밖 카메라를 잠시 끄고 되살린다 (vsource 가 호출).
+
+    시나리오에 없는 카메라를 켜둔 채 두면 그 층까지 건물 훈련 참여 층으로 잡혀
+    리허설과 무관한 실영상이 지표에 섞인다(ADR 08 §5-1).
+    """
+    cam = next((c for c in rt.cameras() if c.cam_id == cam_id), None)
+    if cam is None or bool(cam.enabled) == bool(enabled):
+        return
+    cfg = CameraConfig.model_validate({**cam.model_dump(), "enabled": bool(enabled)})
+    rt.store.save_camera(SITE_ID, cfg)
+    rt.ingest.update_camera(cfg)
+    rt.reload_engine()
+
+
+vsource.set_park_hook(_vsource_park)
 
 
 @app.post("/api/vsource/standby")
@@ -1287,7 +1311,7 @@ async def vsource_standby(request: Request):
     if not sid:
         raise HTTPException(422, "scenario_id 필요")
     try:
-        return vsource.standby(sid)
+        return vsource.standby(sid, cameras=rt.cameras())
     except FileNotFoundError:
         raise HTTPException(404, f"시나리오 없음: {sid}")
     except ValueError as e:

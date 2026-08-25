@@ -107,6 +107,34 @@ def _alive(pid: int) -> bool:
         return False
 
 
+# ---------------------------------------------------- 리허설 밖 카메라 파킹
+# 리허설은 준비한 영상이 전부여야 한다. 시나리오에 없는 카메라를 켜둔 채 두면
+# 그 층까지 건물 훈련 참여 층으로 잡혀 리허설과 무관한 실영상이 지표에 섞인다.
+# 켜는 동안만 끄고, 정지하면 원래 상태로 되돌린다.
+_park_cb = None       # (cam_id, enabled) -> None  — API 층이 주입
+
+
+def set_park_hook(fn) -> None:
+    """카메라 활성 토글 훅 주입 (server.py 가 자기 store/ingest 로 처리)."""
+    global _park_cb
+    _park_cb = fn
+
+
+def _park(cam_ids: list[str], enabled: bool) -> list[str]:
+    if not cam_ids or _park_cb is None:
+        return []
+    done = []
+    for cid in cam_ids:
+        try:
+            _park_cb(cid, enabled)
+            done.append(cid)
+        except Exception:
+            logger.exception("[vsource] 카메라 %s 토글 실패", cid)
+    if done:
+        logger.info("[vsource] 카메라 %s: %s", "복구" if enabled else "파킹", done)
+    return done
+
+
 def _still_for(file: str, path: str) -> str | None:
     """영상 첫 프레임을 PNG로 뽑아 캐시. 대기 송출용."""
     STILL_DIR.mkdir(parents=True, exist_ok=True)
@@ -137,19 +165,19 @@ def _spawn(cmd: list[str], path: str) -> int:
 
 
 # ------------------------------------------------------------------ 제어
-def standby(scenario_id: str) -> dict:
+def standby(scenario_id: str, cameras=None) -> dict:
     """대기 송출 — 각 채널의 **첫 프레임을 정지화면으로** 계속 내보낸다.
 
     매핑을 하려면 카메라에 프레임이 들어와야 하는데 본영상을 틀면 시간이
     흘러버린다. 정지화면이면 카메라가 붙어 매핑은 되고 영상은 멈춰 있다.
     준비가 끝나면 start()로 t=0부터 본영상을 튼다(전환 실측 1.2초).
     """
-    s = sc.load(scenario_id)
+    s = sc.load(scenario_id, cameras=cameras)
     if not s.ok:
         raise ValueError("시나리오에 문제가 있어 시작할 수 없습니다: "
                          + " / ".join(s.problems))
     prev = _read_state()                     # 재생→대기 전환이면 pm2는 이미 내려가 있다
-    stop(restore_pm2=False)                  # 곧 다시 내릴 pm2를 복구하지 않는다
+    stop(restore_pm2=False, unpark=False)    # 곧 다시 쓸 pm2·카메라를 건드리지 않는다
     pm2_stopped = _pm2_stop([st.path for st in s.streams])
     if prev and prev.get("pm2_stopped"):     # 직전 단계가 내린 것도 복구 목록에 승계
         pm2_stopped = sorted(set(pm2_stopped) | set(prev["pm2_stopped"]))
@@ -167,18 +195,20 @@ def standby(scenario_id: str) -> dict:
     if missing:
         logger.warning("[vsource] 첫 프레임 추출 실패: %s", missing)
 
+    parked = (prev.get("parked") if prev else None) or _park(
+        s.outside_cams(cameras), False)
     state = {"scenario_id": s.id, "scenario_name": s.name, "mode": "standby",
              "t0": 0.0, "cycle_sec": s.cycle_sec, "loop": False,
              "started_at": time.time(), "pm2_stopped": pm2_stopped,
-             "streams": streams}
+             "parked": parked, "streams": streams}
     _write_state(state)
     logger.info("[vsource] 대기 송출: %s · %d채널 (정지화면)", s.id, len(streams))
     return status()
 
 
-def start(scenario_id: str, loop: bool = True) -> dict:
+def start(scenario_id: str, loop: bool = True, cameras=None) -> dict:
     """시나리오를 동시 송출로 시작. 이미 돌고 있으면 먼저 정지한다."""
-    s = sc.load(scenario_id)
+    s = sc.load(scenario_id, cameras=cameras)
     if not s.ok:
         raise ValueError("시나리오에 문제가 있어 시작할 수 없습니다: "
                          + " / ".join(s.problems))
@@ -186,7 +216,7 @@ def start(scenario_id: str, loop: bool = True) -> dict:
         raise ValueError("사이클 길이를 정할 수 없습니다(영상 길이 불명).")
 
     prev = _read_state()                     # 대기 송출에서 넘어오는 경우 pm2는 이미 내려가 있다
-    stop(restore_pm2=False)                  # 곧 다시 내릴 pm2를 복구하지 않는다
+    stop(restore_pm2=False, unpark=False)    # 곧 다시 쓸 pm2·카메라를 건드리지 않는다
 
     # 같은 경로에 퍼블리셔 둘은 공존 못 한다 — 점유 중인 pm2를 먼저 내린다.
     pm2_stopped = _pm2_stop([st.path for st in s.streams])
@@ -205,10 +235,12 @@ def start(scenario_id: str, loop: bool = True) -> dict:
                         "pid": _spawn(cmd, st.path),
                         "duration_sec": st.duration_sec})
 
+    parked = (prev.get("parked") if prev else None) or _park(
+        s.outside_cams(cameras), False)
     state = {"scenario_id": s.id, "scenario_name": s.name, "mode": "play",
              "t0": t0, "cycle_sec": s.cycle_sec, "loop": bool(loop),
              "started_at": time.time(), "pm2_stopped": pm2_stopped,
-             "streams": streams}
+             "parked": parked, "streams": streams}
     _write_state(state)
     logger.info("[vsource] 시작: %s · %d채널 · T0=%.3f · 사이클 %.1fs · loop=%s",
                 s.id, len(streams), t0, s.cycle_sec, loop)
@@ -242,8 +274,12 @@ def _sweep_orphans() -> int:
     return n
 
 
-def stop(restore_pm2: bool | None = None) -> dict:
-    """송출 정지. restore_pm2 미지정이면 VSOURCE_PM2_RESTORE(기본 on)."""
+def stop(restore_pm2: bool | None = None, unpark: bool = True) -> dict:
+    """송출 정지. restore_pm2 미지정이면 VSOURCE_PM2_RESTORE(기본 on).
+
+    unpark=False 는 모드 전환(대기↔재생) 중 내부 호출용 — 파킹한 카메라를
+    껐다 켰다 하면 그때마다 엔진이 재적재돼 전환이 느려진다.
+    """
     st = _read_state()
     if not st:
         orphans = _sweep_orphans()
@@ -275,6 +311,7 @@ def stop(restore_pm2: bool | None = None) -> dict:
             except OSError:
                 pass
 
+    unparked = _park(st.get("parked") or [], True) if unpark else []
     restored: list[str] = []
     do_restore = PM2_RESTORE if restore_pm2 is None else restore_pm2
     if do_restore and st.get("pm2_stopped"):
@@ -285,7 +322,7 @@ def stop(restore_pm2: bool | None = None) -> dict:
     logger.info("[vsource] 정지: %d채널 · pm2 복구 %d · 떠돌이 %d",
                 n, len(restored), orphans)
     return {"running": False, "stopped": n, "pm2_restored": restored,
-            "orphans_killed": orphans}
+            "orphans_killed": orphans, "cams_restored": unparked}
 
 
 def status() -> dict:
@@ -312,6 +349,7 @@ def status() -> dict:
             "scenario_id": st.get("scenario_id"),
             "scenario_name": st.get("scenario_name"),
             "cycle_sec": cycle, "pm2_stopped": st.get("pm2_stopped", []),
+            "parked_cams": st.get("parked", []),
             "streams": [{"path": s["path"], "file": s["file"],
                          "duration_sec": s.get("duration_sec"),
                          "publishing": _alive(s.get("pid")), "pos_sec": None}
@@ -330,6 +368,7 @@ def status() -> dict:
         "next_cycle_at": next_at,
         "next_cycle_in": (round(next_at - now, 3) if next_at else None),
         "pm2_stopped": st.get("pm2_stopped", []),
+        "parked_cams": st.get("parked", []),
         "streams": [
             {"path": s["path"], "file": s["file"],
              "duration_sec": s.get("duration_sec"),

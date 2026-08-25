@@ -134,7 +134,8 @@ const Session = (() => {
   async function refreshParts() {
     try {
       const cams = await API.getCameras();
-      partCache = [...new Set(cams.filter((c) => c.mapping).map((c) => c.floor_id || "default"))];
+      partCache = [...new Set(cams.filter((c) => c.mapping && c.enabled)
+        .map((c) => c.floor_id || "default"))];
     } catch (e) { partCache = null; }
     renderAlarmPanel();
   }
@@ -222,7 +223,9 @@ const Session = (() => {
     // 참여 층 = 카메라가 매핑된 층(추적이 실제로 일어나는 층). 2개 이상이면 건물 드릴.
     let cams = [];
     try { cams = await API.getCameras(); } catch (e) { /* 폴백: 단일 층 */ }
-    const parts = [...new Set(cams.filter((c) => c.mapping)
+    // 매핑 + 활성이어야 참여 층 — 비활성은 수신을 안 해 추적이 없다
+    // (백엔드 RT.participating_floors 와 같은 규칙).
+    const parts = [...new Set(cams.filter((c) => c.mapping && c.enabled)
       .map((c) => c.floor_id || "default"))];
 
     if (parts.length >= 2) {
