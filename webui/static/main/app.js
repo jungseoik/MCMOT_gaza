@@ -147,6 +147,8 @@ const App = {
     document.querySelectorAll(".vbtn").forEach((b) =>
       b.classList.toggle("on", b.dataset.view === v));
     Views[v].enter();
+    // 훈련영상 송출(ADR 08) — 제어는 ②, 상태 칩은 ③. 화면과 무관하게 상태만 유지.
+    if (typeof VSource !== "undefined") { VSource.init(); VSource.refresh(); }
   },
 };
 

@@ -319,6 +319,22 @@
             <div class="grow" id="camAddMsg"></div>
             <button class="btn sm" id="camBulkOpen" style="width:100%">⿻ 여러 대 한 번에 등록…</button>
           </div>
+          <!-- 훈련영상 동기 송출 (ADR 08) — 리허설·시연용. 안 켜면 아무 일도 없다. -->
+          <div class="group">
+            <div class="gtitle">훈련영상 송출 <i class="mtag">리허설</i></div>
+            <div class="grow gnote">영상 파일을 전 채널 <b>같은 시각</b>으로 내보낸다.
+              켜는 동안 해당 경로의 pm2 상시송출은 멈추고, 끄면 되돌아온다.</div>
+            <select id="vsScenario" title="송출할 훈련영상 묶음"></select>
+            <div class="grow" id="vsMeta"></div>
+            <label class="vsloop"><input type="checkbox" id="vsLoop" checked />
+              사이클마다 전 채널 함께 되감기</label>
+            <div class="floor-btns">
+              <button class="btn primary sm" id="vsStart">▶ 송출 시작</button>
+              <button class="tag-btn danger" id="vsStop">■ 정지</button>
+            </div>
+            <div class="grow" id="vsMsg"></div>
+            <div id="vsStreams" class="ellist"></div>
+          </div>
         </div>
       </aside>
 
@@ -403,6 +419,7 @@
           <button class="tag-btn" id="graphToggle" title="IDR 공간그래프 표시">공간그래프</button>
           <button class="tag-btn" id="hullToggle" title="카메라 매핑 커버리지 표시 (대응점 컨벡스 헐)">커버리지</button>
           <span class="fieldlab" title="객체 위치 보간 렌더링 목표 fps">보간 <input id="fpsInput" type="number" min="1" max="30" step="1" value="20" style="width:46px" /> fps</span>
+          <span class="vschip hidden" id="vsChip" title="훈련영상 동기 송출 중 — 다음 사이클 시작에 맞춰 경보를 누르면 t=0부터 전 채널이 정렬된다"></span>
         </div>
         <div id="alarmSetup" class="alarm-setup">
           <button class="btn primary sm" id="sessBtn">🔔 경보 시작</button>
@@ -653,6 +670,7 @@
 <script src="/static/main/view_cams.js"></script>
 <script src="/static/main/view_live.js"></script>
 <script src="/static/main/view_replay.js"></script>
+<script src="/static/main/view_vsource.js"></script>
 <script src="/static/main/app.js"></script>
 </body>
 </html>

@@ -178,6 +178,19 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .th-sub{ font-size:11px; font-weight:500; color:var(--text-3); border:1px solid var(--stroke-2);
   border-radius:999px; padding:1px 7px; }
 .gnote{ font-size:12px; color:var(--text-3); line-height:1.5; margin-top:2px; }
+/* 훈련영상 동기 송출 (ADR 08) */
+.vsloop{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-3); cursor:pointer; }
+.vsloop input{ accent-color:var(--pia-cyan); margin:0; }
+#vsScenario{ width:100%; }
+.vsrow{ display:flex; align-items:center; gap:7px; font-size:12px; padding:4px 8px;
+  background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-md); }
+.vsrow .dot{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:var(--stroke-3); }
+.vsrow.on .dot{ background:#3FB950; }
+.vsrow .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vsrow .pos{ color:var(--text-3); font-family:var(--font-num); }
+.vschip{ display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:3px 10px;
+  border-radius:999px; background:rgba(48,220,251,.12); border:1px solid var(--pia-cyan);
+  color:var(--pia-cyan); white-space:nowrap; }
 .gnote b{ color:var(--text-2); }
 
 /* ---------------- camera list ---------------- */
@@ -523,3 +536,7 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .pvstat .row b{ color:var(--text-1); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .pvnote{ font-size:11px; color:var(--text-3); line-height:1.6; margin-top:10px; }
 .pvnote.warn{ color:var(--danger); }
+
+/* vsource 메시지 강조 */
+.grow .ok{ color:#3FB950; }
+.grow .warn{ color:var(--warning); }

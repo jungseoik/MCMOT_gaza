@@ -236,3 +236,9 @@ docs/manual/**/img/
 
 # 서드파티 모델 clone (비교 실험용, 대용량·외부 코드) — git 제외
 third_party/
+
+# 훈련영상 동기 송출 (ADR 08) — 송출 준비된 인코딩본은 대용량이라 HF 보관
+media/vsource/*
+!media/vsource/README.md
+data/vsource_state.json
+data/vsource_logs/

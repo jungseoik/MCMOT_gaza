@@ -54,6 +54,8 @@ from system.ingest.manager import IngestManager
 import model_zoo
 from system.metrics.engine import MetricsEngine
 from system.metrics.recorder import SessionRecorder
+from system.vsource import controller as vsource
+from system.vsource import scenario as vscenario
 
 logger = logging.getLogger("system.api")
 
@@ -1229,6 +1231,58 @@ def session_export(format: str = "json", floor: str = DEFAULT_FLOOR_ID):
                         headers={"Content-Disposition":
                                  f"attachment; filename={res.session_id}.csv"})
     raise HTTPException(422, "format은 json|csv")
+
+
+# ============================================== 훈련영상 동기 송출 (ADR 08)
+# 리허설·시연용 별도 도구. 본체(추론·추적·지표)는 건드리지 않는다 — 켜지 않으면
+# 아무 일도 일어나지 않고, 켜는 동안만 RTSP 경로의 송출 주체가 바뀐다.
+
+
+@app.get("/api/vsource/scenarios")
+def vsource_scenarios():
+    """시나리오 목록 + 영상 검증(존재·길이·fps·코덱) 결과."""
+    return {"scenarios": [s.to_dict() for s in vscenario.load_all()],
+            "media_dir": str(vscenario.MEDIA_DIR),
+            "scenario_dir": str(vscenario.SCENARIO_DIR)}
+
+
+@app.post("/api/vsource/start")
+async def vsource_start(request: Request):
+    """동시 송출 시작 — body {scenario_id, loop?}.
+
+    전 채널이 공통 T0에 함께 t=0부터 시작한다(실측 편차 1.7ms). 같은 RTSP 경로를
+    점유 중인 pm2 송출은 자동으로 내린다(경로는 배타적).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    sid = str(body.get("scenario_id") or "").strip()
+    if not sid:
+        raise HTTPException(422, "scenario_id 필요")
+    try:
+        return vsource.start(sid, loop=bool(body.get("loop", True)))
+    except FileNotFoundError:
+        raise HTTPException(404, f"시나리오 없음: {sid}")
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/vsource/stop")
+async def vsource_stop(request: Request):
+    """송출 정지 — body {restore_pm2?} (미지정 시 환경변수 기본값)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    rp = body.get("restore_pm2")
+    return vsource.stop(restore_pm2=None if rp is None else bool(rp))
+
+
+@app.get("/api/vsource/status")
+def vsource_status():
+    """송출 상태 — t0·사이클 위치·다음 사이클까지 남은 시간·채널별 송출 여부."""
+    return vsource.status()
 
 
 # ================================================================ 맵 상태
