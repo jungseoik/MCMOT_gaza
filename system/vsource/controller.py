@@ -148,8 +148,11 @@ def standby(scenario_id: str) -> dict:
     if not s.ok:
         raise ValueError("시나리오에 문제가 있어 시작할 수 없습니다: "
                          + " / ".join(s.problems))
+    prev = _read_state()                     # 재생→대기 전환이면 pm2는 이미 내려가 있다
     stop(restore_pm2=False)                  # 곧 다시 내릴 pm2를 복구하지 않는다
     pm2_stopped = _pm2_stop([st.path for st in s.streams])
+    if prev and prev.get("pm2_stopped"):     # 직전 단계가 내린 것도 복구 목록에 승계
+        pm2_stopped = sorted(set(pm2_stopped) | set(prev["pm2_stopped"]))
 
     streams, missing = [], []
     for st in s.streams:
