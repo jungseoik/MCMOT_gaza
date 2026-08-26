@@ -111,11 +111,16 @@ def _alive(pid: int) -> bool:
 # 리허설은 준비한 영상이 전부여야 한다. 시나리오에 없는 카메라를 켜둔 채 두면
 # 그 층까지 건물 훈련 참여 층으로 잡혀 리허설과 무관한 실영상이 지표에 섞인다.
 # 켜는 동안만 끄고, 정지하면 원래 상태로 되돌린다.
-_park_cb = None       # (cam_id, enabled) -> None  — API 층이 주입
+_park_cb = None       # (cam_ids, enabled) -> list[str]  — API 층이 주입
 
 
 def set_park_hook(fn) -> None:
-    """카메라 활성 토글 훅 주입 (server.py 가 자기 store/ingest 로 처리)."""
+    """카메라 활성 토글 훅 주입 (server.py 가 자기 store/ingest 로 처리).
+
+    **여러 대를 한 번에** 받는다. 하나씩 끄면 그때마다 DS 워커가 재시작돼
+    3대에 20초가 걸렸다(실측). launcher.update_cameras() 가 슬롯당 1회로
+    묶어주므로 그 경로를 쓴다.
+    """
     global _park_cb
     _park_cb = fn
 
@@ -123,13 +128,11 @@ def set_park_hook(fn) -> None:
 def _park(cam_ids: list[str], enabled: bool) -> list[str]:
     if not cam_ids or _park_cb is None:
         return []
-    done = []
-    for cid in cam_ids:
-        try:
-            _park_cb(cid, enabled)
-            done.append(cid)
-        except Exception:
-            logger.exception("[vsource] 카메라 %s 토글 실패", cid)
+    try:
+        done = list(_park_cb(cam_ids, enabled) or [])
+    except Exception:
+        logger.exception("[vsource] 카메라 토글 실패: %s", cam_ids)
+        return []
     if done:
         logger.info("[vsource] 카메라 %s: %s", "복구" if enabled else "파킹", done)
     return done

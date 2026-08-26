@@ -107,10 +107,16 @@ var VSource = (() => {
         box.innerHTML = (st.streams || []).map((s) => {
           const cs = sc && sc.streams.find((x) => x.path === s.path);
           const cid = cs && cs.cam_id;
+          // 송출(dot)과 카메라 수신(rx)은 다르다 — 송출은 떴는데 카메라가 아직
+          // 안 붙은 구간이 20초쯤 있어서, 둘을 갈라 보여야 오해가 없다.
+          const rx = s.receiving
+            ? `<span class="vsrx on">수신</span>`
+            : `<span class="vsrx">붙는 중…</span>`;
           return `<div class="vsrow${s.publishing ? " on" : ""}${cid ? " clk" : ""}"` +
             `${cid ? ` data-cam="${cid}" title="클릭하면 ${cid} 매핑 화면으로 이동"` : ""}>
              <span class="dot"></span>
              <span class="nm" title="${s.file}">${s.path}</span>
+             ${rx}
              ${camLabel(sc, s.path)}
              <span class="pos">${s.pos_sec != null ? s.pos_sec.toFixed(0) + "s" : "종료"}</span>
            </div>`;
@@ -121,11 +127,15 @@ var VSource = (() => {
       }
     }
     if (msgEl && st && st.running && !busy && Date.now() >= stickyUntil) {
+      const rxN = st.cams_receiving, rxT = st.cams_total;
+      const rxTxt = (rxT && rxN < rxT)
+        ? `<br><span class="warn">카메라 붙는 중 ${rxN}/${rxT} — 20초쯤 걸립니다</span>`
+        : "";
       if (st.mode === "standby") {
-        msgEl.innerHTML = `<span class="ok">대기 중</span> — 정지화면 (영상 멈춤)`
-          + `<br><span class="vshint">채널을 클릭해 매핑 → 끝나면 ③ 운영 뷰에서 [경보 시작]</span>`;
+        msgEl.innerHTML = `<span class="ok">대기 중</span> — 정지화면 (영상 멈춤)` + rxTxt
+          + `<br><span class="vshint">채널을 클릭해 매핑 → 끝나면 ③ 운영 뷰에서 [🎬 리허설 훈련 시작]</span>`;
       } else {
-        msgEl.innerHTML = `<span class="ok">훈련 재생 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}`
+        msgEl.innerHTML = `<span class="ok">훈련 재생 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}` + rxTxt
           + `<br><span class="vshint">채널을 클릭하면 <b>대기로 돌리고</b> 매핑 화면으로 갑니다</span>`;
       }
     }
@@ -212,17 +222,26 @@ var VSource = (() => {
     const s = current();
     if (!s) return;
     busy = true;
-    msg("대기 송출 준비 중… (첫 프레임 추출)");
+    // 첫 프레임 추출 + pm2 정지 + 리허설 밖 카메라 파킹(워커 재시작 1회)이 걸려
+    // 응답까지 몇 초 걸린다. 진행 표시가 없으면 "안 눌린다"고 오해한다.
+    let dots = 0;
+    const tick = setInterval(() => {
+      dots = (dots + 1) % 4;
+      msg("대기 송출 준비 중" + ".".repeat(dots)
+        + `<br><span class="vshint">첫 프레임 추출 · 상시송출 정지 · 리허설 밖 카메라 정리</span>`);
+    }, 500);
     $("vsStandby").disabled = true;
     try {
       const st = await jpost("/api/vsource/standby", { scenario_id: s.id });
       const n = (st.pm2_stopped || []).length;
-      msg(`<span class="ok">대기 송출 중</span> — ${st.streams.length}채널 정지화면`
-        + (n ? ` · pm2 ${n}개 정지` : "")
-        + `<br>영상은 멈춰 있습니다. 채널을 클릭해 매핑하세요.`, 10);
+      const pk = (st.parked_cams || []).length;
+      msg(`<span class="ok">대기 송출 시작</span> — ${st.streams.length}채널 정지화면`
+        + (n ? ` · pm2 ${n}개 정지` : "") + (pk ? ` · 리허설 밖 카메라 ${pk}대 정리` : "")
+        + `<br><b>카메라가 붙는 데 20초쯤 걸립니다</b> — 아래 채널이 전부 '수신'이 되면 매핑하세요.`, 25);
     } catch (e) {
       msg(`<span class="warn">대기 실패: ${e.message}</span>`, 15);
     } finally {
+      clearInterval(tick);
       busy = false; $("vsStandby").disabled = false; refresh();
     }
   }
