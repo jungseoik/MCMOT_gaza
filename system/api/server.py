@@ -1285,10 +1285,14 @@ def vsource_scenarios():
 
 @app.post("/api/vsource/start")
 async def vsource_start(request: Request):
-    """동시 송출 시작 — body {scenario_id, loop?}.
+    """동시 송출 시작 — body {scenario_id, loop?, attach_sec?}.
 
-    전 채널이 공통 T0에 함께 t=0부터 시작한다(실측 편차 1.7ms). 같은 RTSP 경로를
-    점유 중인 pm2 송출은 자동으로 내린다(경로는 배타적).
+    전 채널이 공통 T0에 함께 시작한다(실측 편차 1.7ms). 같은 RTSP 경로를 점유 중인
+    pm2 송출은 자동으로 내린다(경로는 배타적).
+
+    `attach_sec` — 대기 송출 때 카메라가 다 붙는 데 걸린 실측 시간. 이 값으로
+    앞머리(정지화면) 길이를 정한다. 응답의 `alarm_at` 이 본영상 t=0 시각이며
+    **경보는 그때 걸어야 한다** — T0에 걸면 앞부분이 분석에서 빠진다.
     """
     try:
         body = await request.json()
@@ -1297,9 +1301,11 @@ async def vsource_start(request: Request):
     sid = str(body.get("scenario_id") or "").strip()
     if not sid:
         raise HTTPException(422, "scenario_id 필요")
+    at = body.get("attach_sec")
     try:
         r = vsource.start(sid, loop=bool(body.get("loop", True)),
-                          cameras=rt.cameras())
+                          cameras=rt.cameras(),
+                          attach_sec=float(at) if at else None)
         rt.reload_engine()          # 리허설 매핑 유지 (대기→재생 전환에도 그대로)
         return r
     except FileNotFoundError:

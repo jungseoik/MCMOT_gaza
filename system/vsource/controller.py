@@ -108,6 +108,72 @@ def _alive(pid: int) -> bool:
         return False
 
 
+# 앞머리(정지화면) 길이 — 카메라가 다시 붙는 데 걸리는 시간을 덮어야 한다.
+# 고정 상수를 쓰지 않는다: 대기 송출 때 실제로 붙은 시간을 UI가 재서 넘겨주고,
+# 여기서 여유를 얹는다. 측정이 없을 때만 DEFAULT 를 쓴다.
+LEAD_STILL_MIN = float(os.environ.get("VSOURCE_LEAD_MIN", "20"))
+LEAD_STILL_MAX = float(os.environ.get("VSOURCE_LEAD_MAX", "90"))
+LEAD_STILL_DEFAULT = float(os.environ.get("VSOURCE_LEAD_DEFAULT", "45"))
+LEAD_MARGIN = float(os.environ.get("VSOURCE_LEAD_MARGIN", "12"))   # 측정치에 얹는 여유
+LEAD_DIR = Path("data/vsource_leads")   # 앞머리 mp4 + concat 목록 (캐시)
+
+
+def lead_seconds(attach_sec: float | None) -> float:
+    """앞머리 길이 결정 — 실측 부착시간 + 여유, 범위로 자른다."""
+    if attach_sec and attach_sec > 0:
+        v = attach_sec + LEAD_MARGIN
+    else:
+        v = LEAD_STILL_DEFAULT
+    return round(max(LEAD_STILL_MIN, min(LEAD_STILL_MAX, v)), 1)
+
+
+def _build_lead(file: str, still: Path | None, sec: float) -> str | None:
+    """정지화면 앞머리 mp4 + concat 목록을 만들고 목록 경로를 돌려준다.
+
+    본영상과 **같은 코덱 파라미터**로 인코딩해야 `-c copy` 로 이어붙일 수 있다
+    (실측: 45s 앞머리 인코딩 2.8초, concat 결과 45+181=226.0s).
+    재인코딩 없이 붙으므로 송출 중 CPU 부담은 그대로다.
+    """
+    src = Path(file)
+    if not src.is_file() or still is None or not still.is_file():
+        return None
+    LEAD_DIR.mkdir(parents=True, exist_ok=True)
+    tag = f"{src.stem}_{int(sec)}s"
+    lead_mp4 = LEAD_DIR / f"{tag}.mp4"
+    lst = LEAD_DIR / f"{tag}.txt"
+    if not lead_mp4.is_file() or lead_mp4.stat().st_mtime < still.stat().st_mtime:
+        # key=value 로 읽는다 — 값 순서가 요청 순서와 다르고, profile 은
+        # "Constrained Baseline" 처럼 공백을 포함해 위치 기반 파싱이 깨진다(실측).
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,r_frame_rate",
+             "-of", "default=nk=0:nw=1", str(src)],
+            capture_output=True, text=True, timeout=20)
+        kv = dict(l.split("=", 1) for l in probe.stdout.strip().splitlines()
+                  if "=" in l)
+        w, h = kv.get("width"), kv.get("height")
+        if not w or not h:
+            return None
+        try:
+            num, den = kv.get("r_frame_rate", "30/1").split("/")
+            fps = max(1, round(float(num) / float(den)))
+        except (ValueError, ZeroDivisionError):
+            fps = 30
+        r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-loop", "1", "-i", str(still),
+             "-t", f"{sec:.2f}", "-c:v", "libx264", "-profile:v", "baseline",
+             "-pix_fmt", "yuv420p", "-r", str(fps), "-s", f"{w}x{h}",
+             "-g", str(fps), "-keyint_min", str(fps), "-sc_threshold", "0",
+             "-tune", "stillimage", "-preset", "veryfast", "-an", str(lead_mp4)],
+            capture_output=True, text=True, timeout=120)
+        if r.returncode != 0 or not lead_mp4.is_file():
+            logger.warning("[vsource] 앞머리 생성 실패 %s: %s", src.name, r.stderr[:200])
+            return None
+    lst.write_text(f"file '{lead_mp4.resolve()}'\nfile '{src.resolve()}'\n",
+                   encoding="utf-8")
+    return str(lst)
+
+
 def _still_for(file: str, path: str) -> str | None:
     """영상 첫 프레임을 PNG로 뽑아 캐시. 대기 송출용."""
     STILL_DIR.mkdir(parents=True, exist_ok=True)
@@ -177,8 +243,15 @@ def standby(scenario_id: str, cameras=None) -> dict:
     return status()
 
 
-def start(scenario_id: str, loop: bool = True, cameras=None) -> dict:
-    """시나리오를 동시 송출로 시작. 이미 돌고 있으면 먼저 정지한다."""
+def start(scenario_id: str, loop: bool = True, cameras=None,
+          attach_sec: float | None = None) -> dict:
+    """시나리오를 동시 송출로 시작. 이미 돌고 있으면 먼저 정지한다.
+
+    attach_sec — 대기 송출 때 카메라가 다 붙는 데 걸린 실측 시간(초).
+    이 값으로 앞머리(정지화면) 길이를 정한다. 훈련 시작은 같은 경로의 퍼블리셔를
+    갈아끼우는 것이라 카메라가 전부 떨어졌다 다시 붙는데(실측 27초), 그동안
+    본영상이 흘러가면 앞부분이 분석에서 빠진다. 앞머리를 그만큼 깔아 덮는다.
+    """
     s = sc.load(scenario_id, cameras=cameras)
     if not s.ok:
         raise ValueError("시나리오에 문제가 있어 시작할 수 없습니다: "
@@ -194,25 +267,45 @@ def start(scenario_id: str, loop: bool = True, cameras=None) -> dict:
     if prev and prev.get("pm2_stopped"):     # 직전 단계가 내린 것도 복구 목록에 남긴다
         pm2_stopped = sorted(set(pm2_stopped) | set(prev["pm2_stopped"]))
 
+    lead_sec = lead_seconds(attach_sec)
+    # 앞머리는 **T0를 정하기 전에** 다 만들어 둔다. 캐시가 없으면 채널당 2.3초가
+    # 걸려(실측), T0 계산 뒤에 만들면 6채널에서 T0가 이미 지나버린다 —
+    # 퍼블리셔가 "지나간 사이클"로 보고 다음 바퀴까지 건너뛰어 아무것도 안 나온다.
+    leads = {}
+    for st in s.streams:
+        still = _still_for(st.file, st.path)
+        leads[st.path] = _build_lead(st.file, Path(still) if still else None,
+                                     lead_sec)
     t0 = time.time() + LEAD_SEC
     streams = []
     for st in s.streams:
+        lead_list = leads.get(st.path)
         cmd = [sys.executable, "-m", "system.vsource.publisher",
                "--file", st.file, "--url", rtsp_url(st.path),
                "--t0", f"{t0:.6f}", "--cycle", f"{s.cycle_sec:.6f}"]
+        if lead_list:
+            cmd += ["--lead", lead_list, "--lead-sec", f"{lead_sec:.2f}"]
         if loop:
             cmd.append("--loop")
         streams.append({"path": st.path, "file": st.file,
                         "pid": _spawn(cmd, st.path),
+                        "lead": bool(lead_list),
                         "duration_sec": st.duration_sec})
 
+    has_lead = any(x.get("lead") for x in streams)
     state = {"scenario_id": s.id, "scenario_name": s.name, "mode": "play",
              "t0": t0, "cycle_sec": s.cycle_sec, "loop": bool(loop),
              "started_at": time.time(), "pm2_stopped": pm2_stopped,
-             "floors": s.floors, "streams": streams}
+             "floors": s.floors, "streams": streams,
+             # 앞머리를 깐 경우 본영상 t=0(=경보 시각)은 T0 가 아니라 여기다.
+             "lead_sec": lead_sec if has_lead else 0.0,
+             "attach_measured_sec": attach_sec,
+             "alarm_at": t0 + (lead_sec if has_lead else 0.0)}
     _write_state(state)
-    logger.info("[vsource] 시작: %s · %d채널 · T0=%.3f · 사이클 %.1fs · loop=%s",
-                s.id, len(streams), t0, s.cycle_sec, loop)
+    logger.info("[vsource] 시작: %s · %d채널 · T0=%.3f · 앞머리 %.1fs · "
+                "경보 %.3f · 사이클 %.1fs · loop=%s",
+                s.id, len(streams), t0, state["lead_sec"], state["alarm_at"],
+                s.cycle_sec, loop)
     return status()
 
 
@@ -302,13 +395,17 @@ def status() -> dict:
     now = time.time()
     t0, cycle = float(st["t0"]), float(st["cycle_sec"])
     live = [s for s in st.get("streams", []) if _alive(s.get("pid"))]
-    elapsed = now - t0
+    lead_sec = float(st.get("lead_sec") or 0.0)
+    # 앞머리를 깐 경우 본영상 t=0(=경보 시각)은 T0 가 아니라 T0+앞머리다.
+    # 사이클 위치·경계도 전부 이 기준으로 센다.
+    alarm_at = float(st.get("alarm_at") or t0)
+    elapsed = now - alarm_at
     in_cycle = (elapsed % cycle) if (cycle > 0 and elapsed >= 0) else max(0.0, elapsed)
     # 다음 사이클 경계 — "안 끊고 다음 바퀴에 시작" 모드가 이 값을 쓴다.
     if elapsed < 0:
-        next_at = t0
+        next_at = alarm_at
     elif cycle > 0 and st.get("loop"):
-        next_at = t0 + (int(elapsed // cycle) + 1) * cycle
+        next_at = alarm_at + (int(elapsed // cycle) + 1) * cycle
     else:
         next_at = None
     mode = st.get("mode", "play")
@@ -330,6 +427,12 @@ def status() -> dict:
         "scenario_id": st.get("scenario_id"),
         "scenario_name": st.get("scenario_name"),
         "t0": t0,
+        # 앞머리(정지화면) 구간 — 카메라가 다시 붙는 동안 본영상이 안 흐르게 깐다
+        "lead_sec": lead_sec,
+        "alarm_at": alarm_at,
+        "lead_left_sec": (round(alarm_at - now, 2) if now < alarm_at else 0.0),
+        "in_lead": now < alarm_at,
+        "attach_measured_sec": st.get("attach_measured_sec"),
         "cycle_sec": cycle,
         "loop": bool(st.get("loop")),
         "elapsed_sec": round(elapsed, 3),

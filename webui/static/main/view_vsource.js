@@ -11,6 +11,9 @@ var VSource = (() => {
   let poll = null;
   let inited = false;
   let busy = false;
+  // 대기 송출에서 카메라가 다 붙는 데 걸린 실측 시간 — 훈련 시작 때 앞머리
+  // 길이를 이 값으로 정한다(고정 상수를 쓰지 않는다).
+  let standbyAt = null, attachSec = null;
   // 성공/실패 메시지가 2초 폴링에 덮여 사라지는 걸 막는다 — 눌렀는데 아무 반응이
   // 없어 보이면 또 누르게 된다(추론 모델 패널에서 같은 문제를 겪었다).
   let stickyUntil = 0;
@@ -133,6 +136,9 @@ var VSource = (() => {
     }
     if (msgEl && st && st.running && !busy && Date.now() >= stickyUntil) {
       const rxN = st.cams_receiving, rxT = st.cams_total;
+    if (st.mode === "standby" && rxT && rxN === rxT && standbyAt && attachSec == null) {
+      attachSec = (Date.now() - standbyAt) / 1000;
+    }
       const rxTxt = (rxT && rxN < rxT)
         ? `<br><span class="warn">카메라 붙는 중 ${rxN}/${rxT} — 20초쯤 걸립니다</span>`
         : "";
@@ -202,6 +208,7 @@ var VSource = (() => {
       busy = true;
       msg("매핑을 위해 대기(정지화면)로 전환 중…");
       try {
+        standbyAt = Date.now(); attachSec = null;
         await jpost("/api/vsource/standby", { scenario_id: st.scenario_id });
         msg(`<span class="ok">대기로 전환</span> — 영상이 멈췄습니다. 매핑하세요.`
           + `<br>끝나면 ③ 운영 뷰 [경보 시작]이 처음부터 다시 재생합니다.`, 10);
@@ -261,6 +268,7 @@ var VSource = (() => {
     }, 500);
     $("vsStandby").disabled = true;
     try {
+      standbyAt = Date.now(); attachSec = null;   // 부착시간 측정 시작
       const st = await jpost("/api/vsource/standby", { scenario_id: s.id });
       const n = (st.pm2_stopped || []).length;
       msg(`<span class="ok">대기 송출 시작</span> — ${st.streams.length}채널 정지화면`
@@ -319,6 +327,11 @@ var VSource = (() => {
       step = "standby"; txt = `대기 송출 준비 중 — 카메라 붙는 중 ${rxN}/${rxT} (20초쯤 걸립니다)`;
     } else if (st.mode === "standby") {
       step = "map"; txt = "대기 중(정지화면) — 매핑할 채널을 클릭하거나, ③ 운영 뷰에서 [🎬 리허설 훈련 시작]";
+    } else if (st.in_lead) {
+      // 앞머리 = 정지화면으로 카메라 복귀를 덮는 구간. 본영상은 아직 안 흐른다.
+      step = "run";
+      txt = `🎬 훈련 시작까지 ${Math.ceil(st.lead_left_sec)}초 — 정지화면으로 `
+          + `카메라 복귀를 덮는 중 (${rxN}/${rxT})`;
     } else if (!allRx) {
       step = "run"; txt = `훈련 재생 중 · 위치 ${fmtSec(st.cycle_pos_sec)} — 카메라 붙는 중 ${rxN}/${rxT}`;
     } else {
@@ -332,7 +345,7 @@ var VSource = (() => {
       li.classList.toggle("cur", i === cur);
     });
     lab.textContent = txt;
-    lab.classList.toggle("warn", busy || (running && !allRx));
+    lab.classList.toggle("warn", busy || (running && (!allRx || st.in_lead)));
     if ($("rhChanN")) $("rhChanN").textContent = (st && st.streams || []).length;
   }
 
@@ -354,6 +367,8 @@ var VSource = (() => {
 
   return {
     init, refresh, startDrill,
+    // 대기 송출 실측 부착시간 — session.js 가 앞머리 길이를 정하는 데 쓴다
+    get attachSec() { return attachSec; },
     // ⑤ 탭 진입점 — App.switchView 가 부른다
     enter() { init(); refresh(); },
     leave() {},

@@ -208,14 +208,17 @@ const Session = (() => {
     try {
       const st = await (await fetch("/api/vsource/status")).json();
       if (!st || !st.running || st.mode !== "standby") return null;
+      // 대기 송출에서 실측한 부착시간을 넘긴다 — 서버가 그 길이만큼 앞머리를 깐다
+      const at = (typeof VSource !== "undefined" && VSource.attachSec) || null;
       const r = await fetch("/api/vsource/start", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario_id: st.scenario_id, loop: false }),
+        body: JSON.stringify({ scenario_id: st.scenario_id, loop: false,
+                               attach_sec: at }),
       });
       if (!r.ok) return null;
       const d = await r.json();
-      hint(`리허설 영상 재생 시작 — 전 채널 t=0. 카메라 복귀에 20~25초 걸립니다.`);
-      return { t0: d.t0 || null, floors: d.floors || [] };
+      return { t0: d.t0 || null, floors: d.floors || [],
+               alarmAt: d.alarm_at || d.t0 || null, leadSec: d.lead_sec || 0 };
     } catch (e) { return null; }
   }
 
@@ -228,7 +231,32 @@ const Session = (() => {
     if (live || drillActive) return;
     const r = await startRehearsalIfStandby();
     if (!r) { hint("리허설이 대기 중이 아닙니다 — ⑤ 리허설에서 [대기 송출]을 먼저 켜세요.", true); return; }
-    return _startAlarm(r.t0, r.floors);
+    // 앞머리(정지화면) 구간이 있으면 그게 끝나는 순간 = 본영상 t=0 = 경보 시각.
+    // 그 전에 경보를 걸면 카메라가 아직 안 붙어 영상 앞부분이 분석에서 빠진다.
+    if (r.leadSec > 0 && r.alarmAt) {
+      await waitForAlarm(r.alarmAt, r.leadSec);
+    }
+    return _startAlarm(r.alarmAt || r.t0, r.floors);
+  }
+
+  /** 앞머리가 끝날 때까지 대기 — 남은 시간과 카메라 복귀 상태를 보여준다. */
+  async function waitForAlarm(alarmAt, leadSec) {
+    const btn = document.getElementById("sessRehearsalBtn");
+    if (btn) btn.disabled = true;
+    try {
+      while (true) {
+        const left = alarmAt - Date.now() / 1000;
+        if (left <= 0.15) break;
+        let rx = "";
+        try {
+          const st = await (await fetch("/api/vsource/status")).json();
+          if (st && st.cams_total) rx = ` · 카메라 ${st.cams_receiving}/${st.cams_total}`;
+        } catch (e) { /* 무시 */ }
+        hint(`🎬 훈련 시작까지 ${left.toFixed(0)}초${rx}`
+             + ` — 정지화면 ${leadSec.toFixed(0)}초로 카메라 복귀를 덮는 중`);
+        await new Promise((z) => setTimeout(z, 1000));
+      }
+    } finally { if (btn) btn.disabled = false; }
   }
 
   async function _startAlarm(tAlarm, scopeFloors) {

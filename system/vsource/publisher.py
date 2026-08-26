@@ -35,9 +35,24 @@ def sleep_until(ts: float) -> None:
         time.sleep(d * 0.9 if d > 0.005 else 0)
 
 
-def ffmpeg_cmd(file: str, url: str) -> list[str]:
-    # -c:v copy — 재인코딩하면 채널당 CPU 인코더가 붙어 9채널이면 CPU가 먼저 막힌다.
-    return FFMPEG_BASE + ["-i", file, "-c:v", "copy", "-an",
+def ffmpeg_cmd(file: str, url: str, lead: str | None = None) -> list[str]:
+    """본영상 송출. lead 를 주면 그 앞머리를 먼저 내보낸 뒤 이어서 본영상.
+
+    **앞머리가 왜 필요한가.** 훈련 시작은 같은 RTSP 경로의 퍼블리셔를 정지화면에서
+    본영상으로 갈아끼우는 것이라, 붙어 있던 카메라가 전부 떨어졌다 다시 붙는다
+    (실측 27초). 그동안 본영상이 흘러가면 **영상 앞부분이 통째로 분석에서 빠진다**
+    — 경보 직후 구간이라 IDR 이 특히 망가진다.
+
+    앞머리(정지화면)를 붙이면 카메라는 그 구간에 복귀하고, 본영상 t=0 이 경보
+    시각과 맞는다. 전 채널이 같은 길이를 붙이므로 동기는 그대로다.
+    concat demuxer 라 **재인코딩이 없다** (실측 45+181=226.0s, -c copy).
+    """
+    if not lead:
+        # -c:v copy — 재인코딩하면 채널당 CPU 인코더가 붙어 9채널이면 CPU가 먼저 막힌다.
+        return FFMPEG_BASE + ["-i", file, "-c:v", "copy", "-an",
+                              "-f", "rtsp", "-rtsp_transport", "tcp", url]
+    return FFMPEG_BASE + ["-f", "concat", "-safe", "0", "-i", lead,
+                          "-c:v", "copy", "-an",
                           "-f", "rtsp", "-rtsp_transport", "tcp", url]
 
 
@@ -74,9 +89,16 @@ def run_standby(still: str, url: str) -> int:
         time.sleep(1.0)
 
 
-def run(file: str, url: str, t0: float, cycle_sec: float, loop: bool) -> int:
-    """사이클 격자에 맞춰 송출. loop=False면 1회만."""
+def run(file: str, url: str, t0: float, cycle_sec: float, loop: bool,
+        lead: str | None = None, lead_sec: float = 0.0) -> int:
+    """사이클 격자에 맞춰 송출. loop=False면 1회만.
+
+    lead 를 주면 **첫 바퀴만** 앞머리(정지화면)를 먼저 내보낸다. 그래서
+    본영상 t=0 시각은 `t0 + lead_sec` 이고, 사이클 격자도 거기서부터 센다
+    — 두 바퀴째부터는 앞머리 없이 본영상만 돈다.
+    """
     proc: subprocess.Popen | None = None
+    base = t0 + (lead_sec if lead else 0.0)     # 본영상 t=0 시각 (= 경보 시각)
 
     def _bye(*_a):
         if proc and proc.poll() is None:
@@ -88,17 +110,19 @@ def run(file: str, url: str, t0: float, cycle_sec: float, loop: bool) -> int:
 
     n = 0
     while True:
-        start_at = t0 + n * cycle_sec
+        first = (n == 0 and bool(lead))
+        # 첫 바퀴는 앞머리를 포함하므로 lead_sec 만큼 일찍 띄운다.
+        start_at = (t0 if first else base + n * cycle_sec)
         # 이미 지나간 사이클은 건너뛴다(늦게 spawn 됐거나 재부착한 경우) —
         # 중간부터 틀면 다른 채널과 위치가 어긋나므로 다음 경계를 기다린다.
         if start_at < time.time() - 0.5:
             if not loop:
                 return 0
-            n = max(n + 1, math.ceil((time.time() - t0) / cycle_sec))
+            n = max(n + 1, math.ceil((time.time() - base) / cycle_sec))
             continue
         sleep_until(start_at)
-        proc = subprocess.Popen(ffmpeg_cmd(file, url))
-        deadline = t0 + (n + 1) * cycle_sec if loop else None
+        proc = subprocess.Popen(ffmpeg_cmd(file, url, lead if first else None))
+        deadline = base + (n + 1) * cycle_sec if loop else None
         while proc.poll() is None:
             if deadline is not None and time.time() >= deadline:
                 proc.terminate()                    # 사이클 경계 — 다음 바퀴를 밀지 않는다
@@ -122,6 +146,10 @@ def main() -> int:
     ap.add_argument("--loop", action="store_true")
     ap.add_argument("--standby", metavar="STILL",
                     help="대기 모드 — 이 이미지를 계속 송출(본영상 대신)")
+    ap.add_argument("--lead", metavar="LIST",
+                    help="첫 바퀴 앞머리 concat 목록 (정지화면 + 본영상)")
+    ap.add_argument("--lead-sec", type=float, default=0.0,
+                    help="앞머리 길이(s) — 본영상 t=0 은 t0+이 값")
     a = ap.parse_args()
     if a.standby:
         return run_standby(a.standby, a.url)
@@ -129,7 +157,8 @@ def main() -> int:
         ap.error("--file 이 필요합니다 (대기 모드가 아니면)")
     # 프로세스 그룹은 만들지 않는다 — 컨트롤러가 start_new_session=True 로 띄우므로
     # 이미 세션·그룹 리더다. 여기서 setpgrp()를 부르면 EPERM으로 죽는다(실측).
-    return run(a.file, a.url, a.t0, a.cycle, a.loop)
+    return run(a.file, a.url, a.t0, a.cycle, a.loop,
+               lead=a.lead, lead_sec=a.lead_sec)
 
 
 if __name__ == "__main__":
