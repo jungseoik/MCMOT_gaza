@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import signal
 import subprocess
@@ -133,7 +134,11 @@ def lead_seconds(attach_sec: float | None) -> float:
         logger.warning("[vsource] 앞머리가 상한에 걸림: 필요 %.1fs > 상한 %.1fs — "
                        "영상 앞부분이 유실될 수 있다. VSOURCE_LEAD_MAX 를 올려라.",
                        v, LEAD_STILL_MAX)
-    return round(max(LEAD_STILL_MIN, min(LEAD_STILL_MAX, v)), 1)
+    # **정수 초로 올린다.** 앞머리 길이는 채널마다 그 영상의 프레임 주기로
+    # 반올림되는데, 정수 초면 어떤 정수 fps 로도 정확히 나눠떨어져 전 채널의
+    # 앞머리가 **같은 길이**가 된다. 소수를 쓰면 24fps 52.9167s vs 30fps 52.900s
+    # 처럼 16.7ms 어긋나고(실측), 그만큼 본영상 시작이 채널마다 밀린다.
+    return float(math.ceil(max(LEAD_STILL_MIN, min(LEAD_STILL_MAX, v))))
 
 
 def _build_lead(file: str, still: Path | None, sec: float) -> str | None:

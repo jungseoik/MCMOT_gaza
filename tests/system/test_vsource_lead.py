@@ -1,11 +1,14 @@
 """앞머리(정지화면) 길이 산정 — 고정 상수가 아니라 실측 부착시간에서 나온다."""
+import math
+
 from system.vsource import controller as c
 
 
 class TestLeadSeconds:
     def test_measured_attach_plus_margin(self):
-        """실측이 있으면 그 값 + 여유. 카메라 복귀를 덮어야 하므로 반드시 더 크다."""
-        assert c.lead_seconds(23.0) == 23.0 + c.LEAD_MARGIN
+        """실측이 있으면 그 값 + 여유(정수 초로 올림).
+        카메라 복귀를 덮어야 하므로 반드시 더 크다."""
+        assert c.lead_seconds(23.0) == math.ceil(23.0 + c.LEAD_MARGIN)
         assert c.lead_seconds(23.0) > 23.0
 
     def test_no_measurement_uses_default(self):
@@ -52,7 +55,7 @@ class TestScaling:
     def test_cap_raised_above_measured_12ch_need(self):
         """12채널 실측 부착 40.9s → 앞머리 52.9s. 상한이 그보다 넉넉해야 한다."""
         assert c.LEAD_STILL_MAX >= 52.9 * 2, "채널이 더 늘 여지를 둬야 한다"
-        assert c.lead_seconds(40.9) == 40.9 + c.LEAD_MARGIN   # 안 잘린다
+        assert c.lead_seconds(40.9) == math.ceil(40.9 + c.LEAD_MARGIN)  # 안 잘린다
 
     def test_over_cap_warns(self, caplog):
         """상한에 걸리면 조용히 자르지 않는다 — 앞부분이 유실되기 때문."""
@@ -68,3 +71,28 @@ class TestScaling:
         assert c._parallel(lambda x: x * 2, items) == [x * 2 for x in items]
         assert c._parallel(lambda x: x, []) == []
         assert c._parallel(lambda x: x, [7]) == [7]
+
+
+class TestLeadWholeSeconds:
+    """앞머리는 정수 초여야 한다 — 채널마다 fps 가 다를 수 있다."""
+
+    def test_always_whole_seconds(self):
+        """소수 초면 채널의 프레임 주기로 반올림돼 길이가 어긋난다.
+        실측: -t 52.9 → 24fps 52.9167s vs 30fps 52.900s (16.7ms 차이).
+        정수 초면 어떤 정수 fps 로도 정확히 나눠떨어진다."""
+        for a in (None, 5, 23.1, 40.9, 88.3, 500):
+            v = c.lead_seconds(a)
+            assert v == int(v), f"attach={a} → {v} 는 정수가 아니다"
+
+    def test_whole_seconds_divide_evenly_at_any_fps(self):
+        for a in (23.1, 40.9):
+            sec = c.lead_seconds(a)
+            for fps in (15, 24, 25, 30, 50, 60):
+                frames = sec * fps
+                assert frames == int(frames), f"{sec}s @ {fps}fps 가 안 나눠떨어진다"
+
+    def test_still_covers_attach(self):
+        """올림해도 부착시간보다 반드시 길어야 한다(짧으면 앞부분 유실)."""
+        for a in (5.0, 23.1, 40.9, 88.3):
+            if a + c.LEAD_MARGIN <= c.LEAD_STILL_MAX:
+                assert c.lead_seconds(a) >= a
