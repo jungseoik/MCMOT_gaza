@@ -151,6 +151,7 @@ var VSource = (() => {
           : `▶ 리허설 재생 중 · ${fmtSec(st.cycle_pos_sec)}`;
       }
     }
+    renderSteps(st);
     const rb = $("sessRehearsalBtn"), sb = $("sessBtn");
     if (rb && sb) {
       const standby = !!(st && st.running && st.mode === "standby");
@@ -164,7 +165,7 @@ var VSource = (() => {
 
   async function refresh() {
     try { renderStatus(await jget("/api/vsource/status")); }
-    catch (e) { /* 일시 오류 무시 */ }
+    catch (e) { renderSteps(null); }
   }
 
   /** 매핑하러 간다 — 재생 중이면 먼저 대기(정지화면)로 돌린다.
@@ -183,12 +184,15 @@ var VSource = (() => {
         msg(`<span class="warn">전환 실패: ${e.message}</span>`, 12);
       } finally { busy = false; refresh(); }
     }
-    if (typeof Views !== "undefined" && Views.cams && Views.cams.selectCamera) {
-      Views.cams.selectCamera(camId);
-      // 가운데(카메라 프레임 | 맵)가 매핑 화면이다 — 거기로 시선을 옮긴다
-      const duo = document.querySelector("#viewCams .duo");
-      if (duo) duo.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    // 매핑 화면은 ② 다 — 리허설 탭에서 눌렀으면 거기로 데려간다.
+    if (typeof App !== "undefined" && App.view !== "cams") App.switchView("cams");
+    setTimeout(() => {
+      if (typeof Views !== "undefined" && Views.cams && Views.cams.selectCamera) {
+        Views.cams.selectCamera(camId);
+        const duo = document.querySelector("#viewCams .duo");
+        if (duo) duo.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 300);
   }
 
   // ------------------------------------------------------------ 제어
@@ -234,9 +238,8 @@ var VSource = (() => {
     try {
       const st = await jpost("/api/vsource/standby", { scenario_id: s.id });
       const n = (st.pm2_stopped || []).length;
-      const pk = (st.parked_cams || []).length;
       msg(`<span class="ok">대기 송출 시작</span> — ${st.streams.length}채널 정지화면`
-        + (n ? ` · pm2 ${n}개 정지` : "") + (pk ? ` · 리허설 밖 카메라 ${pk}대 정리` : "")
+        + (n ? ` · pm2 ${n}개 정지` : "")
         + `<br><b>카메라가 붙는 데 20초쯤 걸립니다</b> — 아래 채널이 전부 '수신'이 되면 매핑하세요.`, 25);
     } catch (e) {
       msg(`<span class="warn">대기 실패: ${e.message}</span>`, 15);
@@ -274,5 +277,47 @@ var VSource = (() => {
     if (!poll) poll = setInterval(refresh, 2000);
   }
 
-  return { init, refresh };
+  /** 단계 표시 — 지금 어디인지 한 줄로. 상태가 여럿이라 헷갈린다는 지적 반영. */
+  function renderSteps(st) {
+    const box = $("rhSteps"), lab = $("rhState");
+    if (!box || !lab) return;
+    const running = !!(st && st.running);
+    const rxN = st && st.cams_receiving, rxT = st && st.cams_total;
+    const allRx = running && rxT && rxN === rxT;
+    let step, txt;
+    if (busy) {                       // 요청 처리 중 — 직전 상태를 보여 오해를 만들지 않는다
+      step = "standby"; txt = "전환 중… (첫 프레임 추출 · 상시송출 정지)";
+    } else if (!running) {
+      step = "pick"; txt = "리허설이 꺼져 있습니다 — 시나리오를 고르고 [⏸ 대기 송출 시작].";
+    } else if (st.mode === "standby" && !allRx) {
+      step = "standby"; txt = `대기 송출 준비 중 — 카메라 붙는 중 ${rxN}/${rxT} (20초쯤 걸립니다)`;
+    } else if (st.mode === "standby") {
+      step = "map"; txt = "대기 중(정지화면) — 매핑할 채널을 클릭하거나, ③ 운영 뷰에서 [🎬 리허설 훈련 시작]";
+    } else if (!allRx) {
+      step = "run"; txt = `훈련 재생 중 · 위치 ${fmtSec(st.cycle_pos_sec)} — 카메라 붙는 중 ${rxN}/${rxT}`;
+    } else {
+      step = "run"; txt = `훈련 재생 중 · 위치 ${fmtSec(st.cycle_pos_sec)} · 전 채널 수신`;
+    }
+    const order = ["pick", "standby", "map", "run"];
+    const cur = order.indexOf(step);
+    box.querySelectorAll("li").forEach((li) => {
+      const i = order.indexOf(li.dataset.step);
+      li.classList.toggle("done", i < cur);
+      li.classList.toggle("cur", i === cur);
+    });
+    lab.textContent = txt;
+    lab.classList.toggle("warn", busy || (running && !allRx));
+    if ($("rhChanN")) $("rhChanN").textContent = (st && st.streams || []).length;
+  }
+
+  return {
+    init, refresh,
+    // ⑤ 탭 진입점 — App.switchView 가 부른다
+    enter() { init(); refresh(); },
+    leave() {},
+  };
 })();
+
+// 화면 5 = 리허설 (view_map/view_cams 와 같은 규약)
+var Views = window.Views || (window.Views = {});
+Views.rehearsal = VSource;

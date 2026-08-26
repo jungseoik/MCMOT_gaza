@@ -1278,39 +1278,6 @@ async def vsource_start(request: Request):
         raise HTTPException(409, str(e))
 
 
-def _vsource_park(cam_ids: list[str], enabled: bool) -> list[str]:
-    """리허설 밖 카메라를 잠시 끄고 되살린다 (vsource 가 호출).
-
-    시나리오에 없는 카메라를 켜둔 채 두면 그 층까지 건물 훈련 참여 층으로 잡혀
-    리허설과 무관한 실영상이 지표에 섞인다(ADR 08 §5-1).
-
-    **여러 대를 한 번에** 처리한다 — 하나씩 update_camera 하면 그때마다 워커가
-    재시작돼 3대에 20초가 걸린다(실측). update_cameras 가 슬롯당 1회로 묶는다.
-    """
-    want = bool(enabled)
-    cams = {c.cam_id: c for c in rt.cameras()}
-    changed = []
-    for cid in cam_ids:
-        cam = cams.get(cid)
-        if cam is None or bool(cam.enabled) == want:
-            continue
-        cfg = CameraConfig.model_validate({**cam.model_dump(), "enabled": want})
-        rt.store.save_camera(SITE_ID, cfg)
-        changed.append(cfg)
-    if changed:
-        upd = getattr(rt.ingest, "update_cameras", None)
-        if callable(upd):
-            upd(changed)                      # 슬롯당 재시작 1회
-        else:                                 # ffmpeg 백엔드 폴백
-            for cfg in changed:
-                rt.ingest.update_camera(cfg)
-        rt.reload_engine()                    # 엔진 재적재도 1회
-    return [c.cam_id for c in changed]
-
-
-vsource.set_park_hook(_vsource_park)
-
-
 @app.post("/api/vsource/standby")
 async def vsource_standby(request: Request):
     """대기 송출 — body {scenario_id}.

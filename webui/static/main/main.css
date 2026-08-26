@@ -552,3 +552,26 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 /* vsource 메시지 강조 */
 .grow .ok{ color:#3FB950; }
 .grow .warn{ color:var(--warning); }
+
+/* ---------------- 화면 5: 리허설 ---------------- */
+.workarea.rh{ align-items:flex-start; }
+.rhmain{ flex:1; min-width:0; display:flex; flex-direction:column; gap:12px;
+  background:var(--bg-1); border:1px solid var(--stroke-1); border-radius:var(--r-lg); padding:16px 18px; }
+/* 단계 표시 — 지금 어디인지가 제일 먼저 보여야 한다 */
+.rhsteps{ display:flex; gap:8px; list-style:none; margin:0; padding:0; flex-wrap:wrap; }
+.rhsteps li{ flex:1; min-width:150px; display:flex; align-items:center; gap:8px;
+  background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-md);
+  padding:9px 12px; font-size:13px; color:var(--text-3); }
+.rhsteps li b{ width:20px; height:20px; border-radius:50%; background:var(--bg-4);
+  color:var(--text-3); font-size:11px; display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.rhsteps li i{ font-style:normal; font-size:11px; opacity:.7; }
+.rhsteps li.done{ color:var(--text-2); border-color:var(--stroke-2); }
+.rhsteps li.done b{ background:#3FB950; color:#fff; }
+.rhsteps li.cur{ color:var(--pia-cyan); border-color:var(--pia-cyan); background:rgba(48,220,251,.10); }
+.rhsteps li.cur b{ background:var(--pia-cyan); color:#06212b; }
+.rhstate{ font-size:14px; color:var(--text-2); padding:10px 12px; background:var(--bg-2);
+  border:1px solid var(--stroke-1); border-radius:var(--r-md); }
+.rhstate.warn{ color:var(--warning); border-color:var(--warning); }
+.rhbody{ display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; }
+.rhcol{ flex:1; min-width:320px; display:flex; flex-direction:column; gap:8px; }
+.rhbtns{ display:flex; gap:8px; align-items:center; }

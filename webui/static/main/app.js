@@ -140,13 +140,13 @@ const App = {
   switchView(v) {
     if (Views[App.view] && Views[App.view].leave) Views[App.view].leave();
     App.view = v;
-    ["map", "cams", "live", "replay"].forEach((k) => {
+    ["map", "cams", "live", "replay", "rehearsal"].forEach((k) => {
       document.getElementById("view" + k[0].toUpperCase() + k.slice(1))
         .classList.toggle("hidden", k !== v);
     });
     document.querySelectorAll(".vbtn").forEach((b) =>
       b.classList.toggle("on", b.dataset.view === v));
-    Views[v].enter();
+    if (Views[v] && Views[v].enter) Views[v].enter();
     // 훈련영상 송출(ADR 08) — 제어는 ②, 상태 칩은 ③. 화면과 무관하게 상태만 유지.
     if (typeof VSource !== "undefined") { VSource.init(); VSource.refresh(); }
   },

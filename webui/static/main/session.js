@@ -215,7 +215,7 @@ const Session = (() => {
       if (!r.ok) return null;
       const d = await r.json();
       hint(`리허설 영상 재생 시작 — 전 채널 t=0. 카메라 복귀에 20~25초 걸립니다.`);
-      return d.t0 || null;
+      return { t0: d.t0 || null, floors: d.floors || [] };
     } catch (e) { return null; }
   }
 
@@ -226,18 +226,26 @@ const Session = (() => {
    *  ③ 에 리허설 대기 중일 때만 나타나는 별도 버튼이 부른다. */
   async function onRehearsalBtn() {
     if (live || drillActive) return;
-    return _startAlarm(await startRehearsalIfStandby());
+    const r = await startRehearsalIfStandby();
+    if (!r) { hint("리허설이 대기 중이 아닙니다 — ⑤ 리허설에서 [대기 송출]을 먼저 켜세요.", true); return; }
+    return _startAlarm(r.t0, r.floors);
   }
 
-  async function _startAlarm(tAlarm) {
+  async function _startAlarm(tAlarm, scopeFloors) {
     if (live || drillActive) return;
     // 참여 층 = 카메라가 매핑된 층(추적이 실제로 일어나는 층). 2개 이상이면 건물 드릴.
     let cams = [];
     try { cams = await API.getCameras(); } catch (e) { /* 폴백: 단일 층 */ }
     // 매핑 + 활성이어야 참여 층 — 비활성은 수신을 안 해 추적이 없다
     // (백엔드 RT.participating_floors 와 같은 규칙).
-    const parts = [...new Set(cams.filter((c) => c.mapping && c.enabled)
+    let parts = [...new Set(cams.filter((c) => c.mapping && c.enabled)
       .map((c) => c.floor_id || "default"))];
+    // 리허설이면 그 시나리오가 다루는 층으로만 좁힌다 — 카메라를 끄지 않고도
+    // 무관한 층(예: 17F 실영상)이 훈련 지표에 섞이지 않게 한다.
+    if (scopeFloors && scopeFloors.length) {
+      parts = parts.filter((f) => scopeFloors.includes(f));
+      if (!parts.length) { hint("리허설 시나리오의 층에 매핑된 카메라가 없습니다.", true); return; }
+    }
 
     if (parts.length >= 2) {
       const missing = parts.filter((f) => !(drillOrigins[f] && drillOrigins[f].length));

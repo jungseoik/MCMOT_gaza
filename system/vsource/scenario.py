@@ -75,22 +75,6 @@ class Scenario:
         """이 시나리오가 다루는 층 — 매칭된 카메라의 소속 층."""
         return sorted({s.cam_floor for s in self.streams if s.cam_floor})
 
-    def outside_cams(self, cameras) -> list[str]:
-        """시나리오 밖인데 켜져 있는 카메라 id.
-
-        리허설은 준비한 영상이 전부여야 한다. 다른 층에서 돌던 카메라를 그대로
-        두면 그 층까지 건물 훈련 참여 층으로 잡혀(경보 원점을 요구하고 롤업에도
-        섞인다) 리허설과 무관한 실영상이 지표에 들어간다.
-        """
-        mine = {s.cam_id for s in self.streams if s.cam_id}
-        out = []
-        for c in cameras or []:
-            get = (lambda k, d=None: getattr(c, k, d)) if not isinstance(c, dict) \
-                else (lambda k, d=None: c.get(k, d))
-            if get("enabled") and get("cam_id") not in mine:
-                out.append(get("cam_id"))
-        return sorted(out)
-
     def to_dict(self) -> dict:
         return {
             "id": self.id, "name": self.name, "note": self.note,
