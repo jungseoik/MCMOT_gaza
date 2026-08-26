@@ -302,15 +302,14 @@
 
   <!-- ====================== 화면 2: 카메라 등록·매핑 ====================== -->
   <section id="viewCams" class="view hidden">
-    <div class="rhbanner" id="rhBanner">
-      <b>🎬 리허설 매핑 모드</b> — 지금 잡는 매핑은 <b>이 리허설에만</b> 저장됩니다.
-      기존 카메라의 현장용 매핑은 그대로 남습니다.
-      <span id="rhBannerWho"></span>
-    </div>
     <div class="workarea">
       <aside class="side left">
         <div class="sidehead">카메라 목록 <span id="camListDefConf" class="hdr-def" title="사이트 전역 기본 검출 신뢰도 — 카메라별로 비워두면 이 값을 상속">기본 conf —</span></div>
         <div class="sidebody">
+          <div class="rhbanner" id="rhBanner" title="리허설 중에 잡는 매핑은 시나리오에만 저장되고, 원래 카메라 매핑은 그대로 남습니다">
+            🎬 <b>리허설 매핑</b> — 원본 매핑은 안 건드림
+            <span id="rhBannerWho"></span>
+          </div>
           <div id="camList" class="camlist"></div>
           <button class="btn sm hidden" id="camEnableMapped" style="width:100%"
             title="매핑을 끝냈지만 비활성인 카메라를 한 번에 켭니다 — 워커 재시작 1회">

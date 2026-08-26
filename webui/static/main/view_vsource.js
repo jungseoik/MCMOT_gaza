@@ -159,12 +159,23 @@ var VSource = (() => {
     renderSteps(st);
     const sd = $("vsStartDrill");
     if (sd) sd.disabled = !(st && st.running && st.mode === "standby");
-    // ②에 "지금 잡는 매핑은 리허설용" 배너 — 어디에 저장되는지 오해를 막는다
-    document.body.classList.toggle("rehearsing", !!(st && st.running));
+    // ② 카메라 목록이 "어느 게 리허설 채널인지" 를 알아야 한다 — 9대가 나란히
+    // 있으면 구분이 안 간다. 상태가 바뀐 순간에만 다시 그린다.
+    const wasOn = !!(window.VSourceState && window.VSourceState.running);
+    const nowOn = !!(st && st.running);
+    const key = nowOn ? (st.streams || []).map((x) => x.cam_id).join(",") : "";
+    const prevKey = window.VSourceState && window.VSourceState._key;
+    window.VSourceState = st ? { ...st, _key: key } : null;
+    document.body.classList.toggle("rehearsing", nowOn);
+    if ((wasOn !== nowOn || prevKey !== key)
+        && typeof Views !== "undefined" && Views.cams && Views.cams.renderList) {
+      Views.cams.renderList();
+    }
     const who = $("rhBannerWho");
-    if (who && st && st.running) {
-      who.textContent = `시나리오: ${st.scenario_name || st.scenario_id}`
-        + (st.own_mapped ? ` · 리허설 매핑 ${st.own_mapped}개` : " · 아직 전부 원래 매핑 상속");
+    if (who && nowOn) {
+      const n = (st.streams || []).length;
+      who.textContent = `${st.scenario_name || st.scenario_id} · ${n}채널`
+        + (st.own_mapped ? ` · 리허설 매핑 ${st.own_mapped}` : "");
     }
     const rb = $("sessRehearsalBtn"), sb = $("sessBtn");
     if (rb && sb) {

@@ -579,7 +579,14 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
   border-radius:3px; padding:0 4px; white-space:nowrap; margin-left:4px; }
 .vsmp.on{ color:var(--pia-cyan); border-color:var(--pia-cyan); }
 /* ② 리허설 중 배너 — 매핑이 어디로 저장되는지 오해가 없게 */
-.rhbanner{ display:none; margin:0 0 10px; padding:9px 12px; font-size:13px;
-  background:rgba(48,220,251,.10); border:1px solid var(--pia-cyan);
-  border-radius:var(--r-md); color:var(--text-1); }
+/* 리허설 배너 — 카메라 목록 위 한 줄. 전에는 전체 폭 블록이라 화면을 밀었다. */
+.rhbanner{ display:none; margin:0 0 6px; padding:5px 8px; font-size:11px; line-height:1.45;
+  background:rgba(48,220,251,.08); border:1px solid var(--pia-cyan);
+  border-radius:var(--r-sm); color:var(--text-2); }
+.rhbanner b{ color:var(--pia-cyan); }
+.rhbanner #rhBannerWho{ display:block; color:var(--text-3); }
 body.rehearsing .rhbanner{ display:block; }
+/* 카메라 목록에서 리허설 채널 구분 */
+.rhb{ font-size:10px; padding:0 4px; border-radius:3px; white-space:nowrap;
+  color:var(--pia-cyan); border:1px solid var(--pia-cyan); background:rgba(48,220,251,.10); }
+.rhb.off{ color:var(--text-3); border-color:var(--stroke-2); background:none; }

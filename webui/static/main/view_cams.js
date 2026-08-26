@@ -124,6 +124,18 @@ Views.cams = (() => {
     return seg || m;
   }
 
+  /** 리허설 채널인지 — 목록에서 바로 구분돼야 한다.
+   *  9대가 나란히 있으면 어느 게 리허설 영상을 받는 중인지 알 수 없다. */
+  function rhBadge(cam) {
+    const st = window.VSourceState;
+    if (!st || !st.running) return "";
+    const s = (st.streams || []).find((x) => x.cam_id === cam.cam_id);
+    if (s) return `<span class="rhb" title="리허설 채널 — ${s.file || s.path}">🎬 리허설</span>`;
+    // 꺼진 카메라는 어차피 아무것도 안 받는다 — 배지가 붙으면 노이즈만 된다.
+    if (!cam.enabled) return "";
+    return `<span class="rhb off" title="리허설 밖 — 평소 스트림을 그대로 받습니다. 훈련 지표에는 안 들어갑니다">평상</span>`;
+  }
+
   function renderList() {
     const box = $("camList");
     box.innerHTML = "";
@@ -157,6 +169,7 @@ Views.cams = (() => {
       div.innerHTML = `
         <div class="r1"><span class="dotc" style="background:${camColor(c.cam_id, App.cameras)}"></span>
           <span class="nm" title="${c.name || c.cam_id}">${c.name || c.cam_id}</span>
+          ${rhBadge(c)}
           ${c.mapping ? badge("ok", "매핑 ✓") : badge("warn", "매핑 필요")}
           <button class="del" title="삭제">🗑</button></div>
         <div class="r2"><span class="cid">${c.cam_id}</span>
