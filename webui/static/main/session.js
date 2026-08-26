@@ -89,6 +89,7 @@ const Session = (() => {
     if (inited) return;
     inited = true;
     $("sessBtn").onclick = onBtn;
+    if ($("sessRehearsalBtn")) $("sessRehearsalBtn").onclick = onRehearsalBtn;
     $("sessStopBtn").onclick = stop;
     $("alarmAddBtn").onclick = toggleAdding;
     $("alarmClearBtn").onclick = () => {
@@ -218,7 +219,17 @@ const Session = (() => {
     } catch (e) { return null; }
   }
 
-  async function onBtn() {
+  /** 평상시 경보 시작 — 리허설과 무관하게 기존 동작 그대로. */
+  async function onBtn() { return _startAlarm(null); }
+
+  /** 리허설 훈련 시작 — 영상 t=0 재생과 경보를 같은 시각으로 묶는다.
+   *  ③ 에 리허설 대기 중일 때만 나타나는 별도 버튼이 부른다. */
+  async function onRehearsalBtn() {
+    if (live || drillActive) return;
+    return _startAlarm(await startRehearsalIfStandby());
+  }
+
+  async function _startAlarm(tAlarm) {
     if (live || drillActive) return;
     // 참여 층 = 카메라가 매핑된 층(추적이 실제로 일어나는 층). 2개 이상이면 건물 드릴.
     let cams = [];
@@ -235,14 +246,13 @@ const Session = (() => {
         hint(`경보 발생원 미지정 층: ${names} — 해당 층으로 이동해 경보 위치를 지정하세요.`, true);
         return;
       }
-      startDrill(parts, await startRehearsalIfStandby());
+      startDrill(parts, tAlarm);
       return;
     }
     // 단일 층(참여 층 ≤1) — 기존 층별 세션.
     syncPending();
     if (!pendingOrigins.length) { hint("경보 발생원을 먼저 추가하세요.", true); return; }
-    const t0 = await startRehearsalIfStandby();
-    _startWithOrigins(pendingOrigins.slice(), t0);
+    _startWithOrigins(pendingOrigins.slice(), tAlarm);
   }
 
   /** 맵 클릭 훅 (view_live) — addingOrigin 모드면 경보원 추가 후 true 반환. */

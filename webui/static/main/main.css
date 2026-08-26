@@ -194,6 +194,9 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .vsrow.clk{ cursor:pointer; }
 .vsrow.clk:hover{ border-color:var(--pia-cyan); }
 .vshint{ font-size:11px; color:var(--text-3); }
+/* 리허설 대기 중에는 평상시 경보 버튼을 흐리게 — 리허설 버튼을 쓰라는 신호.
+   막지는 않는다(영상 없이 경보만 걸고 싶을 수도 있다). */
+.btn.vs-dim{ opacity:.45; }
 .vschip{ display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:3px 10px;
   border-radius:999px; background:rgba(48,220,251,.12); border:1px solid var(--pia-cyan);
   color:var(--pia-cyan); white-space:nowrap; }

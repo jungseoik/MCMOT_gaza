@@ -129,15 +129,26 @@ var VSource = (() => {
           + `<br><span class="vshint">채널을 클릭하면 <b>대기로 돌리고</b> 매핑 화면으로 갑니다</span>`;
       }
     }
-    // ③ 운영뷰 칩 — 경보를 언제 누르면 t=0에 맞는지 알려준다
+    // ③ 운영뷰 — 상태 칩 + 리허설 전용 시작 버튼.
+    // 평상시 [🔔 경보 시작]은 건드리지 않는다(리허설과 무관하게 기존 동작 유지).
+    // 대기 중일 때만 [🎬 리허설 훈련 시작]이 나타나 영상 재생과 경보를 함께 건다.
     if (chip) {
       const on = !!(st && st.running);
       chip.classList.toggle("hidden", !on);
       if (on) {
         chip.textContent = st.mode === "standby"
-          ? `⏸ 리허설 대기 중 — [경보 시작]이 영상을 t=0부터 재생합니다`
+          ? `⏸ 리허설 대기 중 — [🎬 리허설 훈련 시작]으로 t=0부터`
           : `▶ 리허설 재생 중 · ${fmtSec(st.cycle_pos_sec)}`;
       }
+    }
+    const rb = $("sessRehearsalBtn"), sb = $("sessBtn");
+    if (rb && sb) {
+      const standby = !!(st && st.running && st.mode === "standby");
+      // 세션 진행 중이면 둘 다 숨긴다(기존 sessBtn 토글은 session.js 소관이므로
+      // 그쪽이 숨긴 상태를 덮지 않도록 hidden 여부를 보고 따라간다).
+      const sessionOn = sb.classList.contains("hidden");
+      rb.classList.toggle("hidden", !standby || sessionOn);
+      sb.classList.toggle("vs-dim", standby && !sessionOn);
     }
   }
 
