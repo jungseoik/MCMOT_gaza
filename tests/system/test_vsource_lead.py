@@ -44,3 +44,27 @@ class TestLeadCmd:
         from system.vsource.publisher import ffmpeg_cmd
         for lead in (None, "lead.txt"):
             assert "-re" in ffmpeg_cmd("v.mp4", "rtsp://h/p", lead=lead)
+
+
+class TestScaling:
+    """채널 수가 늘어도(6 → 12 → 15) 성립하는가."""
+
+    def test_cap_raised_above_measured_12ch_need(self):
+        """12채널 실측 부착 40.9s → 앞머리 52.9s. 상한이 그보다 넉넉해야 한다."""
+        assert c.LEAD_STILL_MAX >= 52.9 * 2, "채널이 더 늘 여지를 둬야 한다"
+        assert c.lead_seconds(40.9) == 40.9 + c.LEAD_MARGIN   # 안 잘린다
+
+    def test_over_cap_warns(self, caplog):
+        """상한에 걸리면 조용히 자르지 않는다 — 앞부분이 유실되기 때문."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="system.vsource"):
+            v = c.lead_seconds(c.LEAD_STILL_MAX + 100)
+        assert v == c.LEAD_STILL_MAX
+        assert any("상한" in r.message for r in caplog.records)
+
+    def test_parallel_preserves_order(self):
+        """앞머리·정지화면을 병렬로 만들어도 채널 순서가 섞이면 안 된다."""
+        items = list(range(12))
+        assert c._parallel(lambda x: x * 2, items) == [x * 2 for x in items]
+        assert c._parallel(lambda x: x, []) == []
+        assert c._parallel(lambda x: x, [7]) == [7]

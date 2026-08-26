@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from system.vsource import overlay
@@ -112,18 +113,26 @@ def _alive(pid: int) -> bool:
 # 고정 상수를 쓰지 않는다: 대기 송출 때 실제로 붙은 시간을 UI가 재서 넘겨주고,
 # 여기서 여유를 얹는다. 측정이 없을 때만 DEFAULT 를 쓴다.
 LEAD_STILL_MIN = float(os.environ.get("VSOURCE_LEAD_MIN", "20"))
-LEAD_STILL_MAX = float(os.environ.get("VSOURCE_LEAD_MAX", "90"))
+LEAD_STILL_MAX = float(os.environ.get("VSOURCE_LEAD_MAX", "150"))
 LEAD_STILL_DEFAULT = float(os.environ.get("VSOURCE_LEAD_DEFAULT", "45"))
 LEAD_MARGIN = float(os.environ.get("VSOURCE_LEAD_MARGIN", "12"))   # 측정치에 얹는 여유
 LEAD_DIR = Path("data/vsource_leads")   # 앞머리 mp4 + concat 목록 (캐시)
 
 
 def lead_seconds(attach_sec: float | None) -> float:
-    """앞머리 길이 결정 — 실측 부착시간 + 여유, 범위로 자른다."""
+    """앞머리 길이 결정 — 실측 부착시간 + 여유, 범위로 자른다.
+
+    부착시간은 채널 수에 비례한다(실측 6ch 22.6s → 12ch 40.9s). 상한에 걸리면
+    앞머리가 복귀를 못 덮어 앞부분이 유실되므로, 잘릴 때는 경고를 남긴다.
+    """
     if attach_sec and attach_sec > 0:
         v = attach_sec + LEAD_MARGIN
     else:
         v = LEAD_STILL_DEFAULT
+    if v > LEAD_STILL_MAX:
+        logger.warning("[vsource] 앞머리가 상한에 걸림: 필요 %.1fs > 상한 %.1fs — "
+                       "영상 앞부분이 유실될 수 있다. VSOURCE_LEAD_MAX 를 올려라.",
+                       v, LEAD_STILL_MAX)
     return round(max(LEAD_STILL_MIN, min(LEAD_STILL_MAX, v)), 1)
 
 
@@ -194,6 +203,20 @@ def _still_for(file: str, path: str) -> str | None:
         return None
 
 
+# 채널당 ffmpeg 호출(정지화면 추출·앞머리 인코딩)은 서로 독립이라 병렬로 돌린다.
+# 순차로 하면 채널 수에 그대로 비례한다 — 실측 12채널에서 standby 0.3→3.4s,
+# start 17.3→41.7s. 15채널이면 start 가 50초를 넘어 못 쓴다.
+_PREP_WORKERS = int(os.environ.get("VSOURCE_PREP_WORKERS", "8"))
+
+
+def _parallel(fn, items: list) -> list:
+    """items 각각에 fn 을 병렬 적용 — 순서는 보존한다."""
+    if len(items) <= 1:
+        return [fn(x) for x in items]
+    with ThreadPoolExecutor(max_workers=min(_PREP_WORKERS, len(items))) as ex:
+        return list(ex.map(fn, items))
+
+
 def _spawn(cmd: list[str], path: str) -> int:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     lf = open(LOG_DIR / f"{path}.log", "w")
@@ -221,9 +244,10 @@ def standby(scenario_id: str, cameras=None) -> dict:
     if prev and prev.get("pm2_stopped"):     # 직전 단계가 내린 것도 복구 목록에 승계
         pm2_stopped = sorted(set(pm2_stopped) | set(prev["pm2_stopped"]))
 
+    # 첫 프레임 추출도 채널마다 독립이라 병렬로 (순차면 채널 수에 그대로 비례)
+    stills = _parallel(lambda st: _still_for(st.file, st.path), list(s.streams))
     streams, missing = [], []
-    for st in s.streams:
-        still = _still_for(st.file, st.path)
+    for st, still in zip(s.streams, stills):
         if not still:
             missing.append(st.path)
             continue
@@ -271,12 +295,17 @@ def start(scenario_id: str, loop: bool = True, cameras=None,
     # 앞머리는 **T0를 정하기 전에** 다 만들어 둔다. 캐시가 없으면 채널당 2.3초가
     # 걸려(실측), T0 계산 뒤에 만들면 6채널에서 T0가 이미 지나버린다 —
     # 퍼블리셔가 "지나간 사이클"로 보고 다음 바퀴까지 건너뛰어 아무것도 안 나온다.
-    leads = {}
-    for st in s.streams:
+    def _prep(st):
         still = _still_for(st.file, st.path)
-        leads[st.path] = _build_lead(st.file, Path(still) if still else None,
-                                     lead_sec)
-    t0 = time.time() + LEAD_SEC
+        return _build_lead(st.file, Path(still) if still else None, lead_sec)
+
+    t_prep = time.time()
+    leads = dict(zip([st.path for st in s.streams],
+                     _parallel(_prep, list(s.streams))))
+    logger.info("[vsource] 앞머리 %d개 준비 %.1fs", len(leads), time.time() - t_prep)
+    # spawn 여유는 채널 수에 맞춰 늘린다 — 채널마다 Popen 이 하나씩 붙으므로
+    # 고정 2초는 채널이 많아지면 T0가 지나버릴 위험이 있다(그러면 전부 건너뛴다).
+    t0 = time.time() + max(LEAD_SEC, 0.15 * len(s.streams))
     streams = []
     for st in s.streams:
         lead_list = leads.get(st.path)
