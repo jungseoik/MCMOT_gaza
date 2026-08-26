@@ -55,6 +55,7 @@ import model_zoo
 from system.metrics.engine import MetricsEngine
 from system.metrics.recorder import SessionRecorder
 from system.vsource import controller as vsource
+from system.vsource import overlay as voverlay
 from system.vsource import scenario as vscenario
 
 logger = logging.getLogger("system.api")
@@ -150,7 +151,14 @@ class Runtime:
         return cfg
 
     def cameras(self) -> list[CameraConfig]:
-        return self.store.list_cameras(SITE_ID)
+        """카메라 목록 — 리허설이 도는 동안은 그 시나리오의 매핑을 얹어 돌려준다.
+
+        production JSON 은 읽기만 한다. 리허설용 매핑은 시나리오 옆에 따로 저장돼
+        (`data/scenarios/<id>.cams.json`) 여기서만 얹히므로, 리허설이 죽거나 꺼지면
+        원래 설정이 그대로 남는다 (ADR 08 §5-2).
+        """
+        cams = self.store.list_cameras(SITE_ID)
+        return voverlay.apply(cams, vsource.active_overlay())
 
     def reload_engine(self) -> None:
         """층 목록·카메라 매핑 변경을 엔진에 반영 — 층마다 엔진을 유지/생성/삭제.
@@ -691,9 +699,29 @@ async def set_mapping(cam_id: str, request: Request):
     cfg.valid_roi = roi if (roi and len(roi) >= 3) else None
     if "floor_id" in body:            # 층 매핑 (v1.7) — map_pts는 해당 층 맵 px
         cfg.floor_id = body["floor_id"]
-    rt.store.save_camera(SITE_ID, cfg)
+    sid = vsource.active_scenario_id()
+    if sid:
+        # 리허설 중 — 시나리오 옆에 저장한다. 새로 준비한 영상은 시점이 달라
+        # 매핑을 다시 잡아야 하는데, 그걸 카메라에 쓰면 현장용 매핑이 날아간다.
+        voverlay.save_cam(sid, cam_id, {
+            "mapping": cfg.mapping.model_dump() if cfg.mapping else None,
+            "valid_roi": cfg.valid_roi,
+            "floor_id": cfg.floor_id})
+    else:
+        rt.store.save_camera(SITE_ID, cfg)
     rt.reload_engine()
     return cfg
+
+
+@app.delete("/api/cameras/{cam_id}/rehearsal-mapping")
+def clear_rehearsal_mapping(cam_id: str):
+    """리허설 전용 매핑을 지운다 → 그 카메라는 다시 원래 매핑을 쓴다."""
+    sid = vsource.active_scenario_id()
+    if not sid:
+        raise HTTPException(409, "리허설이 실행 중이 아닙니다")
+    ok = voverlay.clear_cam(sid, cam_id)
+    rt.reload_engine()
+    return {"cleared": ok, "cam_id": cam_id, "scenario_id": sid}
 
 
 # ================================================================ 층(floor) — 다중 도면 (v1.7)
@@ -1270,8 +1298,10 @@ async def vsource_start(request: Request):
     if not sid:
         raise HTTPException(422, "scenario_id 필요")
     try:
-        return vsource.start(sid, loop=bool(body.get("loop", True)),
-                             cameras=rt.cameras())
+        r = vsource.start(sid, loop=bool(body.get("loop", True)),
+                          cameras=rt.cameras())
+        rt.reload_engine()          # 리허설 매핑 유지 (대기→재생 전환에도 그대로)
+        return r
     except FileNotFoundError:
         raise HTTPException(404, f"시나리오 없음: {sid}")
     except ValueError as e:
@@ -1293,7 +1323,9 @@ async def vsource_standby(request: Request):
     if not sid:
         raise HTTPException(422, "scenario_id 필요")
     try:
-        return vsource.standby(sid, cameras=rt.cameras())
+        r = vsource.standby(sid, cameras=rt.cameras())
+        rt.reload_engine()          # 이 시나리오의 리허설 매핑을 얹는다
+        return r
     except FileNotFoundError:
         raise HTTPException(404, f"시나리오 없음: {sid}")
     except ValueError as e:
@@ -1308,7 +1340,9 @@ async def vsource_stop(request: Request):
     except Exception:
         body = {}
     rp = body.get("restore_pm2")
-    return vsource.stop(restore_pm2=None if rp is None else bool(rp))
+    r = vsource.stop(restore_pm2=None if rp is None else bool(rp))
+    rt.reload_engine()              # 리허설 매핑을 떼고 원래 설정으로 돌아간다
+    return r
 
 
 @app.get("/api/vsource/status")
@@ -1337,6 +1371,11 @@ def vsource_status():
         n_rx += 1 if s["receiving"] else 0
     st["cams_receiving"] = n_rx
     st["cams_total"] = len(st.get("streams", []))
+    # 채널마다 "리허설 전용 매핑을 잡아뒀는가" — 안 잡았으면 원래 매핑을 상속한다
+    ov = voverlay.load(st.get("scenario_id") or "")
+    for s2 in st.get("streams", []):
+        s2["own_mapping"] = bool(s2.get("cam_id") and ov.get(s2["cam_id"], {}).get("mapping"))
+    st["own_mapped"] = sum(1 for s2 in st.get("streams", []) if s2.get("own_mapping"))
     return st
 
 

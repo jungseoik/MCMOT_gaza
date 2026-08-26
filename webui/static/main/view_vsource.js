@@ -112,11 +112,16 @@ var VSource = (() => {
           const rx = s.receiving
             ? `<span class="vsrx on">수신</span>`
             : `<span class="vsrx">붙는 중…</span>`;
+          // 리허설 전용 매핑이 있나 — 없으면 원래 카메라 매핑을 상속한다.
+          // 새로 준비한 영상은 시점이 달라 대개 다시 잡아야 한다.
+          const mp = s.own_mapping
+            ? `<span class="vsmp on" title="이 리허설용으로 따로 잡은 매핑을 씁니다">리허설 매핑</span>`
+            : `<span class="vsmp" title="원래 카메라 매핑을 그대로 씁니다. 영상 시점이 다르면 클릭해 다시 잡으세요">매핑 상속</span>`;
           return `<div class="vsrow${s.publishing ? " on" : ""}${cid ? " clk" : ""}"` +
             `${cid ? ` data-cam="${cid}" title="클릭하면 ${cid} 매핑 화면으로 이동"` : ""}>
              <span class="dot"></span>
              <span class="nm" title="${s.file}">${s.path}</span>
-             ${rx}
+             ${rx}${mp}
              ${camLabel(sc, s.path)}
              <span class="pos">${s.pos_sec != null ? s.pos_sec.toFixed(0) + "s" : "종료"}</span>
            </div>`;
@@ -152,6 +157,15 @@ var VSource = (() => {
       }
     }
     renderSteps(st);
+    const sd = $("vsStartDrill");
+    if (sd) sd.disabled = !(st && st.running && st.mode === "standby");
+    // ②에 "지금 잡는 매핑은 리허설용" 배너 — 어디에 저장되는지 오해를 막는다
+    document.body.classList.toggle("rehearsing", !!(st && st.running));
+    const who = $("rhBannerWho");
+    if (who && st && st.running) {
+      who.textContent = `시나리오: ${st.scenario_name || st.scenario_id}`
+        + (st.own_mapped ? ` · 리허설 매핑 ${st.own_mapped}개` : " · 아직 전부 원래 매핑 상속");
+    }
     const rb = $("sessRehearsalBtn"), sb = $("sessBtn");
     if (rb && sb) {
       const standby = !!(st && st.running && st.mode === "standby");
@@ -271,6 +285,7 @@ var VSource = (() => {
     inited = true;
     $("vsStandby").onclick = standby;
     $("vsStop").onclick = stop;
+    if ($("vsStartDrill")) $("vsStartDrill").onclick = startDrill;
     $("vsScenario").onchange = renderMeta;
     loadScenarios().then(refresh);
     // 상태 폴링 — 사이클 카운트다운이 있어야 경보 시점을 맞출 수 있다
@@ -310,8 +325,24 @@ var VSource = (() => {
     if ($("rhChanN")) $("rhChanN").textContent = (st && st.streams || []).length;
   }
 
+  /** ⑤에서 바로 훈련 시작 → ③ 운영 뷰로 데려간다.
+   *  전에는 ⑤에서 준비하고 ③으로 옮겨 다시 눌러야 해 왔다갔다했다. */
+  async function startDrill() {
+    if (busy) return;
+    const st = await jget("/api/vsource/status").catch(() => null);
+    if (!st || !st.running || st.mode !== "standby") {
+      msg("대기 송출을 먼저 켜세요.", 6); return;
+    }
+    if (typeof App !== "undefined") App.switchView("live");
+    setTimeout(() => {
+      const b = document.getElementById("sessRehearsalBtn");
+      if (b && !b.disabled) b.click();
+      else msg("③ 운영 뷰에서 경보 원점을 찍고 [🎬 리허설 훈련 시작]을 누르세요.", 8);
+    }, 600);
+  }
+
   return {
-    init, refresh,
+    init, refresh, startDrill,
     // ⑤ 탭 진입점 — App.switchView 가 부른다
     enter() { init(); refresh(); },
     leave() {},

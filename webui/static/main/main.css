@@ -575,3 +575,11 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .rhbody{ display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; }
 .rhcol{ flex:1; min-width:320px; display:flex; flex-direction:column; gap:8px; }
 .rhbtns{ display:flex; gap:8px; align-items:center; }
+.vsmp{ font-size:10px; color:var(--text-3); border:1px solid var(--stroke-2);
+  border-radius:3px; padding:0 4px; white-space:nowrap; margin-left:4px; }
+.vsmp.on{ color:var(--pia-cyan); border-color:var(--pia-cyan); }
+/* ② 리허설 중 배너 — 매핑이 어디로 저장되는지 오해가 없게 */
+.rhbanner{ display:none; margin:0 0 10px; padding:9px 12px; font-size:13px;
+  background:rgba(48,220,251,.10); border:1px solid var(--pia-cyan);
+  border-radius:var(--r-md); color:var(--text-1); }
+body.rehearsing .rhbanner{ display:block; }

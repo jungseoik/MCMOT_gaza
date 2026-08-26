@@ -23,6 +23,7 @@ import sys
 import time
 from pathlib import Path
 
+from system.vsource import overlay
 from system.vsource import scenario as sc
 
 logger = logging.getLogger("system.vsource")
@@ -346,3 +347,21 @@ def status() -> dict:
                          if (s.get("duration_sec") or 0) > in_cycle else None)}
             for s in st.get("streams", [])],
     }
+
+
+# ------------------------------------------------------------ 리허설 매핑 오버레이
+def active_scenario_id() -> str | None:
+    """지금 도는 시나리오 id — 안 돌면 None."""
+    st = _read_state()
+    if not st or not any(_alive(x.get("pid")) for x in st.get("streams", [])):
+        return None
+    return st.get("scenario_id")
+
+
+def active_overlay() -> dict[str, dict]:
+    """리허설이 도는 동안만 얹을 카메라 오버레이.
+
+    안 돌면 빈 dict → production 설정이 그대로 쓰인다.
+    """
+    sid = active_scenario_id()
+    return overlay.load(sid) if sid else {}

@@ -302,6 +302,11 @@
 
   <!-- ====================== 화면 2: 카메라 등록·매핑 ====================== -->
   <section id="viewCams" class="view hidden">
+    <div class="rhbanner" id="rhBanner">
+      <b>🎬 리허설 매핑 모드</b> — 지금 잡는 매핑은 <b>이 리허설에만</b> 저장됩니다.
+      기존 카메라의 현장용 매핑은 그대로 남습니다.
+      <span id="rhBannerWho"></span>
+    </div>
     <div class="workarea">
       <aside class="side left">
         <div class="sidehead">카메라 목록 <span id="camListDefConf" class="hdr-def" title="사이트 전역 기본 검출 신뢰도 — 카메라별로 비워두면 이 값을 상속">기본 conf —</span></div>
@@ -568,7 +573,7 @@
           <li data-step="pick"><b>1</b> 시나리오 선택</li>
           <li data-step="standby"><b>2</b> 대기 송출 <i>정지화면</i></li>
           <li data-step="map"><b>3</b> 카메라 매핑 <i>필요할 때만</i></li>
-          <li data-step="run"><b>4</b> 훈련 시작 <i>③ 운영 뷰</i></li>
+          <li data-step="run"><b>4</b> 훈련 시작 <i>운영 뷰로 이동</i></li>
         </ol>
         <div class="rhstate" id="rhState">리허설이 꺼져 있습니다.</div>
 
@@ -582,6 +587,8 @@
             <div class="rhbtns">
               <button class="btn primary" id="vsStandby"
                 title="첫 프레임을 정지화면으로 내보낸다 — 카메라가 붙어 매핑은 되고 영상은 멈춰 있다">⏸ 대기 송출 시작</button>
+              <button class="btn" id="vsStartDrill"
+                title="훈련 영상을 t=0부터 틀고 ③ 운영 뷰로 이동한다">🎬 훈련 시작 → ③</button>
               <button class="tag-btn danger" id="vsStop">■ 리허설 종료</button>
             </div>
             <div class="grow" id="vsMsg"></div>
