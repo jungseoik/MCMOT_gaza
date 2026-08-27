@@ -166,6 +166,37 @@ def _origin_cell(origin_px: Point, cell_px: float,
 
 # ---------------------------------------------------------------- 공개 API
 
+def points_grid_distance_m(points_px: list[Point],
+                           origin_px: Point,
+                           map_w: float, map_h: float,
+                           m_per_px: float,
+                           cell_size_m: float,
+                           ) -> float | None:
+    """경보 발생원 → **주어진 점들**이 있는 셀까지의 평균 거리 (m).
+
+    구역 polygon 안 모든 셀을 평균하면(zone_grid_distance_m) 사람이 어디 있든
+    같은 값이 나온다 — 도면 전체를 한 구역으로 잡으면 전원이 경보 바로 옆에
+    있어도 79.1 m 가 나왔다(실측). 지표 정의는 "얼마나 멀리 떨어진 곳까지
+    피난을 개시했는지"이므로, 빈 바닥이 아니라 **사람이 있는 곳**을 재야 한다.
+
+    점이 하나도 없으면 None — 호출부가 구역 면적 평균으로 폴백한다.
+    """
+    if m_per_px <= 0 or cell_size_m <= 0 or not points_px:
+        return None
+    cell_px = cell_size_m / m_per_px
+    n_rows = max(1, math.ceil(map_h / cell_px))
+    n_cols = max(1, math.ceil(map_w / cell_px))
+    field = _distance_field(n_rows, n_cols,
+                            _origin_cell(origin_px, cell_px, n_rows, n_cols))
+    dists = []
+    for x, y in points_px:
+        rc = _origin_cell((x, y), cell_px, n_rows, n_cols)
+        d = field.get(rc)
+        if d is not None:
+            dists.append(d * cell_size_m)
+    return sum(dists) / len(dists) if dists else None
+
+
 def zone_grid_distance_m(zone_polygon: list[Point],
                          origin_px: Point,
                          map_w: float, map_h: float,

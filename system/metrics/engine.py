@@ -358,8 +358,13 @@ class MetricsEngine:
                 origins = [origin_xy]
             else:
                 origins = [(0.0, 0.0)]
+            # 경보가 울린 순간 사람들이 어디 있었나 — IDR 거리 D 의 기준(§4.1).
+            # _reset_locked() 가 객체 이력을 지우므로 그 전에 붙잡아 둔다.
+            at_alarm = [(st.hist[-1][1], st.hist[-1][2])
+                        for st in self._objects.values() if st.hist]
             self._reset_locked()
-            self._session = EvaluationSession(self, origins, float(t_alarm))
+            self._session = EvaluationSession(self, origins, float(t_alarm),
+                                              occupants_px=at_alarm)
             return self._session.live(float(t_alarm))
 
     def attach_recorder(self, recorder) -> None:

@@ -53,7 +53,8 @@ from system.spatial import (
     point_in_polygon,
     shortest_dist_px,
 )
-from system.spatial.grid import zone_grid_distance_m
+from system.spatial.grid import (points_grid_distance_m,
+                                 zone_grid_distance_m)
 
 if TYPE_CHECKING:                       # 순환 import 방지 (타입 전용)
     from system.metrics.engine import MetricsEngine
@@ -124,7 +125,8 @@ class EvaluationSession:
     시작 시점의 site 설정 사본으로 판정한다."""
 
     def __init__(self, engine: "MetricsEngine",
-                 alarm_origins: list[tuple[float, float]], t_alarm: float):
+                 alarm_origins: list[tuple[float, float]], t_alarm: float,
+                 occupants_px: list[tuple[float, float]] | None = None):
         self._eng = engine
         self.alarm_ts = float(t_alarm)
         # N개 경보 발생원 — 하위 호환용 self.origin = 첫 번째 or (0,0)
@@ -164,11 +166,18 @@ class EvaluationSession:
 
         # 누적 상태
         self.persons: dict[str, _PersonAcc] = {}
+        # 경보 시점의 사람 위치 — D 산출 기준(§4.1 개정). 경보가 울린 순간
+        # 어디에 있었는지가 "얼마나 멀리서 반응했나"의 기준이다.
+        # engine 이 _reset_locked() 전에 잡아 넘겨준다(그 뒤엔 이력이 비어 있다).
+        _at_alarm = list(occupants_px or [])
         self.zones: list[_ZoneAcc] = [
             _ZoneAcc(zone=z,
-                     graph_distances_m=[self._origin_distance_m(z, o)
-                                        for o in self.alarm_origins]
-                                       or [self._graph_distance_m(z)])
+                     graph_distances_m=[
+                         self._origin_distance_m(
+                             z, o, [p for p in _at_alarm
+                                    if point_in_polygon(p, z.polygon)])
+                         for o in self.alarm_origins]
+                     or [self._graph_distance_m(z)])
             for z, _area in engine._zones]
         self.bns: dict[str, _BnAcc] = {b.id: _BnAcc() for b, _ in self._bn_cfg}
         self.timeline: deque[TimelinePoint] = deque(maxlen=TIMELINE_MAXLEN)
@@ -184,12 +193,34 @@ class EvaluationSession:
     # ---------------------------------------------------- IDR 거리 산출
 
     def _origin_distance_m(self, zone: Zone,
-                           origin: tuple[float, float]) -> float | None:
-        """경보 발생원 1개 → 구역 거리 (m). 격자 BFS 우선, 수동 그래프, 직선 폴백."""
+                           origin: tuple[float, float],
+                           occupants_px: list[tuple[float, float]] | None = None,
+                           ) -> float | None:
+        """경보 발생원 1개 → 구역 거리 (m).
+
+        **사람이 있는 셀** 우선(요구사항 §4.1, 2026-08-27 개정) → 구역 면적 평균
+        → 수동 그래프 → 직선 폴백.
+
+        구역 polygon 안 모든 셀을 평균하면 사람이 어디 있든 같은 값이 나온다
+        (도면 전체 구역에서 전원이 경보 옆에 있어도 79.1 m). 지표 정의가
+        "얼마나 멀리 떨어진 곳까지"이므로 빈 바닥이 아니라 사람을 재야 한다.
+        경보 시점에 그 구역에 사람이 없으면 면적 평균으로 되돌아간다.
+        """
         if self.m_per_px is None:
             return None
-        # 1순위: 격자 BFS (map 크기 알 때)
         if self._map_w > 0 and self._map_h > 0:
+            # 1순위: 경보 시점에 이 구역 안에 있던 사람들이 밟고 있는 셀
+            if occupants_px:
+                d = points_grid_distance_m(
+                    points_px=occupants_px,
+                    origin_px=origin,
+                    map_w=self._map_w, map_h=self._map_h,
+                    m_per_px=self.m_per_px,
+                    cell_size_m=self._grid_cfg.cell_size_m,
+                )
+                if d is not None:
+                    return d
+            # 2순위: 구역 면적 평균 (사람이 없거나 투영 실패)
             d = zone_grid_distance_m(
                 zone_polygon=zone.polygon,
                 origin_px=origin,
