@@ -12,13 +12,17 @@ from __future__ import annotations
 
 import heapq
 import math
-from collections import deque
+from collections import OrderedDict, deque
 
 Point = tuple[float, float]
 _Cell = tuple[int, int]  # (row, col)
 
 
 # ---------------------------------------------------------------- 격자 생성
+
+_CELLS_CACHE: "OrderedDict[tuple, list[tuple[int, int, float, float]]]" = OrderedDict()
+_CELLS_CACHE_MAX = 4
+
 
 def make_grid_cells(map_w: float, map_h: float,
                     m_per_px: float, cell_size_m: float,
@@ -31,12 +35,20 @@ def make_grid_cells(map_w: float, map_h: float,
     cell_px = cell_size_m / m_per_px
     n_rows = max(1, math.ceil(map_h / cell_px))
     n_cols = max(1, math.ceil(map_w / cell_px))
+    key = (n_rows, n_cols, cell_px)
+    hit = _CELLS_CACHE.get(key)
+    if hit is not None:                 # 격자 모양이 같으면 그대로 쓴다 —
+        _CELLS_CACHE.move_to_end(key)   # 구역마다 4만 개를 다시 만들 이유가 없다
+        return hit
     cells = []
     for r in range(n_rows):
         for c in range(n_cols):
             cx = (c + 0.5) * cell_px
             cy = (r + 0.5) * cell_px
             cells.append((r, c, cx, cy))
+    _CELLS_CACHE[key] = cells
+    if len(_CELLS_CACHE) > _CELLS_CACHE_MAX:
+        _CELLS_CACHE.popitem(last=False)
     return cells
 
 
@@ -58,9 +70,21 @@ def _point_in_polygon(px: float, py: float, polygon: list[Point]) -> bool:
 def cells_in_polygon(cells: list[tuple[int, int, float, float]],
                      polygon: list[Point],
                      ) -> list[tuple[int, int, float, float]]:
-    """격자 셀 중 polygon centroid 포함 셀만 반환."""
+    """격자 셀 중 polygon centroid 포함 셀만 반환.
+
+    바깥 사각(bbox)으로 먼저 걸러낸다 — 구역을 도면 전체에 타일처럼 깔면
+    셀 전부를 구역 수만큼 점-다각형 판정하게 되는데, 대부분은 애초에 구역
+    근처도 아니다(실측 0.5m 셀·25구역에서 이 필터가 대부분의 비용을 없앤다).
+    """
+    if not polygon:
+        return []
+    xs = [p[0] for p in polygon]
+    ys = [p[1] for p in polygon]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
     return [(r, c, cx, cy) for r, c, cx, cy in cells
-            if _point_in_polygon(cx, cy, polygon)]
+            if x0 <= cx <= x1 and y0 <= cy <= y1
+            and _point_in_polygon(cx, cy, polygon)]
 
 
 # ---------------------------------------------------------------- BFS 최단거리
@@ -105,6 +129,33 @@ def bfs_distances(n_rows: int, n_cols: int,
     return dist
 
 
+# 같은 원점의 거리장(distance field)은 어느 구역을 재든 동일하다.
+# 구역마다 다시 돌리면 구역 수만큼 낭비다 — 구역을 도면 전체에 타일처럼 깔면
+# 25개 × 3원점 = 75회가 된다(실측 0.5m 셀에서 1.6s → 4.8s).
+# 격자 모양과 원점이 같으면 재사용한다. 세션 시작 때만 쓰이므로 작게 유지.
+_FIELD_CACHE: "OrderedDict[tuple, dict[_Cell, float]]" = OrderedDict()
+_FIELD_CACHE_MAX = 32
+
+
+def _distance_field(n_rows: int, n_cols: int, origin_rc: _Cell) -> dict[_Cell, float]:
+    key = (n_rows, n_cols, origin_rc)
+    hit = _FIELD_CACHE.get(key)
+    if hit is not None:
+        _FIELD_CACHE.move_to_end(key)
+        return hit
+    field = bfs_distances(n_rows, n_cols, origin_rc)
+    _FIELD_CACHE[key] = field
+    if len(_FIELD_CACHE) > _FIELD_CACHE_MAX:
+        _FIELD_CACHE.popitem(last=False)
+    return field
+
+
+def clear_distance_cache() -> None:
+    """거리장·셀목록 캐시 비우기 — 테스트·격자 설정 변경 시."""
+    _FIELD_CACHE.clear()
+    _CELLS_CACHE.clear()
+
+
 def _origin_cell(origin_px: Point, cell_px: float,
                  n_rows: int, n_cols: int) -> _Cell:
     """경보 발생원 (맵 px) → 격자 (row, col) (범위 클램프)."""
@@ -145,7 +196,7 @@ def zone_grid_distance_m(zone_polygon: list[Point],
         return math.dist(origin_px, (cx, cy)) * m_per_px
 
     src_rc = _origin_cell(origin_px, cell_px, n_rows, n_cols)
-    cell_dist = bfs_distances(n_rows, n_cols, src_rc)
+    cell_dist = _distance_field(n_rows, n_cols, src_rc)
 
     dists_m: list[float] = []
     for r, c, _, _ in zone_cells:

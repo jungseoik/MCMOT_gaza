@@ -67,3 +67,79 @@ class TestApproximatesEuclidean:
                 for a in (0, 15, 30, 45, 60, 75, 90)]
         spread = (max(vals) - min(vals)) / min(vals)
         assert spread < 0.12, f"각도별 편차 {spread*100:.1f}% — {[round(v,1) for v in vals]}"
+
+
+class TestWholePlanZones:
+    """구역을 도면 전체에 타일처럼 까는 실제 사용 방식."""
+
+    def _tiles(self, side: int):
+        step = 100.0 / side
+        out = []
+        for i in range(side):
+            for j in range(side):
+                x0, y0 = i * step / M_PER_PX, j * step / M_PER_PX
+                x1, y1 = (i + 1) * step / M_PER_PX, (j + 1) * step / M_PER_PX
+                out.append([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+        return out
+
+    def test_tiled_zones_still_track_their_own_distance(self):
+        """타일 구역은 각자 자기 위치의 거리를 낸다 — 서로 구분돼야 IDR 이 뜻을 갖는다."""
+        from system.spatial.grid import clear_distance_cache
+        clear_distance_cache()
+        ds = [zone_grid_distance_m(z, ORIGIN, W, H, M_PER_PX, CELL_M)
+              for z in self._tiles(5)]
+        assert min(ds) < 20 and max(ds) > 120, f"구역별 거리가 안 벌어진다: {ds}"
+        # 5×5 를 (i,j) 로 읽으면 대각 대칭이라 고유값은 상삼각 개수 15 다.
+        # 그보다 적으면 값이 뭉갠 것이고, 많으면 대칭(=회전 불변)이 깨진 것.
+        assert len(set(round(d, 1) for d in ds)) == 15, f"{sorted(set(round(d,1) for d in ds))}"
+
+    def test_tiled_zones_are_symmetric(self):
+        """(i,j) 와 (j,i) 구역의 거리가 같아야 한다 — 대각 대칭.
+
+        4방향 BFS 시절에도 이건 성립했다. 문제는 대칭이 아니라 **대각 방향의
+        값 자체**가 부풀었다는 것이었다(test_diagonal_not_inflated_by_manhattan).
+        """
+        from system.spatial.grid import clear_distance_cache
+        clear_distance_cache()
+        side = 5
+        ds = self._tiles(side)
+        vals = [zone_grid_distance_m(z, ORIGIN, W, H, M_PER_PX, CELL_M) for z in ds]
+        grid = [[vals[i * side + j] for j in range(side)] for i in range(side)]
+        for i in range(side):
+            for j in range(side):
+                assert abs(grid[i][j] - grid[j][i]) < 1e-9, f"({i},{j}) 비대칭"
+
+    def test_cache_does_not_change_values(self):
+        """캐시를 켜도 끈 것과 같은 값이 나와야 한다."""
+        from system.spatial.grid import clear_distance_cache
+        zones = self._tiles(3)
+        clear_distance_cache()
+        cold = [zone_grid_distance_m(z, ORIGIN, W, H, M_PER_PX, CELL_M) for z in zones]
+        warm = [zone_grid_distance_m(z, ORIGIN, W, H, M_PER_PX, CELL_M) for z in zones]
+        assert cold == warm
+
+    def test_fine_grid_many_zones_is_fast(self):
+        """0.5 m 셀 × 25구역 — 세션 시작에 쓰이므로 사람이 기다릴 만해야 한다.
+
+        구역마다 거리장을 다시 돌리고 전체 셀을 점-다각형 판정하던 때는
+        1.6초였다(경보 3개면 4.8초).
+        """
+        import time
+        from system.spatial.grid import clear_distance_cache
+        zones = self._tiles(5)
+        clear_distance_cache()
+        t = time.time()
+        for z in zones:
+            zone_grid_distance_m(z, ORIGIN, W, H, M_PER_PX, 0.5)
+        el = time.time() - t
+        assert el < 0.6, f"{el:.2f}s — 너무 느리다"
+
+    def test_single_giant_zone_averages_the_area(self):
+        """도면 전체를 한 구역으로 잡으면 D 는 '그 구역까지의 거리'가 아니라
+        면적 평균이 된다 — 값이 틀린 건 아니지만 IDR 의 구역 구분이 사라진다."""
+        from system.spatial.grid import clear_distance_cache
+        clear_distance_cache()
+        whole = [(0.0, 0.0), (W, 0.0), (W, H), (0.0, H)]
+        d = zone_grid_distance_m(whole, ORIGIN, W, H, M_PER_PX, CELL_M)
+        assert d > math.hypot(100, 100) / 2, f"면적 평균이어야 한다: {d}"
+        assert d > _d(30, 30), "작은 구역보다는 멀게 나온다"
