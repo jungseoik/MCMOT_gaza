@@ -22,7 +22,11 @@ cad/17F_Egress Route.pdf
 cad/17F_v2.dwg
 cad/A-101_128_각 층 평면도_최종_수정.dwg
 cad/A-101_128_각 층 평면도_최종_수정.dxf
-cad/ai_hub_cad/
+# AI-Hub CAD: git엔 텍스트(문서·스크립트)만. 이미지·DXF·원본 dwg 등 대용량은 전부 HF.
+cad/ai_hub_cad/*
+!cad/ai_hub_cad/README.md
+!cad/ai_hub_cad/render_plan.py
+# target_floors/ 하위도 텍스트가 아니면 제외(png·dxf → HF)
 cad/CAD_API_Based_Optimal_Evacuation_Route_Algorithm/*.dxf
 # 원본 CAD(대용량 바이너리) — 로컬 보관/필요시 Git LFS. synth 실행엔 17F.dxf 필요
 cad/ODATrial.tar.gz
