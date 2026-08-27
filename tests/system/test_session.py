@@ -426,9 +426,12 @@ class TestIDR:
         assert zm.status == "started"
         assert zm.evacuation_start_at == pytest.approx(106.0)
         assert zm.response_delay_sec == pytest.approx(6.0)
-        # 그래프 거리: n1(경보 최근접)→n2(zone.node_id) = 500 px = 5 m
-        assert zm.graph_distance == pytest.approx(5.0)
-        assert zm.idr == pytest.approx(5.0 / 6.0)
+        # D 는 **격자 거리**다 — _origin_distance_m 이 격자를 1순위로 쓰므로
+        # 수동 SpatialGraph 는 여기까지 오지 않는다. 경보(100,500)→구역 중심
+        # (500,500) 직선이 4.0 m 이고, 격자(셀 2 m·8방향)가 4.19 m 로 근사한다.
+        # (4방향 BFS 였을 때는 맨해튼이라 5.0 m 였다 — +25%)
+        assert zm.graph_distance == pytest.approx(4.19, abs=0.02)
+        assert zm.idr == pytest.approx(zm.graph_distance / 6.0)
         assert zm.participant_ratio == pytest.approx(1.0)
 
     def test_stationary_not_started(self):
@@ -442,7 +445,7 @@ class TestIDR:
         assert zm.evacuation_start_at is None
         assert zm.response_delay_sec is None
         assert zm.idr is None
-        assert zm.graph_distance == pytest.approx(5.0)       # 거리는 산출
+        assert zm.graph_distance == pytest.approx(4.19, abs=0.02)  # 거리는 산출
 
     def test_short_burst_below_hold_not_started(self):
         """2 s만 이동(dt_hold=3 미달) → not_started."""
@@ -452,9 +455,14 @@ class TestIDR:
         res = eng.stop_session()
         assert res.zone_metrics[0].status == "not_started"
 
-    def test_graph_empty_straight_line_fallback(self):
-        """그래프 미정의 → 경보위치→구역 중심 직선거리 폴백.
-        origin(100,500)→중심(500,500) = 400 px = 4 m."""
+    def test_grid_takes_priority_over_graph(self):
+        """그래프가 없어도 **격자**가 D 를 낸다 — 직선 폴백까지 가지 않는다.
+
+        `_origin_distance_m` 은 맵 크기를 아는 한 격자를 1순위로 쓴다. 즉 수동
+        SpatialGraph 는 IDR 거리에 관여하지 않는다(설계상 그렇다).
+        직선거리는 origin(100,500)→중심(500,500) = 400 px = 4 m 이고,
+        격자가 그것을 4.19 m 로 근사한다.
+        """
         eng = MetricsEngine(
             make_idr_site(graph=SpatialGraph(),
                           zones=[Zone(id="z1", polygon=ZONE.polygon)]),
@@ -462,7 +470,9 @@ class TestIDR:
         eng.start_session((100, 500), t_alarm=100.0)
         self.feed_two(eng, 100.0, 102.0, move_from=999.0)
         res = eng.stop_session()
-        assert res.zone_metrics[0].graph_distance == pytest.approx(4.0)
+        d = res.zone_metrics[0].graph_distance
+        assert d == pytest.approx(4.19, abs=0.02)
+        assert abs(d - 4.0) / 4.0 < 0.08, f"직선 4.0 m 대비 오차 과다: {d}"
 
 
 # ================================================================ 세션 수명주기

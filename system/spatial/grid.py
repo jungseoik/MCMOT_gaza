@@ -10,6 +10,7 @@ D(zone, origin)을 산출한다.
 """
 from __future__ import annotations
 
+import heapq
 import math
 from collections import deque
 
@@ -64,21 +65,43 @@ def cells_in_polygon(cells: list[tuple[int, int, float, float]],
 
 # ---------------------------------------------------------------- BFS 최단거리
 
+# 8방향 이웃과 이동 비용 — 대각은 √2 셀.
+# 4방향만 쓰면 홉 수가 곧 **맨해튼 거리**가 되어, 대각 방향 구역의 거리가 최대
+# √2(+41%) 부풀었다(실측: 45° 방향 42.4m → 59.0m). IDR = D/지연 이라 그대로
+# IDR 이 41% 부풀고, 더 나쁜 건 **도면을 45° 돌리면 값이 변한다**는 점이다.
+_NEIGHBORS: tuple[tuple[int, int, float], ...] = (
+    (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
+    (-1, -1, _SQRT2 := math.sqrt(2.0)), (-1, 1, _SQRT2),
+    (1, -1, _SQRT2), (1, 1, _SQRT2),
+)
+
+
 def bfs_distances(n_rows: int, n_cols: int,
                   origin_rc: _Cell,
-                  ) -> dict[_Cell, int]:
-    """격자 (n_rows×n_cols)에서 origin_rc → 각 셀 BFS 홉 수.
-    4방향 인접. 도달 불가 셀은 결과에 없음."""
-    dist: dict[_Cell, int] = {origin_rc: 0}
-    q: deque[_Cell] = deque([origin_rc])
-    while q:
-        r, c = q.popleft()
-        d = dist[(r, c)]
-        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                  ) -> dict[_Cell, float]:
+    """격자에서 origin_rc → 각 셀 최단거리 (**셀 단위**, 대각 √2).
+
+    8방향 다익스트라. 반환값은 홉 수가 아니라 셀 단위 거리라 실수다 —
+    호출부에서 `× cell_size_m` 하면 미터가 된다.
+
+    장애물이 없는 지금은 결과가 octile 거리(유클리드 대비 최대 +7.6%)이고,
+    나중에 통행 불가 셀을 넣으면 그대로 우회 경로 거리가 된다.
+    """
+    dist: dict[_Cell, float] = {origin_rc: 0.0}
+    pq: list[tuple[float, _Cell]] = [(0.0, origin_rc)]
+    while pq:
+        d, rc = heapq.heappop(pq)
+        if d > dist.get(rc, math.inf):
+            continue                      # 오래된 항목
+        r, c = rc
+        for dr, dc, w in _NEIGHBORS:
             nb = (r + dr, c + dc)
-            if 0 <= nb[0] < n_rows and 0 <= nb[1] < n_cols and nb not in dist:
-                dist[nb] = d + 1
-                q.append(nb)
+            if not (0 <= nb[0] < n_rows and 0 <= nb[1] < n_cols):
+                continue
+            nd = d + w
+            if nd < dist.get(nb, math.inf) - 1e-12:
+                dist[nb] = nd
+                heapq.heappush(pq, (nd, nb))
     return dist
 
 
@@ -102,7 +125,7 @@ def zone_grid_distance_m(zone_polygon: list[Point],
 
     1. 격자 셀 생성
     2. Zone 내 포함 셀 필터
-    3. BFS (홉 수) × cell_size_m → 미터 변환
+    3. 8방향 다익스트라 (셀 단위 거리, 대각 √2) × cell_size_m → 미터
     4. Zone 내 셀 평균
 
     Zone에 셀이 없거나 축척이 없으면 None 반환.
@@ -122,13 +145,13 @@ def zone_grid_distance_m(zone_polygon: list[Point],
         return math.dist(origin_px, (cx, cy)) * m_per_px
 
     src_rc = _origin_cell(origin_px, cell_px, n_rows, n_cols)
-    hop_dist = bfs_distances(n_rows, n_cols, src_rc)
+    cell_dist = bfs_distances(n_rows, n_cols, src_rc)
 
     dists_m: list[float] = []
     for r, c, _, _ in zone_cells:
-        hops = hop_dist.get((r, c))
-        if hops is not None:
-            dists_m.append(hops * cell_size_m)
+        d_cells = cell_dist.get((r, c))
+        if d_cells is not None:
+            dists_m.append(d_cells * cell_size_m)
 
     if not dists_m:
         # BFS 도달 불가 (이론상 발생 안 함 — 벽 없는 격자)
