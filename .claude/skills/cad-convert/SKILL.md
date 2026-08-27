@@ -84,3 +84,8 @@ $PY tools/cad_convert.py dxf2png --dxf cad/17F.dxf --out-prefix cad/17F_plan
 ## 관련
 - 이 좌표계를 그대로 쓰는 합성 CCTV 영상: `cad/synth/`(README 참조).
 - 도면→가상 CCTV 시점 와이어프레임: `tools/cctv_synth.py`.
+- **실전 예 — AI지원센터(AI-Hub) 층별 평면도 추출**: `cad/ai_hub_cad/`
+  (`README.md`·`render_plan.py`). 이 스킬의 단순 dxf2png로는 안 되는 실무 케이스 —
+  빈 xref·중첩블록 재귀전개·레이어 오용을 규명해 조명·천정·기둥·좌석·마감주석을 걷어내고
+  **벽·코어·문만 남긴 층별 PNG + 편집기용 DXF**(`target_floors/`)를 뽑는다.
+  README에 레이어 지도·층별 배치(2~7F 적층/1F 예외)·저장정책(git=텍스트/HF=대용량) 정리.
