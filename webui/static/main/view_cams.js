@@ -100,15 +100,12 @@ Views.cams = (() => {
     if (bcl) bcl.classList.toggle("hidden", !multi);
     const mf = $("mapFloorSel"), mfl = $("mapFloorLab");
     if (mf) {
-      if (isRhCam(sel)) {
-        // 리허설 가상 카메라 — 층은 패키지(rehearsal.json)가 정한다. 사이트 층으로
-        // 폴백돼 저장되면 매니페스트가 오염되므로 그 층 하나만 잠가서 보여준다.
-        mf.innerHTML = `<option value="${selFloor}" selected>${App.floorName(selFloor)}</option>`;
-        mf.disabled = true;
-      } else {
-        mf.disabled = false;
-        mf.innerHTML = floorOptions(selFloor);
-      }
+      // 리허설 카메라도 층을 고른다 — 다층 리허설(10F+17F)은 카메라마다 층이 다르다.
+      // 저장은 패키지 rehearsal.json 의 그 카메라 floor 로 간다(사이트 층 id).
+      mf.disabled = false;
+      mf.innerHTML = floorOptions(selFloor)
+        + (isRhCam(sel) && !((App.site && App.site.floors) || []).some((f) => f.id === selFloor)
+           ? `<option value="${selFloor}" selected>${App.floorName(selFloor)}</option>` : "");
     }
     if (mfl) mfl.classList.toggle("hidden", !(multi && sel));
   }

@@ -73,6 +73,8 @@ if INGEST_BACKEND not in ("ffmpeg", "deepstream"):
 # 기본 on. 0/false면 녹화 끔(기존과 동일 동작, 롤백). 리플레이/재계산의 원료.
 SESSION_RECORD = os.environ.get("SESSION_RECORD", "1").strip().lower() not in ("0", "false", "no", "")
 FRONT_DIR = Path(__file__).resolve().parents[2] / "webui" / "static" / "main"
+# 리허설(파일 모드) 동안 사이트 RTSP 인제스트를 내린다 (ADR 09 §14). 0 이면 유지.
+PARK_SITE_ON_REHEARSAL = os.environ.get("VSOURCE_PARK_SITE", "1").strip().lower() not in ("0", "false", "no")
 
 
 class Runtime:
@@ -107,6 +109,7 @@ class Runtime:
         self._file_analyzer = None
         self.filesrc = vfile.FileSourceRunner(queue_put=self._file_put,
                                               rtsp_host=vsource.RTSP_HOST)
+        self._parked = False                   # 리허설 동안 사이트 RTSP 인제스트를 내렸는가
         self.analyzer = None  # AnalyzerThread | None — TRT 로드 실패 시 None
         self._lock = threading.Lock()
 
@@ -280,6 +283,32 @@ class Runtime:
         an = self.analyzer or self._file_analyzer
         if an is not None:
             an.set_camera_fps(cam_id, fps)
+
+    def park_site(self, park: bool) -> None:
+        """리허설(파일 모드) 동안 사이트 RTSP 인제스트를 내린다 / 종료 시 되살린다.
+
+        리허설은 리허설 카메라만으로 ① 맵설정의 층을 쓰는 것이다 — 그 동안 현장 RTSP 를
+        계속 디코드·추론하면 GPU·CPU 만 태우고(실측: DS 워커 CPU 84%·GPU 11%) 다른 층
+        도면에 무관한 점이 찍힌다. DS 백엔드는 워커 컨테이너를 내리므로 GPU 메모리도 풀린다.
+        복원은 사이트 카메라 설정(store) 그대로 다시 start — 파일은 건드리지 않는다.
+        """
+        if not PARK_SITE_ON_REHEARSAL:
+            return
+        if park and not self._parked:
+            try:
+                self.ingest.stop()
+            except Exception:
+                logger.exception("리허설 파킹: ingest stop 실패(계속)")
+            self._parked = True
+            logger.info("리허설 파킹: 사이트 RTSP 인제스트 정지 (GPU 해제)")
+        elif not park and self._parked:
+            cams = [c for c in self.cameras() if not c.cam_id.startswith(vpkg.CAM_PREFIX)]
+            try:
+                self.ingest.start(cams)
+            except Exception:
+                logger.exception("리허설 복원: ingest start 실패")
+            self._parked = False
+            logger.info("리허설 복원: 사이트 RTSP 인제스트 재기동 (%d대)", len(cams))
 
     def cam_states(self) -> list:
         """ingest 카메라 상태 + 파일 모드 카메라 상태."""
@@ -876,10 +905,11 @@ async def set_mapping(cam_id: str, request: Request):
         # 도면 크기를 스탬프해 두고 상태 조회에서 불일치를 경고한다.
         fl_now = rt._site_plus_rehearsal(rt.site()).get_floor(fid) if fid else None
         patch["map_wh"] = [fl_now.map.w, fl_now.map.h] if (fl_now and fl_now.map) else None
-        if fid.startswith(vpkg.FLOOR_PREFIX):
+        if fid.startswith(vpkg.FLOOR_PREFIX):          # 자립 모드 가상 층
             patch["floor"] = fid[len(vpkg.FLOOR_PREFIX):]
-        # rh_ 접두가 아닌 층 id(사이트 층)는 무시 — 가상 카메라의 층은 패키지가
-        # 정한다. UI 셀렉트가 사이트 층으로 폴백해도 매니페스트가 오염되면 안 된다.
+        elif fid in {fl.id for fl in rt.site().floors}:  # 빙의 모드 — 사이트 층(카메라별로 다를 수 있다)
+            patch["floor"] = fid
+        # 그 외(없는 층 id)는 무시 — 매니페스트 오염 방지
         ok = vpkg.save_camera(pkg["id"], cam_id, patch)
         if not ok:
             raise HTTPException(404, f"패키지에 없는 카메라: {cam_id}")
@@ -1505,10 +1535,16 @@ def _rehearsal_bind_floor(sid: str, floor_id: str | None) -> None:
     pkg = vpkg.get(ps[0])
     if not pkg:
         return
-    if floor_id not in {fl.id for fl in rt.site().floors}:
+    site_floors = {fl.id for fl in rt.site().floors}
+    if floor_id not in site_floors:
         raise HTTPException(404, f"사이트에 없는 층: {floor_id} — ① 맵설정에서 먼저 만드세요")
+    # 카메라별 층은 ② 매핑에서 정한다(다층 리허설 — 10F+17F 등). 여기 "기본 층"은
+    # 층이 비었거나 사이트에 없는 층을 가리키는 카메라에만 채워 넣는다.
+    by_cam = {vpkg.cam_id_of(c["cam"]): c for c in pkg.get("cameras", []) if c.get("cam")}
     for cid in sorted(vpkg.scenario_cam_ids(pkg, ps[1])):
-        vpkg.save_camera(pkg["id"], cid, {"floor": floor_id})
+        cur = (by_cam.get(cid) or {}).get("floor")
+        if not cur or cur not in site_floors:
+            vpkg.save_camera(pkg["id"], cid, {"floor": floor_id})
 
 
 def _file_mode(sid: str) -> dict | None:
@@ -1525,7 +1561,9 @@ def _file_standby(sid: str) -> dict:
     cams_floor = {c.cam_id: (c.floor_id or DEFAULT_FLOOR_ID)
                   for c in vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST)}
     fps = next((c.analyze_fps for c in vpkg.virtual_cameras(pkg)), 5.0)
-    return rt.filesrc.standby(pkg, ps[1], cams_floor=cams_floor, fps=fps)
+    r = rt.filesrc.standby(pkg, ps[1], cams_floor=cams_floor, fps=fps)
+    rt.park_site(True)                       # 리허설 = 리허설 카메라만. 사이트 RTSP 는 내린다
+    return r
 
 
 def _rehearsal_switch(sid: str) -> str | None:
@@ -1622,6 +1660,7 @@ async def vsource_standby(request: Request):
             rt.set_rehearsal(*prev_pkg)
             raise HTTPException(409, str(e))
     rt.filesrc.stop()                            # 파일 리허설이 돌고 있었다면 내린다
+    rt.park_site(False)
     try:
         r = vsource.standby(sid, cameras=rt.cameras())
         rt.reload_engine()          # 이 시나리오의 리허설 매핑을 얹는다
@@ -1647,6 +1686,7 @@ async def vsource_stop(request: Request):
     if fr.get("stopped"):
         r = {**r, "stopped": r.get("stopped", 0) + fr["stopped"], "source": "file"}
     rt.set_rehearsal(None)          # 패키지 가상 카메라·층을 떼어낸다 = 복원 (ADR 09)
+    rt.park_site(False)             # 사이트 RTSP 인제스트 재기동
     rt.reload_engine()              # 리허설 매핑을 떼고 원래 설정으로 돌아간다
     return r
 
@@ -1660,6 +1700,7 @@ def vsource_status():
     지금 받고 있는지를 함께 돌려준다.
     """
     st = rt.filesrc.status() if (rt.filesrc.active or rt.filesrc.mode == "done") else vsource.status()
+    st["site_parked"] = rt._parked
     if not st.get("running") and not st.get("done"):
         return st
     fps = {s.cam_id: s.fps_in for s in rt.cam_states()}

@@ -91,6 +91,7 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 | `MAP_STREAM_HZ` | `5` | 맵 SSE 송출 주기 — analyze_fps 와 같게 (더 높으면 같은 스냅샷 반복, 낮으면 끊김) |
 | `VSOURCE_FILE_DECODE_WORKERS` | `8` | 파일 모드 디코드 스레드(1080p 채널당 14ms → 병렬화, ~15ch@5fps) |
 | `VSOURCE_FILE_START_MARGIN` | `0.8` | 시작 여유(초) — t0 = 지금 + 여유, 경보 시각 = t0 |
+| `VSOURCE_PARK_SITE` | `1` | 리허설(파일 모드) 동안 사이트 RTSP 인제스트를 내리고(GPU 해제) 종료 시 복원. `0`=유지 |
 
 ## 카메라 일괄 등록 (벌크)
 

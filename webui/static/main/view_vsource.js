@@ -196,8 +196,9 @@ var VSource = (() => {
       const rxTxt = (rxT && rxN < rxT)
         ? `<br><span class="warn">카메라 붙는 중 ${rxN}/${rxT} — 20초쯤 걸립니다</span>`
         : "";
+      const parked = st.site_parked ? `<br><span class="vshint">기존 RTSP 카메라는 리허설 동안 일시 정지(GPU 해제) — 종료 시 복원</span>` : "";
       if (st.mode === "standby") {
-        msgEl.innerHTML = `<span class="ok">${st.source === "file" ? "준비됨 (파일 모드)" : "대기 중"}</span> — 정지화면 (영상 멈춤)` + rxTxt
+        msgEl.innerHTML = `<span class="ok">${st.source === "file" ? "준비됨 (파일 모드)" : "대기 중"}</span> — 정지화면 (영상 멈춤)` + rxTxt + parked
           + `<br><span class="vshint">채널을 클릭해 매핑 → 끝나면 ③ 운영 뷰에서 [🎬 리허설 훈련 시작]</span>`;
       } else {
         msgEl.innerHTML = `<span class="ok">훈련 재생 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}` + rxTxt

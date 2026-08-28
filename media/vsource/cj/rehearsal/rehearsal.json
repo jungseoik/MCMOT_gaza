@@ -18,7 +18,9 @@
       "name": "CJ cam1",
       "floor": "floor10",
       "analyze_fps": 5.0,
-      "mapping": null
+      "mapping": null,
+      "valid_roi": null,
+      "map_wh": null
     },
     {
       "cam": "cam2",

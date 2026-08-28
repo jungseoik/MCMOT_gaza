@@ -102,7 +102,10 @@ Views.live = (() => {
 
   function drawCameraHulls(g) {
     const { ctx, TX, TY } = g;
-    App.cameras.forEach((cam) => {
+    // 지금 보는 층의 카메라만 — 다른 층 매핑은 다른 도면 좌표계라 여기에 겹치면 엉뚱한
+    // 자리에 헐이 찍힌다(버그: 전 층 헐이 한 도면에 겹쳐 보였다).
+    const fid = App.currentFloor || "default";
+    App.cameras.filter((cam) => (cam.floor_id || "default") === fid).forEach((cam) => {
       const m = cam.mapping;
       if (!m || !m.map_pts || m.map_pts.length < 4) return;
       // 실제 탐지 영역을 백엔드 규칙과 동일하게: valid_roi 지정 시 그 다각형을
