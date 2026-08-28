@@ -156,6 +156,8 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
     s.shot("21_cams_overview", note="② 카메라 등록·매핑 전체")
     s.shot("22_cam_list", "aside.side.left", "카메라 목록")
     try:
+        # 카메라 추가는 접이식 <details id=camAddBox> 안에 있다 — 먼저 펼친다
+        pg.eval_on_selector("#camAddBox", "el => el.open = true"); pg.wait_for_timeout(200)
         pg.locator("#camBulkOpen").click(); pg.wait_for_timeout(700)
         pg.locator("#bulkText").fill(
             "1층 로비,rtsp://172.29.0.11:554/trackID=1&streamID=2\n"
@@ -257,15 +259,33 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
         s.shot("34b_cbs_select", "#cbsBn", note="CBS 병목 선택 집계")
     except Exception as e:
         print(f"  ✗ 34b_cbs_select: {type(e).__name__}")
-        s.shot("35_session_running", note="평가 세션 진행 중")
-        res = api("/api/session/stop", "POST")
-        print(f"  · 세션 종료: {res['session_id']}")
-        pg.wait_for_timeout(3000)
-        s.shot("36_session_result", note="세션 종료 결과")
+    # 세션 종료 → 결과 (do_session 일 때만 — 시작한 세션을 반드시 닫는다)
+    if do_session:
         try:
-            s.shot("37_result_modal", "#resultModal .modalbox", "평가 결과 상세")
-        except Exception:
-            pass
+            s.shot("35_session_running", note="평가 세션 진행 중")
+            # UI 버튼으로 종료해야 프론트 endSession() 이 결과 모달을 띄운다
+            # (API 직접 stop 은 UI 를 우회해 모달이 안 열림)
+            stopped = False
+            try:
+                pg.on("dialog", lambda d: d.accept())
+                if pg.locator("#sessStopBtn:visible").count():
+                    pg.locator("#sessStopBtn").click(); pg.wait_for_timeout(3500); stopped = True
+            except Exception:
+                pass
+            if not stopped:
+                res = api("/api/session/stop", "POST")
+                print(f"  · 세션 종료(API): {res.get('session_id')}")
+                pg.wait_for_timeout(3000)
+            s.shot("36_session_result", note="세션 종료 결과")
+            try:
+                # 모달이 닫혀 있으면 [결과 다시 보기]로 재오픈
+                if pg.locator("#resultModal.hidden").count() and pg.locator("#resReopen").count():
+                    pg.locator("#resReopen").click(); pg.wait_for_timeout(800)
+                s.shot("37_result_modal", "#resultModal .modalbox", "평가 결과 상세")
+            except Exception as e2:
+                print(f"  ✗ 37_result_modal: {type(e2).__name__}")
+        except Exception as e:
+            print(f"  ✗ 세션 종료/결과: {type(e).__name__}")
 
     # ④ 리플레이 (다층 사이트는 기본이 '건물 훈련' 모드)
     tab("④ 리플레이")
