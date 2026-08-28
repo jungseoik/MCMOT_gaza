@@ -54,10 +54,21 @@ const Session = (() => {
       live = s;
       if (wasNew) { result = null; startPoll(); switchPanel("sess"); }
       updateUI();
-    } else if (!s && live) {              // 다른 클라이언트가 종료한 경우
+    } else if (!s && live) {              // 다른 클라이언트가 종료했거나, 영상이 끝나 서버가 자동 종료한 경우
+      const endedId = live.session_id;
       live = null;
       stopPoll();
-      refreshFinal();
+      if (drillActive) {
+        // 건물 훈련(리허설 포함)은 롤업 결과 모달까지 띄운다 — 자동 종료라도 ③에서 결과를 본다
+        drillActive = false;
+        API._j(`/api/drill/${endedId}/result`).then((roll) => {
+          drillReport = roll; result = null; updateUI();
+          hint("영상 종료 → 건물 훈련 자동 종료 — 롤업 결과가 산출되었습니다.");
+          showDrillModal(roll);
+        }).catch(() => refreshFinal());
+      } else {
+        refreshFinal();
+      }
     }
   }
 
