@@ -502,7 +502,10 @@ Views.cams = (() => {
       const f = frames[camId];
       camMc.setImage(f.img, f.w, f.h);
       renderSceneBtn(camId);
-      if (f.black) hint("준비 프레임이 검정 — 이 카메라는 이 구간에 없습니다. [🔄 다른 장면]으로 찍힌 구간을 불러오세요.", true);
+      // 검정 경고는 리허설 카메라(전체 연속 시나리오의 없는 구간)에만 — 사이트 RTSP 카메라가
+      // 어두운 건 다른 문제(야간·가림)라 같은 문구를 쓰면 오해한다.
+      if (f.black && isRhCam(camId)) hint("준비 프레임이 검정 — 이 카메라는 이 구간에 없습니다. [🔄 다른 장면]으로 찍힌 구간을 불러오세요.", true);
+      else if (f.black) hint("프레임이 매우 어둡습니다 — 카메라 영상 상태를 확인하세요.", true);
       else hint();
     } catch (e) { hint("연결 테스트 실패: " + e.message, true); camMc.setImage(null, 640, 360); }
     await loadSelFloorMap();                           // 선택 카메라 층의 맵 표시
