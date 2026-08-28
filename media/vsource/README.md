@@ -41,7 +41,7 @@ media/vsource/
 - **층은 사이트 것을 빌린다** — `cameras[].floor` 에 :8900 ① 맵설정의 층 id(`floor10`).
   도면·구역·출구·경로는 ①에서 관리(CAD 편집기). `floorplan/` 은 패키지가 도면을 직접
   들고 가는 자립 모드(`floors[].image`)에만 쓴다 — 기본은 빌리기.
-- 예외: CJ **실훈련** 원본은 역사적 이유로 `field/encoded/` 에 있다 (`drill-16f` 시나리오)
+- CJ **실훈련** 원본(0521)은 `field/encoded/` 에 있다 — 예전 mock 시나리오(`data/scenarios/`)는 2026-08-28 제거, 패키지로 다시 만들려면 `tools/rehearsal_prep.py --scaffold`
 
 ## 보관 중인 영상 묶음 (로컬, git 제외)
 

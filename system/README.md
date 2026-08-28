@@ -1,7 +1,7 @@
 # system/ — 멀티카메라 2D 맵 분석 시스템
 
 > 설계: [docs/architecture/02-멀티카메라-시스템-전환-설계.md](../docs/architecture/02-멀티카메라-시스템-전환-설계.md) ·
-> 계약: [CONTRACT.md](CONTRACT.md) (v1.9) · M0 실측: [docs/architecture/03](../docs/architecture/03-M0-환경검증-디코딩스택-실측.md)
+> 계약: [CONTRACT.md](CONTRACT.md) (v1.12) · M0 실측: [docs/architecture/03](../docs/architecture/03-M0-환경검증-디코딩스택-실측.md)
 
 ## 사전 설치 (1회)
 
@@ -40,7 +40,13 @@ conda run -n boosttrack uvicorn system.api.mock_server:app --port 8901
   송출이 죽어 있으면 재접속 대기만 하며 무해.
   현재 라이브 세팅을 seed로 갱신: `bash tools/seed_snapshot.sh` (sessions 제외)
 - 평가 세션: 운영 뷰 🔔 경보 시작(맵 클릭) → 4대 지표 카드 → 종료 시 결과 산출,
-  `sessions/<id>.json` 영속화 + `GET /api/sessions` 이력 (계약 v1.3)
+  `sessions/<id>.json` 영속화 + `GET /api/sessions` 이력 (계약 v1.3). 지표 정의는
+  **계약 v1.12** — CBS 병목은 **부채꼴 영역·그룹 집계**(선택 병목만 합계·평균), SEI 출입구는
+  **문별 유효폭(W)·통과 기준(q_design)** 을 문마다 지정(`CONTRACT.md`)
+- **건물 훈련(drill · 계약 v1.11)**: 다층 사이트는 🔔 **[건물 전체 경보]** 로 전 층이
+  **하나의 경보 세션**을 공유한다(공유 `t_alarm`, 층별 원점 게이트) → 4대 지표를
+  **건물 단위로 롤업**·export. ④ 리플레이 탭 기본 모드도 건물 훈련(층 선택·전 층 롤업 재계산).
+  UI 표기는 "건물 훈련", 내부 코드·API는 `drill` 유지(`POST /api/drill/*`). 설계 [ADR 06](../docs/architecture/06-건물-드릴-세션-4대지표-롤업-설계.md)
 - **세션 녹화·리플레이 (계약 v1.10)**: 세션 중 입력 트랙을 `sessions/<id>.db`(SQLite)에
   자동 녹화(도면·카메라 스냅샷 포함) → **④ 리플레이 탭**에서 2D 재생(시크·배속) +
   임계값만 바꿔 4대 지표 재계산(`POST /api/session/{id}/replay`). 도면 그대로,

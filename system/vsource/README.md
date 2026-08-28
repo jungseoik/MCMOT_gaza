@@ -46,7 +46,7 @@ curl -s localhost:8900/api/vsource/scenarios | python -m json.tool
 
 # 시작 / 상태 / 정지
 curl -s -XPOST localhost:8900/api/vsource/start \
-  -H 'Content-Type: application/json' -d '{"scenario_id":"drill-16f","loop":true}'
+  -H 'Content-Type: application/json' -d '{"scenario_id":"pkg:cj-rehearsal:scenario_02","loop":false}'
 curl -s localhost:8900/api/vsource/status | python -m json.tool
 curl -s -XPOST localhost:8900/api/vsource/stop -H 'Content-Type: application/json' -d '{}'
 ```
@@ -55,21 +55,25 @@ UI는 **② 카메라 등록·매핑** 좌측 [훈련영상 송출] 패널. 송�
 상단에 다음 사이클까지 남은 시간이 칩으로 뜬다 — 그 시점에 경보를 누르면 t=0부터
 전 채널이 정렬된다.
 
-## 시나리오 정의
+## 시나리오 정의 (legacy `data/scenarios/*.json`)
+
+> **정본은 리허설 패키지**(`media/vsource/<site>/<set>/rehearsal.json`, 아래 [리허설 패키지](#리허설-패키지-adr-09) 참조).
+> 아래는 예전 단발 시나리오 포맷 — 배포 파일은 2026-08-28 제거됐고, 코드 경로는
+> 남아 있어 `data/scenarios/`에 파일을 두면 그대로 로드된다(RTSP 송출 모드).
 
 ```json
 {
-  "id": "drill-16f",
+  "id": "<시나리오-id>",
   "name": "화재대피훈련 — 16F 6채널",
   "cycle_sec": 0,
   "streams": [
-    {"path": "field_16f_s", "file": "media/vsource/drill-16f/16f_s.mp4"}
+    {"path": "field_16f_s", "file": "media/vsource/<set>/16f_s.mp4"}
   ]
 }
 ```
 
 - `path` = **카메라가 이미 보고 있는 RTSP 경로 그대로** (경로 인수 — 매핑을 안 고쳐도 된다)
-- `file` = 레포 루트 기준 상대경로. 새 영상은 `media/vsource/<id>/` (gitignore + HF 보관)
+- `file` = 레포 루트 기준 상대경로. 영상은 `media/vsource/<set>/` (gitignore + HF 보관)
 - `cycle_sec: 0` = 자동 산출
 
 ## 지켜야 할 것
@@ -108,7 +112,7 @@ UI는 **② 카메라 등록·매핑** 좌측 [훈련영상 송출] 패널. 송�
 - 활성 시나리오가 쓰는 카메라만 ingest 에 들어간다 (DS 16ch 한계 보호).
 - 사전 검증: `python tools/rehearsal_prep.py <폴더>` (`--scaffold`, `--encode`,
   `--floorplan-from-site <층id>` — 구조 동일한 사이트 층 도면을 패키지로 복사).
-- `data/scenarios/*.json` 은 legacy mock (drill-16f 등) — 그대로 동작.
+- `data/scenarios/*.json`(legacy mock)은 2026-08-28 제거 — 코드 경로는 남아 있어 파일을 두면 다시 뜬다.
 - **오프라인 진단**: `python tools/rehearsal_viz.py --package cj-rehearsal --scenario scenario_02`
   → 라이브와 같은 5fps 분석으로 카메라 그리드(ID·헐·통과선) + 공유 2D 맵(패키지 매핑·사이트 층)
   영상을 만든다. 헐 밖(라이브 폐기) 관측을 빨간 ✕로 보여 "추론 문제 vs 매핑 범위 문제"를 가른다.
