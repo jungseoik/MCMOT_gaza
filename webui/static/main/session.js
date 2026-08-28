@@ -17,6 +17,7 @@ const Session = (() => {
   let pendingInited = false;  // _initPending 1회 수행 여부 — clear 후 재로드 방지
   // 건물 드릴(ADR 06) — 층별 원점을 층을 가로질러 모은다. pendingOrigins는 현재 층 별칭.
   let drillOrigins = {};      // {floor_id: [[x,y],...]} — 참여 층별 이번 드릴용 경보 원점
+  let rehearsalExtra = null;      // 리허설로 시작한 드릴의 라벨·시나리오 (드릴 레코드에 저장)
   let drillActive = false;    // 드릴 진행중(전 층 공유 세션)
   let drillReport = null;     // 마지막 드릴 롤업 결과(리포트 재열람용)
   let partCache = null;       // 참여(카메라 매핑) 층 id[] 캐시 — 원점 현황 표시용
@@ -235,6 +236,8 @@ const Session = (() => {
       hint("리허설이 준비 중이 아닙니다 — ⑤ 리허설에서 [준비]를 먼저 누르세요.", true); return;
     }
     const floors = st0.floors || [];
+    rehearsalExtra = { label: `🎬 ${st0.scenario_name || st0.scenario_id}`,
+                       rehearsal: { scenario_id: st0.scenario_id, source: st0.source || null } };
     // ① 리허설 층으로 자동 전환 — 상단 층 셀렉터를 손으로 바꾸지 않으면 다른 층 도면을
     //    보고 있게 되고 "아무것도 안 나온다"로 읽힌다(실측).
     if (floors.length && App.currentFloor !== floors[0]
@@ -243,16 +246,11 @@ const Session = (() => {
     }
     // ② 경보 발생원 사전 검사 — **재생을 시작하기 전에**. 시작한 뒤 걸리면 영상 한
     //    사이클(27s)을 허비한다(실측). 규칙은 _startAlarm 과 같다.
-    if (floors.length >= 2) {
+    syncPending();                                   // 현재 층 원점을 drillOrigins 에 반영
+    {
       const missing = floors.filter((f) => !(drillOrigins[f] && drillOrigins[f].length));
       if (missing.length) {
-        hint(`경보 발생원 미지정 층: ${missing.map((f) => App.floorName(f)).join(", ")} — 도면을 클릭해 [+ 추가]`, true);
-        return;
-      }
-    } else {
-      syncPending();
-      if (!pendingOrigins.length) {
-        hint("경보 발생원을 먼저 추가하세요 — 이 층 도면에서 [+ 추가] 후 클릭 (IDR 기준점)", true);
+        hint(`경보 발생원 미지정 층: ${missing.map((f) => App.floorName(f)).join(", ")} — 그 층 도면에서 [+ 추가] 후 클릭 (IDR 기준점)`, true);
         return;
       }
     }
@@ -300,6 +298,15 @@ const Session = (() => {
     if (scopeFloors && scopeFloors.length) {
       parts = parts.filter((f) => scopeFloors.includes(f));
       if (!parts.length) { hint("리허설 시나리오의 층에 매핑된 카메라가 없습니다.", true); return; }
+      // 리허설은 층 수와 무관하게 **건물 세션**이다 — 층 1개라도 건물 훈련 이력으로 남겨
+      // ④ 리플레이 [건물 훈련]에서 층을 골라 보게 한다(개별 층 목록으로 흩어지지 않게).
+      const missing = parts.filter((f) => !(drillOrigins[f] && drillOrigins[f].length));
+      if (missing.length) {
+        hint(`경보 발생원 미지정 층: ${missing.map((f) => App.floorName(f)).join(", ")} — 도면을 클릭해 [+ 추가]`, true);
+        return;
+      }
+      startDrill(parts, tAlarm, rehearsalExtra || {});
+      return;
     }
 
     if (parts.length >= 2) {
@@ -329,13 +336,14 @@ const Session = (() => {
   }
 
   // ---- 건물 드릴 시작/종료 (ADR 06) --------------------------------
-  async function startDrill(parts, tAlarm) {
+  async function startDrill(parts, tAlarm, extra) {
     addingOrigin = false;
     const payload = {};
     parts.forEach((f) => { payload[f] = (drillOrigins[f] || []).map((o) => [o[0], o[1]]); });
     try {
-      // tAlarm 이 있으면(리허설) 영상 t=0 과 경보 시각을 같은 값으로 맞춘다
-      const resp = await API.drillStart(payload, tAlarm || undefined);
+      // tAlarm 이 있으면(리허설) 영상 t=0 과 경보 시각을 같은 값으로 맞춘다.
+      // floors 범위를 함께 보낸다 — 파킹된 사이트 카메라 층이 참여 층으로 섞이지 않게.
+      const resp = await API.drillStart(payload, tAlarm || undefined, { floors: parts, ...(extra || {}) });
       drillActive = true;
       try { sessionStorage.setItem("macs_drill", resp.session_id); } catch (e) { /* noop */ }
       // 현재 층이 참여 층이면 그 층 세션을 live로 표시(폴링). 아니면 live 없음(다른 층에서 진행).

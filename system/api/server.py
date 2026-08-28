@@ -1166,11 +1166,45 @@ def _aggregate_floors(session_id: str, floors: list[tuple[str, dict]]) -> dict:
     }
 
 
+def _drills_dir() -> Path:
+    d = rt.store.site_dir(SITE_ID) / "sessions" / "_drills"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _drill_meta_save(sid: str, floors: list[str], alarm_ts: float, label: str | None,
+                     rehearsal: dict | None) -> None:
+    """드릴 명시 레코드 — 참여 층·라벨·리허설 정보. 예전엔 '지금 참여 중인 층' 으로만
+    드릴을 추정해서, 리허설처럼 카메라가 잠깐 존재하는 층의 드릴은 종료 후 이력에서 사라졌다."""
+    (_drills_dir() / f"{sid}.json").write_text(json.dumps(
+        {"session_id": sid, "floors": floors, "alarm_ts": alarm_ts,
+         "label": label, "rehearsal": rehearsal}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _drill_meta(sid: str) -> dict | None:
+    p = _drills_dir() / f"{sid}.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _drill_floors(sid: str) -> list[str]:
+    """드릴의 참여 층 — 레코드가 있으면 그것, 없으면(예전 드릴) 지금 참여 층."""
+    m = _drill_meta(sid)
+    return list(m["floors"]) if m and m.get("floors") else rt.participating_floors()
+
+
 def _drill_rollup(session_id: str) -> dict:
     """저장본/라이브에서 session_id로 참여 전 층 결과를 모아 건물 롤업."""
-    floors = [(f, r) for f in rt.participating_floors()
+    floors = [(f, r) for f in _drill_floors(session_id)
               if (r := _floor_result(session_id, f)) is not None]
-    return _aggregate_floors(session_id, floors)
+    roll = _aggregate_floors(session_id, floors)
+    m = _drill_meta(session_id)
+    if m and isinstance(roll, dict):
+        roll["label"] = m.get("label")
+        roll["rehearsal"] = m.get("rehearsal")
+    return roll
 
 
 @app.post("/api/drill/start")
@@ -1181,6 +1215,11 @@ async def drill_start(request: Request):
     body = await request.json()
     floor_origins = body.get("floor_origins") or {}
     part = rt.participating_floors()
+    # 범위(floors) — 리허설은 시나리오 층만. 사이트 카메라가 파킹돼 있어도 매핑·활성이라
+    # 참여 층으로 잡히므로, 범위를 안 주면 무관한 층에도 세션이 열린다.
+    scope = body.get("floors")
+    if scope:
+        part = [f for f in part if f in set(scope)]
     if not part:
         raise HTTPException(409, "카메라 매핑된 층이 없습니다 — 드릴 불가")
     missing = [f for f in part if not floor_origins.get(f)]
@@ -1202,15 +1241,19 @@ async def drill_start(request: Request):
             except Exception:
                 logger.exception("드릴 녹화 부착 실패: %s", f)
         floors.append({"floor_id": f, "session": live.model_dump()})
-    return {"session_id": floors[0]["session"]["session_id"], "alarm_ts": t_alarm,
-            "floors": floors}
+    sid = floors[0]["session"]["session_id"]
+    _drill_meta_save(sid, part, t_alarm, body.get("label"), body.get("rehearsal"))
+    return {"session_id": sid, "alarm_ts": t_alarm, "floors": floors,
+            "label": body.get("label")}
 
 
 @app.post("/api/drill/stop", response_model=DrillResult)
 def drill_stop():
     """건물 드릴 종료 — 참여 전 층 세션 일괄 finalize·저장 후 롤업 반환."""
     sid = None
-    for f in rt.participating_floors():
+    # 라이브 세션이 있는 층 전부(레코드 기준 — 참여 층 추정에 의존하지 않는다)
+    live_floors = [f for f in rt.engines if rt.engines[f].session_live() is not None]
+    for f in live_floors:
         eng = rt.engine_for(f)
         if eng is None or eng.session_live() is None:
             continue
@@ -1237,12 +1280,14 @@ def drill_result(session_id: str):
 
 
 def _drill_session_ids() -> list[str]:
-    """참여 층 전부에 공통 존재하는 session_id (= 건물 드릴), 최신순."""
+    """드릴 id — 명시 레코드(sessions/_drills/*.json) ∪ 예전 방식(참여 층 전부에 공통
+    존재하는 session_id), 최신순."""
     ids = None
     for f in rt.participating_floors():
         fids = {p.stem for p in _sessions_dir(f).glob("*.json")}
         ids = fids if ids is None else (ids & fids)
-    return sorted(ids or [], reverse=True)
+    rec = {p.stem for p in _drills_dir().glob("*.json")}
+    return sorted((ids or set()) | rec, reverse=True)
 
 
 @app.get("/api/drills")
@@ -1255,11 +1300,14 @@ def drills_list():
         # 참여 각 층에 .db가 있으면 드릴 재계산 가능
         has_record = all(_session_db_path(sid, f).is_file() for f in roll["floors"]) \
             if roll["floors"] else False
+        if not roll["floors"]:
+            continue                        # 결과가 아직 없는(진행 중/깨진) 레코드
         out.append({"session_id": sid, "alarm_ts": roll.get("alarm_ts"),
                     "floors": roll["floors"], "epfi_avg": b["epfi_avg"],
                     "cbs_total": b["cbs_total"], "sei": b["sei"],
                     "total_passed": roll["summary"]["total_passed"],
-                    "has_record": has_record})
+                    "has_record": has_record,
+                    "label": roll.get("label"), "rehearsal": roll.get("rehearsal")})
     return out
 
 
@@ -1312,7 +1360,7 @@ async def drill_replay(session_id: str, request: Request):
                  if k in body and body[k] is not None}
     fps = float(body.get("fps", 5.0))
 
-    part = rt.participating_floors()
+    part = _drill_floors(session_id)        # 레코드 기준 — 리허설 층은 종료 후 참여 층이 아니다
     dbs = [(f, _session_db_path(session_id, f)) for f in part]
     dbs = [(f, db) for f, db in dbs if db.is_file()]
     if not dbs:
@@ -1328,7 +1376,9 @@ async def drill_replay(session_id: str, request: Request):
         frames_by_floor[f] = frames
         site_by_floor[f] = meta.get("site_view")
     roll = _aggregate_floors(session_id, floors)
+    m = _drill_meta(session_id)
     return {"drill": DrillResult.model_validate(roll).model_dump(),
+            "label": (m or {}).get("label"), "rehearsal": (m or {}).get("rehearsal"),
             "frames_by_floor": frames_by_floor, "site_by_floor": site_by_floor}
 
 

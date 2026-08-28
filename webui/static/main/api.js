@@ -80,8 +80,8 @@ const API = {
   stopSession: (floor) => API._post("/api/session/stop?" + API._fq(floor)),
 
   // ---- 건물 드릴 (전 층 세션, ADR 06) — 층별 아님(사이트 전역)
-  drillStart: (floorOrigins, t_alarm) => API._post("/api/drill/start",
-    { floor_origins: floorOrigins, ...(t_alarm != null ? { t_alarm } : {}) }),
+  drillStart: (floorOrigins, t_alarm, extra) => API._post("/api/drill/start",
+    { floor_origins: floorOrigins, ...(t_alarm != null ? { t_alarm } : {}), ...(extra || {}) }),
   drillStop: () => API._post("/api/drill/stop"),
   drillResult: (id) => API._j(`/api/drill/${encodeURIComponent(id)}/result`),
   getDrills: () => API._j("/api/drills"),

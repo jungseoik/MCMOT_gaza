@@ -17,7 +17,7 @@ Views.replay = (() => {
   let site = null;          // 세션 당시 공간요소 (배경 렌더)
 
   // 건물 드릴 모드(Phase 2·3) — 전 층 공유 세션 이력·재계산
-  let mode = "sess";        // "sess"(개별 층 세션) | "drill"(건물 훈련)
+  let mode = "drill";       // "drill"(건물 훈련, 기본 — 리허설도 건물 세션) | "sess"(개별 층, 디버그)
   let modeAuto = false;     // 최초 진입 시 사이트에 맞는 기본 모드 1회 자동 설정
   let drills = [];          // 드릴 이력 [{session_id, alarm_ts, floors, epfi_avg, ..., has_record}]
   let drill = null;         // 선택 드릴의 재산출 DrillResult
@@ -94,9 +94,10 @@ Views.replay = (() => {
       const rec = d.has_record
         ? `<span class="badge ok">재계산가능</span>`
         : `<span class="badge" title="일부 층 녹화 없음 — 재계산·재생 불가">요약만</span>`;
+      const lab = d.label ? `<span class="badge cy" title="${d.session_id}">${d.label}</span>` : "";
       return `<div class="camrow rpsess${d.session_id === selId ? " sel" : ""}" data-id="${d.session_id}">
-        <div class="r1"><span class="nm">${t}</span>${rec}</div>
-        <div class="r2"><span>층 ${(d.floors || []).length}</span>
+        <div class="r1"><span class="nm">${t}</span>${lab}${rec}</div>
+        <div class="r2"><span>층 ${(d.floors || []).map((f) => floorName(f)).join("·")}</span>
           <span>EPFI ${fmtVal(d.epfi_avg,0)}</span>
           <span>CBS ${fmtVal(d.cbs_total,1)}</span>
           <span>통과 ${d.total_passed || 0}</span></div></div>`;
@@ -497,7 +498,7 @@ Views.replay = (() => {
     if (!modeAuto) {
       modeAuto = true;
       const multi = App.site && (App.site.floors || []).length >= 2;
-      mode = multi ? "drill" : "sess";
+      mode = "drill";                      // 리허설·훈련 모두 건물 세션 — 개별 층은 디버그용
       $("rpModeDrill").classList.toggle("on", mode === "drill");
       $("rpModeSess").classList.toggle("on", mode === "sess");
       $("rpFloorWrap").classList.toggle("hidden", mode !== "drill");
