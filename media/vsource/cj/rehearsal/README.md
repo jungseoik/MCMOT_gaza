@@ -27,6 +27,14 @@ CJ제일제당센터 **10층**에서 촬영한 (전 시나리오 공통 — 시�
 | scenario_13 | cam2·8·9·10 | 31s | 15:41:13~15:41:43 | cam2→cam10→cam9→cam8 |
 | scenario_14 | cam8·9·10·13 | 25s | 15:42:24~15:42:49 | cam13→cam10→cam9→cam8 |
 
+## scenario_15_full — 01~14 전체 연속 (도구 생성)
+
+`python tools/rehearsal_concat_full.py --package cj-rehearsal` 로 만든다. 시나리오 01~14 를
+시간순으로 이어 붙이고, **그 시나리오에 없는 카메라 구간은 검정 프레임**으로 채운다 → 14대 전부
+**13,574프레임 = 452.5s** 로 프레임 단위 동일. 시나리오 사이 검정 **4s**(트래커 ID 가 순간이동으로
+엉키지 않게, lost_timeout 3s 초과). 각 시나리오의 시작·끝 초는 `rehearsal.json` 의
+`scenarios[].segments` 에 있다. 영상은 HF `media/vsource/cj/rehearsal/scenario_15_full/`.
+
 vsource 시나리오(`data/scenarios/<id>.json`) 등록 시 `file` 은
 `media/vsource/cj/rehearsal/scenario_NN/camX.mp4` 로 가리킨다. 층: 사이트 층 `floor10`(10F)에 붙는다 — 도면은 ① 맵설정에 16F(=17F_v2.dwg) 것을 그대로 올림(구조 동일). 구역·출구·CAD 는 ①에서 세팅.
 RTSP 경로(`path`)는 `cj_camN` 으로 통일 —

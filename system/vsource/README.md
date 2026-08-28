@@ -118,3 +118,5 @@ UI는 **② 카메라 등록·매핑** 좌측 [훈련영상 송출] 패널. 송�
 패키지 리허설은 RTSP 송출 없이 **영상 파일을 직접 읽어** 프레임 잠금 동기로 분석한다
 (`filesource.py` → AnalyzerThread 큐 → 엔진). 준비 즉시, 경보 = t0, 앞머리·재부착 없음.
 `rehearsal.json` 의 `"source": "rtsp"` 로 바꾸면 예전 송출 경로(현장 RTSP 검증용).
+- **전체 연속 시나리오**: `python tools/rehearsal_concat_full.py --package cj-rehearsal` — 01~14 를 이어 붙이고
+  없는 카메라 구간은 검정(간격 4s). 결과 `scenario_15_full/` 14대 동일 길이, 매니페스트 `segments` 기록.

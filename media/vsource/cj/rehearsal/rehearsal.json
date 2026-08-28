@@ -1049,6 +1049,264 @@
         "cam8": "cam3",
         "cam13": "cam1"
       }
+    },
+    {
+      "id": "scenario_15_full",
+      "name": "전체 (01~14 연속)",
+      "cycle_sec": 0,
+      "note": "시나리오 01~14 를 시간순 연결. 카메라가 없는 구간은 검정. 시나리오 사이 검정 4s.",
+      "gap_sec": 4.0,
+      "total_sec": 452.467,
+      "segments": [
+        {
+          "scenario": "scenario_01",
+          "name": "피난 시나리오 1",
+          "start_sec": 0.0,
+          "end_sec": 32.0,
+          "cams": [
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam14"
+          ]
+        },
+        {
+          "scenario": "scenario_02",
+          "name": "피난 시나리오 2",
+          "start_sec": 36.0,
+          "end_sec": 63.033,
+          "cams": [
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam14"
+          ]
+        },
+        {
+          "scenario": "scenario_03",
+          "name": "피난 시나리오 3",
+          "start_sec": 67.033,
+          "end_sec": 99.067,
+          "cams": [
+            "cam3",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11"
+          ]
+        },
+        {
+          "scenario": "scenario_04",
+          "name": "피난 시나리오 4",
+          "start_sec": 103.067,
+          "end_sec": 132.1,
+          "cams": [
+            "cam3",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11"
+          ]
+        },
+        {
+          "scenario": "scenario_05",
+          "name": "피난 시나리오 5",
+          "start_sec": 136.1,
+          "end_sec": 169.167,
+          "cams": [
+            "cam1",
+            "cam4",
+            "cam5",
+            "cam6",
+            "cam7"
+          ]
+        },
+        {
+          "scenario": "scenario_06",
+          "name": "피난 시나리오 6",
+          "start_sec": 173.167,
+          "end_sec": 200.2,
+          "cams": [
+            "cam1",
+            "cam4",
+            "cam5",
+            "cam6",
+            "cam7"
+          ]
+        },
+        {
+          "scenario": "scenario_07",
+          "name": "피난 시나리오 7",
+          "start_sec": 204.2,
+          "end_sec": 233.233,
+          "cams": [
+            "cam4",
+            "cam5",
+            "cam6",
+            "cam7",
+            "cam12"
+          ]
+        },
+        {
+          "scenario": "scenario_08",
+          "name": "피난 시나리오 8",
+          "start_sec": 237.233,
+          "end_sec": 267.267,
+          "cams": [
+            "cam4",
+            "cam5",
+            "cam6",
+            "cam7",
+            "cam12"
+          ]
+        },
+        {
+          "scenario": "scenario_09",
+          "name": "피난 시나리오 9",
+          "start_sec": 271.267,
+          "end_sec": 297.3,
+          "cams": [
+            "cam5",
+            "cam6",
+            "cam7",
+            "cam13"
+          ]
+        },
+        {
+          "scenario": "scenario_10",
+          "name": "피난 시나리오 10",
+          "start_sec": 301.3,
+          "end_sec": 324.333,
+          "cams": [
+            "cam5",
+            "cam6",
+            "cam7",
+            "cam13"
+          ]
+        },
+        {
+          "scenario": "scenario_11",
+          "name": "피난 시나리오 11",
+          "start_sec": 328.333,
+          "end_sec": 356.367,
+          "cams": [
+            "cam2",
+            "cam5",
+            "cam6",
+            "cam7"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "start_sec": 360.367,
+          "end_sec": 388.4,
+          "cams": [
+            "cam2",
+            "cam5",
+            "cam6",
+            "cam7"
+          ]
+        },
+        {
+          "scenario": "scenario_13",
+          "name": "피난 시나리오 13",
+          "start_sec": 392.4,
+          "end_sec": 423.433,
+          "cams": [
+            "cam2",
+            "cam8",
+            "cam9",
+            "cam10"
+          ]
+        },
+        {
+          "scenario": "scenario_14",
+          "name": "피난 시나리오 14",
+          "start_sec": 427.433,
+          "end_sec": 452.467,
+          "cams": [
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam13"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "scenario_15_full/cam1.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam2",
+          "file": "scenario_15_full/cam2.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam3",
+          "file": "scenario_15_full/cam3.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam4",
+          "file": "scenario_15_full/cam4.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam5",
+          "file": "scenario_15_full/cam5.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam6",
+          "file": "scenario_15_full/cam6.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam7",
+          "file": "scenario_15_full/cam7.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_15_full/cam8.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_15_full/cam9.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_15_full/cam10.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_15_full/cam11.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam12",
+          "file": "scenario_15_full/cam12.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam13",
+          "file": "scenario_15_full/cam13.mp4",
+          "duration_sec": 452.467
+        },
+        {
+          "cam": "cam14",
+          "file": "scenario_15_full/cam14.mp4",
+          "duration_sec": 452.467
+        }
+      ]
     }
   ],
   "prep": {
