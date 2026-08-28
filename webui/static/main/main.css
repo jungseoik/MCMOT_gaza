@@ -625,3 +625,8 @@ body.rehearsing .rhbanner{ display:block; }
 /* 행은 두 줄만 — conf 편집은 선택한 카메라에만 펼친다 */
 .camrow .r3{ display:none; }
 .camrow.sel .r3{ display:flex; }
+
+/* ④ 리플레이 목록 — 좁은 사이드바에서 줄 안 깨지게 */
+.rpsess .r2{ flex-wrap:wrap; row-gap:2px; }
+.rpsess .r2 span{ white-space:nowrap; }
+.rpsess .r2 .mtr{ margin-left:auto; }

@@ -90,17 +90,26 @@ Views.replay = (() => {
       return;
     }
     box.innerHTML = drills.map((d) => {
-      const t = d.alarm_ts ? new Date(d.alarm_ts * 1000).toLocaleString("ko-KR", {hour12:false}) : d.session_id;
+      const dt = d.alarm_ts ? new Date(d.alarm_ts * 1000) : null;
+      const p2 = (n) => String(n).padStart(2, "0");
+      // 좁은 사이드바(280px) — 시각은 "08/28 04:05" 로, 전체 시각은 title 로
+      const t = dt ? `${p2(dt.getMonth() + 1)}/${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}` : d.session_id;
+      const tFull = dt ? dt.toLocaleString("ko-KR", {hour12:false}) : d.session_id;
       const rec = d.has_record
         ? `<span class="badge ok">재계산가능</span>`
         : `<span class="badge" title="일부 층 녹화 없음 — 재계산·재생 불가">요약만</span>`;
-      const lab = d.label ? `<span class="badge cy" title="${d.session_id}">${d.label}</span>` : "";
+      // 라벨(🎬 패키지 — 시나리오)은 행 제목으로 — 배지에 넣으면 길어서 행이 두세 줄로 깨진다.
+      // 패키지명은 title 로 내리고 시나리오 부분만 보인다("🎬 전체 (01~14 연속)").
+      let title = tFull;
+      if (d.label) {
+        const parts = String(d.label).split(" — ");
+        title = parts.length > 1 ? `${parts[0].split(" ")[0]} ${parts.slice(1).join(" — ")}` : d.label;
+      }
+      const floors = (d.floors || []).map((f) => floorName(f)).join("·");
       return `<div class="camrow rpsess${d.session_id === selId ? " sel" : ""}" data-id="${d.session_id}">
-        <div class="r1"><span class="nm">${t}</span>${lab}${rec}</div>
-        <div class="r2"><span>층 ${(d.floors || []).map((f) => floorName(f)).join("·")}</span>
-          <span>EPFI ${fmtVal(d.epfi_avg,0)}</span>
-          <span>CBS ${fmtVal(d.cbs_total,1)}</span>
-          <span>통과 ${d.total_passed || 0}</span></div></div>`;
+        <div class="r1"><span class="nm" title="${(d.label || "") + " · " + d.session_id}">${title}</span>${rec}</div>
+        <div class="r2"><span class="cid" title="${tFull}">${t}</span><span>${floors}</span>
+          <span class="mtr">EPFI ${fmtVal(d.epfi_avg,0)} · CBS ${fmtVal(d.cbs_total,1)} · 통과 ${d.total_passed || 0}</span></div></div>`;
     }).join("");
     box.querySelectorAll(".rpsess").forEach((el) => {
       el.onclick = () => {
