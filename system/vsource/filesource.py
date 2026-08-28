@@ -148,9 +148,10 @@ class FileSourceRunner:
     하나 띄운다 — server.py 참조).
     """
 
-    def __init__(self, queue_put, rtsp_host: str = "127.0.0.1:8554"):
+    def __init__(self, queue_put, rtsp_host: str = "127.0.0.1:8554", on_done=None):
         self._put = queue_put
         self._rtsp_host = rtsp_host
+        self.on_done = on_done            # 재생이 끝까지 갔을 때(loop 아님) 1회 호출 — 세션 자동 종료용
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -299,6 +300,11 @@ class FileSourceRunner:
                     with self._lock:
                         self.mode = "done"
                     logger.info("[vsource.file] 재생 끝 (%d스텝)", k)
+                    if self.on_done is not None:
+                        try:
+                            self.on_done()
+                        except Exception:
+                            logger.exception("[vsource.file] on_done 콜백 실패")
                     return
                 for c, fr in frames:
                     if fr is None:

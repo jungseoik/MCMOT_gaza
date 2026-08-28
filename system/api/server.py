@@ -73,6 +73,9 @@ if INGEST_BACKEND not in ("ffmpeg", "deepstream"):
 # 기본 on. 0/false면 녹화 끔(기존과 동일 동작, 롤백). 리플레이/재계산의 원료.
 SESSION_RECORD = os.environ.get("SESSION_RECORD", "1").strip().lower() not in ("0", "false", "no", "")
 FRONT_DIR = Path(__file__).resolve().parents[2] / "webui" / "static" / "main"
+# 파일 모드 재생이 끝나면 리허설 층의 세션을 자동 종료·저장 (ADR 09 §19). 0 이면 수동.
+AUTO_END_SESSION = os.environ.get("VSOURCE_AUTO_END_SESSION", "1").strip().lower() not in ("0", "false", "no")
+AUTO_END_GRACE_SEC = float(os.environ.get("VSOURCE_AUTO_END_GRACE", "2.0"))
 # 리허설(파일 모드) 동안 사이트 RTSP 인제스트를 내린다 (ADR 09 §14). 0 이면 유지.
 PARK_SITE_ON_REHEARSAL = os.environ.get("VSOURCE_PARK_SITE", "1").strip().lower() not in ("0", "false", "no")
 
@@ -108,7 +111,8 @@ class Runtime:
         self._file_queue = FrameQueue(maxsize=64)
         self._file_analyzer = None
         self.filesrc = vfile.FileSourceRunner(queue_put=self._file_put,
-                                              rtsp_host=vsource.RTSP_HOST)
+                                              rtsp_host=vsource.RTSP_HOST,
+                                              on_done=self._on_rehearsal_done)
         self._parked = False                   # 리허설 동안 사이트 RTSP 인제스트를 내렸는가
         self.analyzer = None  # AnalyzerThread | None — TRT 로드 실패 시 None
         self._lock = threading.Lock()
@@ -309,6 +313,23 @@ class Runtime:
                 logger.exception("리허설 복원: ingest start 실패")
             self._parked = False
             logger.info("리허설 복원: 사이트 RTSP 인제스트 재기동 (%d대)", len(cams))
+
+    def _on_rehearsal_done(self) -> None:
+        """파일 모드 재생이 끝까지 갔다 — 리허설 층에 살아 있는 세션을 자동 종료·저장한다.
+
+        리허설 1회 = 영상 1회. 영상이 끝난 뒤 세션이 열려 있으면 빈 시간만 쌓이고, 사용자가
+        ③에서 종료를 눌러야 리플레이가 저장된다(실측: 수동 종료 필요했음). 종료 후 몇 초
+        여유(VSOURCE_AUTO_END_GRACE)는 마지막 프레임 트랙이 엔진에 흘러들 시간이다.
+        """
+        if not AUTO_END_SESSION:
+            return
+        floors = [f for f in (self.filesrc.floors or list(self.engines))
+                  if f in self.engines and self.engines[f].session_live() is not None]
+        if not floors:
+            return
+        time.sleep(AUTO_END_GRACE_SEC)
+        sid = _stop_live_drill(floors)
+        logger.info("리허설 영상 종료 → 세션 자동 종료·저장: %s (층 %s)", sid, floors)
 
     def cam_states(self) -> list:
         """ingest 카메라 상태 + 파일 모드 카메라 상태."""
@@ -1252,11 +1273,12 @@ async def drill_start(request: Request):
 
 
 @app.post("/api/drill/stop", response_model=DrillResult)
-def drill_stop():
-    """건물 드릴 종료 — 참여 전 층 세션 일괄 finalize·저장 후 롤업 반환."""
+def _stop_live_drill(floors: list[str] | None = None) -> str | None:
+    """살아 있는 세션(층들)을 finalize·저장. 돌려주는 값은 session_id(없으면 None).
+    API drill_stop 과 파일 모드 자동 종료(_on_rehearsal_done)가 함께 쓴다."""
     sid = None
-    # 라이브 세션이 있는 층 전부(레코드 기준 — 참여 층 추정에 의존하지 않는다)
-    live_floors = [f for f in rt.engines if rt.engines[f].session_live() is not None]
+    live_floors = [f for f in (floors if floors is not None else list(rt.engines))
+                   if f in rt.engines and rt.engines[f].session_live() is not None]
     for f in live_floors:
         eng = rt.engine_for(f)
         if eng is None or eng.session_live() is None:
@@ -1270,6 +1292,12 @@ def drill_stop():
                 logger.exception("드릴 녹화 종료 실패: %s", f)
         _save_session(result, eng.session_timeline(), eng.session_person_series(), floor_id=f)
         sid = result.session_id
+    return sid
+
+
+def drill_stop():
+    """건물 드릴 종료 — 라이브 세션 층 일괄 finalize·저장 후 롤업 반환."""
+    sid = _stop_live_drill()
     if sid is None:
         raise HTTPException(404, "진행 중인 드릴 없음")
     return _drill_rollup(sid)

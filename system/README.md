@@ -92,6 +92,7 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 | `VSOURCE_FILE_DECODE_WORKERS` | `8` | 파일 모드 디코드 스레드(1080p 채널당 14ms → 병렬화, ~15ch@5fps) |
 | `VSOURCE_FILE_START_MARGIN` | `0.8` | 시작 여유(초) — t0 = 지금 + 여유, 경보 시각 = t0 |
 | (사이트 `thresholds.exit_extrap_m`) | `2.0` | 출입구 통과 판정에 헐 밖 관측을 쓰는 반경(m, 헐 경계 기준). 0=끔. ADR 09 §18 |
+| `VSOURCE_AUTO_END_SESSION` | `1` | 파일 모드 영상이 끝나면 리허설 층 세션 자동 종료·저장 (`VSOURCE_AUTO_END_GRACE` 2s) |
 | `VSOURCE_PARK_SITE` | `1` | 리허설(파일 모드) 동안 사이트 RTSP 인제스트를 내리고(GPU 해제) 종료 시 복원. `0`=유지 |
 
 ## 카메라 일괄 등록 (벌크)
