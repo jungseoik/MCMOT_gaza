@@ -410,6 +410,14 @@
           <button class="btn stop sm hidden" id="sessStopBtn">⏹ 세션 종료</button>
           <span class="fieldlab" id="sessHint"></span>
           <span class="sp"></span>
+          <span class="seg" id="layerSeg" title="지도에 표시할 요소 — 기본 전부. 끄면 그 요소만 숨김(지표 계산은 그대로)">
+            <span class="tb-lab">표시</span>
+            <button class="tag-btn on" data-layer="zones" title="IDR 구역(밀도)">구역</button>
+            <button class="tag-btn on" data-layer="routes" title="EPFI 피난경로">경로</button>
+            <button class="tag-btn on" data-layer="bottlenecks" title="CBS 병목">병목</button>
+            <button class="tag-btn on" data-layer="exits" title="SEI 출입구 통과선·카운트">출입구</button>
+            <button class="tag-btn on" data-layer="origins" title="경보 발생원 마커">경보원</button>
+          </span>
           <button class="tag-btn" id="graphToggle" title="IDR 공간그래프 표시">공간그래프</button>
           <button class="tag-btn" id="hullToggle" title="카메라 매핑 커버리지 표시 (대응점 컨벡스 헐)">커버리지</button>
           <span class="fieldlab" title="객체 위치 보간 렌더링 목표 fps">보간 <input id="fpsInput" type="number" min="1" max="30" step="1" value="20" style="width:46px" /> fps</span>

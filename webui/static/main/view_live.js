@@ -9,6 +9,13 @@ Views.live = (() => {
   let inited = false, active = false;
   let mc = null, es = null, watchdog = null;
   let state = null, lastMsg = 0;
+  // 지도 레이어 표시 — 기본 전부 켬. 운영자가 "IDR 구역만" 같은 식으로 골라 볼 수 있게.
+  // 저장은 브라우저(localStorage) — 서버 설정이 아니라 보는 사람의 취향이다.
+  const LAYER_KEYS = ["zones", "routes", "bottlenecks", "exits", "origins"];
+  let layers = (() => {
+    try { const v = JSON.parse(localStorage.getItem("macs_live_layers") || "null"); if (v && typeof v === "object") return { ...Object.fromEntries(LAYER_KEYS.map((k) => [k, true])), ...v }; } catch (e) { /* 무시 */ }
+    return Object.fromEntries(LAYER_KEYS.map((k) => [k, true]));
+  })();
   let showGraph = false;                 // IDR 공간그래프 표시 토글
   let showHulls = false;                 // 카메라 매핑 커버리지 다각형 표시
   let selGid = null;                     // 객체 목록에서 선택된 gid (맵 하이라이트)
@@ -159,10 +166,10 @@ Views.live = (() => {
 
   // ------------------------------------------------------------ 렌더
   function overlay(g) {
-    drawSiteElements(g, App.site, { state, showScale: false });
+    drawSiteElements(g, App.site, { state, showScale: false, layers });
     if (showGraph) drawGraph(g, App.site.graph, { faint: true });
     if (showHulls) drawCameraHulls(g);               // 카메라별 매핑 커버리지
-    drawAlarm(g);                                    // 🔔 경보 위치 마커
+    if (layers.origins !== false) drawAlarm(g);      // 🔔 경보 위치 마커
     if (!state) return;
     const { ctx, TX, TY } = g;
     const alpha = Math.min(1, interpDuration > 0
@@ -379,6 +386,17 @@ Views.live = (() => {
       Session.init({ onMapRender: () => { if (mc) mc.render(); } });
       // bootstrap은 enter()에서 매 진입(층 전환 포함)마다 현재 층 기준으로 호출
     }
+    // 레이어 토글 칩 — 기본 전부 on, 클릭으로 끄고 켠다 (브라우저에 기억)
+    document.querySelectorAll("#layerSeg .tag-btn[data-layer]").forEach((b) => {
+      const k = b.dataset.layer;
+      b.classList.toggle("on", layers[k] !== false);
+      b.onclick = () => {
+        layers[k] = !(layers[k] !== false);
+        b.classList.toggle("on", layers[k]);
+        try { localStorage.setItem("macs_live_layers", JSON.stringify(layers)); } catch (e) { /* 무시 */ }
+        if (mc) mc.render();
+      };
+    });
     $("graphToggle").onclick = () => {
       showGraph = !showGraph;
       $("graphToggle").classList.toggle("on", showGraph);

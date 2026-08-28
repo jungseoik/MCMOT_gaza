@@ -453,9 +453,11 @@ function drawSiteElements(g, site, opts = {}) {
   };
   const st = opts.state || null;
   const find = (list, id) => (list || []).find((e) => e.id === id);
+  // 레이어 표시 여부 — 운영뷰 [표시] 토글. 미지정이면 전부(기존 동작).
+  const L = Object.assign({ zones: true, bottlenecks: true, routes: true, exits: true }, opts.layers || {});
 
   // 구역
-  (site.zones || []).forEach((z) => {
+  if (L.zones) (site.zones || []).forEach((z) => {
     ctx.globalAlpha = a;
     mcPath(g, z.polygon, true);
     ctx.fillStyle = "rgba(40,161,56,.12)"; ctx.fill();
@@ -469,7 +471,7 @@ function drawSiteElements(g, site, opts = {}) {
   });
 
   // 병목 (over → 붉은 하이라이트)
-  (site.bottlenecks || []).forEach((b) => {
+  if (L.bottlenecks) (site.bottlenecks || []).forEach((b) => {
     const bs = st && find(st.bottlenecks, b.id);
     const over = !!(bs && bs.over);
     ctx.globalAlpha = a;
@@ -487,7 +489,7 @@ function drawSiteElements(g, site, opts = {}) {
   });
 
   // 피난경로 (진행 화살표)
-  (site.routes || []).forEach((r) => {
+  if (L.routes) (site.routes || []).forEach((r) => {
     ctx.globalAlpha = a;
     mcPath(g, r.points, false);
     ctx.strokeStyle = MC_COLORS.route; ctx.lineWidth = 2.5;
@@ -505,7 +507,7 @@ function drawSiteElements(g, site, opts = {}) {
   });
 
   // 출입구 통과선 + inside 표시 + in/out 뱃지
-  (site.exits || []).forEach((e) => {
+  if (L.exits) (site.exits || []).forEach((e) => {
     ctx.globalAlpha = a;
     const [p1, p2] = e.line;
     // 카운트를 카메라 화면에서 하는 출입구는 점선 — 이 맵 선은 위치·폭(C_j)
