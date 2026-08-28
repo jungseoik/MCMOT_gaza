@@ -247,8 +247,12 @@ class MetricsEngine:
                     "foot_u": round(tr.foot_uv[0], 1), "foot_v": round(tr.foot_uv[1], 1),
                     "map_x": round(p.x, 1) if p else None, "map_y": round(p.y, 1) if p else None,
                 }
-                if p is None:                    # valid_roi 밖 — 제외
-                    self._drop(f"{cam_id}:{tr.local_track_id}")
+                if p is None:                    # valid_roi 밖 — 표출·밀도·EPFI 에서 제외
+                    # 단, **출입구 통과 판정**만은 헐 밖 관측도 쓴다(exit_extrap_m).
+                    # 문은 대개 헐 경계 밖에 있어 일반 규칙대로면 영영 안 세진다.
+                    # 외삽 오차를 감안해 출입구 선 근처 관측만, 맵 안(in_bounds)만.
+                    self._observe_exits_extrap(cam_id, gid_pre, proj, tr.foot_uv)
+                    self._drop(gid_pre, forget_lines=not self._extrap_on())
                     if sess is not None:
                         sess.note_dropped()
                     continue
@@ -275,15 +279,50 @@ class MetricsEngine:
             if sess is not None:                 # 1초 샘플 (IDR·CBS·타임라인)
                 sess.maybe_sample(self._latest_ts)
 
-    def _drop(self, gid: str) -> None:
+    def _extrap_on(self) -> bool:
+        return bool(self._m_per_px) and float(getattr(self._site.thresholds, "exit_extrap_m", 0.0) or 0.0) > 0
+
+    def _observe_exits_extrap(self, cam_id: str, gid: str, proj, foot_uv) -> None:
+        """헐 밖 관측을 출입구 맵 통과선 판정에 쓴다 — **헐 경계에서 exit_extrap_m 안**일 때만.
+
+        외삽 오차는 헐에서 멀어질수록 커진다(렌즈 왜곡·대응점 잡음 증폭). 그래서 기준은
+        "출입구 선에 가깝다"가 아니라 "매핑된 바닥(헐)에서 가깝다"다 — 문이 헐 바로 밖
+        1~2m 에 있는 전형적 경우만 허용하고, 멀리서 찍힌 사람이 엉뚱한 선을 넘는 건 막는다.
+        """
+        if not self._extrap_on():
+            return
+        p = proj.project_raw(foot_uv)
+        if not p.in_bounds:
+            return
+        r_px = float(self._site.thresholds.exit_extrap_m) / self._m_per_px
+        cache = getattr(self, "_roi_map_poly", None)
+        if cache is None:
+            cache = self._roi_map_poly = {}
+        poly = cache.get(cam_id)
+        if poly is None or cache.get(("_proj", cam_id)) is not proj:
+            poly = cache[cam_id] = proj.roi_map_polygon()
+            cache[("_proj", cam_id)] = proj      # 투영기가 재구성되면 다각형도 다시
+        if _dist_to_polygon(p.x, p.y, poly) > r_px:
+            return
+        cam_owned = self._cam_exit_ids()
+        for eid, ec in self._exits.items():
+            if eid in cam_owned or not hasattr(ec.line, "A"):
+                continue                          # 화면 게이트는 이미 투영 전에 관측했다
+            ec.observe(gid, (p.x, p.y))
+
+    def _drop(self, gid: str, forget_lines: bool = True) -> None:
         """맵 투영에서 빠진 객체 정리.
 
         화면 통과선(cam_line)은 **일부러 헐 밖에서 쓰는 것**이라 여기서 부호
         기억을 지우면 안 된다. 지우면 문 앞으로 나가는 매 프레임마다 상태가
         초기화돼 crossing 이 영영 성립하지 않는다(실측으로 확인).
-        맵 통과선만 정리한다.
+        맵 통과선은 forget_lines=True 일 때만 정리 — 헐 밖 외삽 판정(exit_extrap_m)을
+        쓰는 동안은 "헐 안 → 헐 밖" 한 걸음 사이에 부호가 지워지면 crossing 이 안 잡히므로
+        유지하고, 객체가 소실(lost_timeout)될 때 지운다.
         """
         self._objects.pop(gid, None)
+        if not forget_lines:
+            return
         cam_owned = self._cam_exit_ids()
         for eid, ec in self._exits.items():
             if eid in cam_owned:
@@ -527,3 +566,22 @@ class MetricsEngine:
                 session=(self._session.live(self._session_now())
                          if self._session is not None else None),
             )
+
+
+def _dist_to_segment(x: float, y: float, A, B) -> float:
+    """점 (x,y) 와 선분 AB(맵 px) 사이 거리."""
+    ax, ay = float(A[0]), float(A[1])
+    bx, by = float(B[0]), float(B[1])
+    dx, dy = bx - ax, by - ay
+    L2 = dx * dx + dy * dy
+    t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / L2))
+    px, py = ax + t * dx, ay + t * dy
+    return float(((x - px) ** 2 + (y - py) ** 2) ** 0.5)
+
+
+def _dist_to_polygon(x: float, y: float, poly) -> float:
+    """점과 다각형(맵 px) 사이 거리 — 안이면 0."""
+    if len(poly) >= 3 and point_in_polygon((x, y), poly):
+        return 0.0
+    n = len(poly)
+    return min(_dist_to_segment(x, y, poly[i], poly[(i + 1) % n]) for i in range(n)) if n >= 2 else float("inf")

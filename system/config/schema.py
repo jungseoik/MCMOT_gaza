@@ -236,6 +236,10 @@ class Thresholds(BaseModel):
     d_allow: float = 2.0   # EPFI 허용 이탈거리 (m)
     min_conf: float = 0.35  # 표출·지표 최소 검출 신뢰도 — 저신뢰 오탐(예: 의자)이
     q_design: float = Field(default=60.0, gt=0)  # SEI: 단위 유효폭당 설계 통과기준 [인/분/m]
+    exit_extrap_m: float = Field(default=2.0, ge=0)  # 출입구 통과 판정에 헐 밖 관측을 쓰는 반경(m).
+                                           # 문은 대개 헐 경계 밖이라 일반 규칙(헐 밖 폐기)이면
+                                           # 안 세진다 → 출입구 선에서 이 거리 안이면 외삽 투영을
+                                           # 통과 판정에만 쓴다. 0 = 끔(예전 동작).
                             # BYTE 저신뢰 연관으로 연명한 트랙 관측을 지표 층에서 차단
 
 

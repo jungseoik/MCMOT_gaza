@@ -63,6 +63,24 @@ class CameraProjector:
         """카메라 px 유효영역 포함 여부."""
         return point_in_polygon((u, v), self._roi)
 
+    def roi_map_polygon(self) -> list[tuple[float, float]]:
+        """유효영역(헐/ROI)을 맵 px 로 투영한 다각형 — 외삽 허용 거리 판정용."""
+        arr = np.array(self._roi, dtype=np.float64).reshape(-1, 1, 2)
+        out = cv2.perspectiveTransform(arr, self.H).reshape(-1, 2)
+        return [(float(x), float(y)) for x, y in out]
+
+    def project_raw(self, foot_uv: tuple[float, float]) -> ProjectedPoint:
+        """ROI 검사 없이 투영(외삽 허용). 출입구 통과 판정 전용 — 문은 대개 헐 경계 밖이라
+        일반 규칙(헐 밖 폐기)대로면 영영 안 세진다. 외삽 오차가 커지므로 호출부가
+        '출입구 선 근처(exit_extrap_m)' 로 범위를 제한한다."""
+        u, v = float(foot_uv[0]), float(foot_uv[1])
+        w = cv2.perspectiveTransform(np.array([[[u, v]]], dtype=np.float64), self.H)[0, 0]
+        x, y = float(w[0]), float(w[1])
+        in_bounds = True
+        if self.map_w is not None and self.map_h is not None:
+            in_bounds = 0.0 <= x <= float(self.map_w) and 0.0 <= y <= float(self.map_h)
+        return ProjectedPoint(x=x, y=y, in_bounds=in_bounds)
+
     def project(self, foot_uv: tuple[float, float]) -> ProjectedPoint | None:
         """발끝점 (u,v) → 맵 (x,y). ROI 밖이면 None."""
         u, v = float(foot_uv[0]), float(foot_uv[1])

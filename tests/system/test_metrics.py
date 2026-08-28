@@ -334,3 +334,43 @@ def test_min_conf_camera_override_lower():
     eng = MetricsEngine(site, [cam])
     gids = _obs(eng, 0.1, 0.3)   # 0.1 < 0.2 제외, 0.3 >= 0.2 통과 (사이트였다면 제외)
     assert "c1:0" not in gids and "c1:1" in gids
+
+
+# ------------------------------------------------------------ 출입구 — 헐 밖 외삽 판정
+class TestExitExtrapolation:
+    """문은 대개 매핑 헐 경계 밖에 있다. 일반 규칙(헐 밖 폐기)대로면 출입구 선이 헐 밖일 때
+    영영 안 세진다 → 출입구 통과 판정만 헐 밖 관측을 쓴다(exit_extrap_m, 선 근처만)."""
+
+    @staticmethod
+    def _cam_small_hull():
+        # 헐 = 맵 (100..400)² — 그 밖(x>400)은 폐기 대상
+        pts = [(100.0, 100.0), (400.0, 100.0), (400.0, 400.0), (100.0, 400.0)]
+        return CameraConfig(cam_id="cam01", rtsp="rtsp://test",
+                            mapping=CameraMapping(cctv_pts=pts, map_pts=pts,
+                                                  H=[1, 0, 0, 0, 1, 0, 0, 0, 1]))
+
+    EXIT_OUT = ExitLine(id="door", line=((500, 200), (500, 300)), inside=(300, 250))  # 헐 밖 1m
+
+    def test_counts_crossing_outside_hull(self):
+        eng = MetricsEngine(make_site(exits=[self.EXIT_OUT]), [self._cam_small_hull()])
+        # 헐 안(x=380) → 헐 밖 문 앞(x=480, 선 20px 앞) → 문 너머(x=520)
+        for i, x in enumerate((380.0, 480.0, 520.0)):
+            eng.on_tracks("cam01", 100.0 + i * 0.2, [tr("cam01", 1, x, 250.0, 100.0 + i * 0.2)])
+        ex = eng.snapshot().exits[0]
+        assert ex.out_count == 1 and ex.in_count == 0, (ex.in_count, ex.out_count)
+
+    def test_far_extrapolation_ignored(self):
+        """선에서 exit_extrap_m(2m=200px) 보다 먼 헐 밖 관측은 안 쓴다 — 외삽 오차 방지."""
+        far = ExitLine(id="far", line=((900, 200), (900, 300)), inside=(300, 250))     # 헐 밖 5m
+        eng = MetricsEngine(make_site(exits=[far]), [self._cam_small_hull()])
+        for i, x in enumerate((380.0, 880.0, 920.0)):
+            eng.on_tracks("cam01", 100.0 + i * 0.2, [tr("cam01", 1, x, 250.0, 100.0 + i * 0.2)])
+        assert eng.snapshot().exits[0].out_count == 0
+
+    def test_disabled_when_zero(self):
+        from system.config.schema import Thresholds
+        site = make_site(exits=[self.EXIT_OUT], thresholds=Thresholds(exit_extrap_m=0.0))
+        eng = MetricsEngine(site, [self._cam_small_hull()])
+        for i, x in enumerate((380.0, 480.0, 520.0)):
+            eng.on_tracks("cam01", 100.0 + i * 0.2, [tr("cam01", 1, x, 250.0, 100.0 + i * 0.2)])
+        assert eng.snapshot().exits[0].out_count == 0                 # 예전 동작 유지
