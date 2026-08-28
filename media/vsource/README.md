@@ -6,8 +6,9 @@
 media/vsource/<시나리오 id>/*.mp4
 ```
 
-**git에 올리지 않는다**(대용량). HuggingFace `backseollgi/MCMOT` 에 보관하고
-`tools/rtsp/fetch_assets.sh` 로 받는다. 이 README만 git 추적.
+영상은 **git에 올리지 않는다**(대용량). HuggingFace `backseollgi/MCMOT` 에 **레포 경로 그대로**
+(`media/vsource/<site>/<set>/...`) 보관하고 `tools/fetch_assets.sh --rehearsal` 로 받는다.
+패키지 정의(`rehearsal.json`·README)는 git 추적.
 
 ## `field/` 와의 차이
 
@@ -46,7 +47,7 @@ media/vsource/
 
 | 폴더 | 내용 | 출처 |
 |---|---|---|
-| `cj/rehearsal/` | **CJ제일제당센터 리허설 영상** — 시나리오 14개(`scenario_01`~`14`), 각 4~5캠(cam1~14 조합). 1080p·30fps·h264·23~33초. `grid_preview/` 14개 별도 | HF dataset `PIA-SPACE/C-lab` / `03_scenarios.7z.001` (토큰: 레포 `.env`의 `HF_TOKEN`) |
+| `cj/rehearsal/` | **CJ제일제당센터 리허설 영상** — 시나리오 14개(`scenario_01`~`14`), 각 4~5캠(cam1~14 조합). 1080p·30fps·h264 baseline·23~33초. `grid_preview/` 14개 별도 | **정본** HF `backseollgi/MCMOT/media/vsource/cj/rehearsal/` (`fetch_assets.sh --rehearsal`) · 원본(High 프로파일) 출처 HF dataset `PIA-SPACE/C-lab/03_scenarios.7z.001` |
 | `aihub/rehearsal/` | **AI Hub 리허설 영상** — 예정 | — |
 
 상세는 각 폴더의 `README.md` 참조.

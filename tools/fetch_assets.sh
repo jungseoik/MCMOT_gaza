@@ -31,7 +31,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; DO_MANUAL=0; DO_REHEARSAL=0; FORCE=0; ANY=0
-# 레포 루트 .env 가 있으면 HF_TOKEN 을 읽는다 (커밋 금지 파일 — .env.example 참조)
+# 레포 루트 .env 가 있으면 HF_TOKEN 을 읽는다 (커밋 금지 파일 — .env.example 참조).
+# 없으면 `hf auth login` 으로 저장된 토큰을 hf CLI 가 쓴다.
 if [ -f "$(dirname "$0")/../.env" ]; then set -a; . "$(dirname "$0")/../.env"; set +a; fi
 for a in "$@"; do
   case "$a" in
@@ -142,19 +143,18 @@ if [ "$DO_FIELD" -eq 1 ]; then
 fi
 
 if [ "$DO_REHEARSAL" -eq 1 ]; then
-  echo "== 리허설 패키지 영상 (PIA-SPACE/C-lab dataset :: rehearsal_packages/ → media/vsource/) =="
+  echo "== 리허설 패키지 영상 (backseollgi/MCMOT/media/vsource/** → ./media/vsource/, 비공개) =="
   # 패키지 정의(rehearsal.json·README)는 git 소관 — HF 에는 영상(mp4)만 있다 (ADR 09).
-  # HF 경로 rehearsal_packages/<site>/<set>/... 가 로컬 media/vsource/<site>/<set>/... 로 간다.
-  TMPR="$(mktemp -d)"
-  if "$HF_BIN" download PIA-SPACE/C-lab --repo-type dataset --include "rehearsal_packages/**" --local-dir "$TMPR" >/dev/null; then
-    mkdir -p media/vsource
-    if [ "$FORCE" -eq 1 ]; then cp -r "$TMPR"/rehearsal_packages/. media/vsource/; else cp -rn "$TMPR"/rehearsal_packages/. media/vsource/; fi
-    echo "  ↓ rehearsal_packages/** → media/vsource/  ($(du -sh media/vsource 2>/dev/null | cut -f1))"
+  # HF 경로가 레포 경로와 같으므로(field/** 와 같은 컨벤션) --local-dir . 로 그대로 내려온다.
+  # .env 의 HF_TOKEN 이 MCMOT 권한이 없는 토큰일 수 있다(다른 org 용) — 실패하면 토큰을
+  # 비우고 `hf auth login` 저장 자격으로 한 번 더 시도한다.
+  if "$HF_BIN" download backseollgi/MCMOT --repo-type model --include "media/vsource/**" --local-dir . >/dev/null \
+     || env -u HF_TOKEN "$HF_BIN" download backseollgi/MCMOT --repo-type model --include "media/vsource/**" --local-dir . >/dev/null; then
+    echo "  ↓ media/vsource/** → ./media/vsource/  ($(du -sh media/vsource 2>/dev/null | cut -f1))"
     echo "  검증: python tools/rehearsal_prep.py media/vsource/cj/rehearsal"
   else
-    echo "  [실패] rehearsal — PIA-SPACE/C-lab(비공개) 토큰(HF_TOKEN, PIA-SPACE org) 필요" >&2; RC=1
+    echo "  [실패] rehearsal — 비공개 MCMOT 접근 토큰(HF_TOKEN 또는 hf auth login) 필요" >&2; RC=1
   fi
-  rm -rf "$TMPR"
 fi
 
 if [ "$DO_MANUAL" -eq 1 ]; then

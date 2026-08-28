@@ -3,7 +3,8 @@
 CJ제일제당센터 **10층**에서 촬영한 (전 시나리오 공통 — 시나리오는 회차 구분일 뿐 층 동일) **리허설 영상 14개 시나리오**. 시나리오마다 4~5개 카메라
 동시 촬영본. 패키지 규격·흐름은 [ADR 09](../../../../docs/architecture/09-리허설-패키지-구조.md), 매니페스트는 `rehearsal.json`. 그리드 미리보기(`grid_scenarioN.mp4`, 1440×540 몽타주)는 **송출 금지** — `grid_preview/` 에 분리 보관.
 
-- 출처: HuggingFace dataset `PIA-SPACE/C-lab` → `03_scenarios.7z.001` (3.48GB, 2026-08-27 수령)
+- **보관(정본)**: HF `backseollgi/MCMOT/media/vsource/cj/rehearsal/` — 레포 경로 미러, `bash tools/fetch_assets.sh --rehearsal`
+- 원본 출처: HuggingFace dataset `PIA-SPACE/C-lab` → `03_scenarios.7z.001` (3.48GB, High 프로파일, 2026-08-27 수령)
 - 원본(`01_original`)·concat(`02_concat`)·sync(`04_sync`)는 같은 레포에 있으나 미수령
 - 전부 1920×1080 · 30fps · **h264 baseline 재인코딩본**(2026-08-27, `rehearsal_prep.py --encode`) · yuv420p, 길이 23~33초
   — HF 원본은 High 프로파일이라 앞머리(baseline) concat 에서 스트림이 깨짐(실측). 원본은 `_orig_high_profile/` 에 보관

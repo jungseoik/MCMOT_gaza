@@ -43,11 +43,11 @@ export HF_TOKEN=hf_xxxxxxxxxxxxxxxx            # 절대 커밋 금지
 # 또는:  hf auth login
 ```
 
-### 리허설 패키지용 토큰 (PIA-SPACE org)
-리허설 영상은 `PIA-SPACE/C-lab`(비공개 dataset)에 있어 **PIA-SPACE org 토큰**이 필요하다.
-레포 루트에 `.env` 를 만들어 두면 `tools/fetch_assets.sh` 가 자동으로 읽는다(커밋 금지):
+### 토큰을 파일로 두기 (선택)
+레포 루트 `.env` 에 `HF_TOKEN` 을 적어두면 `tools/fetch_assets.sh` 가 자동으로 읽는다(커밋 금지).
+`hf auth login` 으로 저장해도 된다 — 둘 중 하나.
 ```bash
-cp .env.example .env && $EDITOR .env      # HF_TOKEN=hf_xxx (PIA-SPACE)
+cp .env.example .env && $EDITOR .env      # HF_TOKEN=hf_xxx (backseollgi/MCMOT 읽기 권한)
 ```
 
 ## 3. 대용량 자산 내려받기
@@ -90,7 +90,7 @@ field/encoded/1F/*.mp4 · 16F/*.mp4          현장 RTSP 송출본  (MCMOT, 토�
 
 ### 리허설 패키지 영상 (ADR 09)
 ```bash
-bash tools/fetch_assets.sh --rehearsal    # PIA-SPACE/C-lab → media/vsource/cj/rehearsal/ (1.3GB)
+bash tools/fetch_assets.sh --rehearsal    # backseollgi/MCMOT/media/vsource/** → ./media/vsource/ (1.4GB)
 python tools/rehearsal_prep.py media/vsource/cj/rehearsal   # 64파일 baseline 검증 → ✅
 ```
 패키지 정의(`media/vsource/cj/rehearsal/rehearsal.json` — 시나리오·카메라·**매핑**)는 git 에

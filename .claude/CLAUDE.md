@@ -23,7 +23,7 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 - **추론 엔진**: `src/` — `inference.py`(PyTorch), `inference_gpu.py`/`inference_trt.py`(TRT 최적화), `build_trt.py`. **검출기 투트랙**(YOLOX ↔ RF-DETR): `BoostTrackGPUInference(detector=...)`·CLI `--detector`, RF-DETR은 `src/rfdetr_trt.py`(라이브러리 불필요)+`tools/setup_rfdetr.sh`. 근거·사용법 `docs/reports/RF-DETR-TRT-변환-사용법.md`
 - **추론 프로파일(모델 교체)**: 검출기·ReID·트래커 조합을 레포 루트 **`model_zoo.py`** 한 곳에서 갈아끼운다 — `yolox_fastreid`(기본, 기존 동작) ↔ `yolo26_clipreid`(YOLO26-L v6.3 + CLIP-ReID). 세 호출 지점(단일영상·ffmpeg 백엔드·DS 컨테이너)이 프로파일 id 하나만 받는다. **:8900 [① 설정 → 추론 모델]에서 전환**(세션 중 불가). 엔진 빌드 `tools/build_profile_engines.sh [--ds]`, ONNX는 `tools/fetch_assets.sh --onnx`. 설계 `docs/architecture/07-추론-프로파일-교체구조.md` · 실측 `docs/reports/2026-08-20_신규-추론스택-YOLO26-CLIPReID-도입-실측.md`
 - **단일채널 웹 UI**: `webui/` — `server.py`, 속도/밀도/카운팅/뎁스 모듈, RTSP 라이브 (포트 8000)
-- **멀티카메라 시스템**: `system/` — 다채널 RTSP·TRT·4대 지표 세션·2D 맵 UI + **세션 리플레이·지표 재계산(v1.10)** · **건물 훈련(전 층 공유 세션·4대지표 롤업·전 층 리플레이, v1.11 — UI 표기 "건물 훈련", 내부 코드·API는 `drill`)** · **리허설 패키지(ADR 09 — `media/vsource/<site>/<set>/rehearsal.json` = 영상·시나리오·카메라·매핑 정본, 사이트 층 빙의, RTSP 없는 파일 모드 잠금 동기 추론; 영상은 HF `PIA-SPACE/C-lab`, `tools/fetch_assets.sh --rehearsal`)** · 간이 로그인 게이트 (포트 8900). `system/README.md` 참조
+- **멀티카메라 시스템**: `system/` — 다채널 RTSP·TRT·4대 지표 세션·2D 맵 UI + **세션 리플레이·지표 재계산(v1.10)** · **건물 훈련(전 층 공유 세션·4대지표 롤업·전 층 리플레이, v1.11 — UI 표기 "건물 훈련", 내부 코드·API는 `drill`)** · **리허설 패키지(ADR 09 — `media/vsource/<site>/<set>/rehearsal.json` = 영상·시나리오·카메라·매핑 정본, 사이트 층 빙의, RTSP 없는 파일 모드 잠금 동기 추론; 영상은 HF `backseollgi/MCMOT/media/vsource/**`(레포 경로 미러), `tools/fetch_assets.sh --rehearsal`)** · 간이 로그인 게이트 (포트 8900). `system/README.md` 참조
 - **트래커**: `tracker/`, `boostracker/`, 외부 의존 `external/`
 
 ## 문서 맵 (docs/)
