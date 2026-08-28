@@ -1272,7 +1272,6 @@ async def drill_start(request: Request):
             "label": body.get("label")}
 
 
-@app.post("/api/drill/stop", response_model=DrillResult)
 def _stop_live_drill(floors: list[str] | None = None) -> str | None:
     """살아 있는 세션(층들)을 finalize·저장. 돌려주는 값은 session_id(없으면 None).
     API drill_stop 과 파일 모드 자동 종료(_on_rehearsal_done)가 함께 쓴다."""
@@ -1295,6 +1294,7 @@ def _stop_live_drill(floors: list[str] | None = None) -> str | None:
     return sid
 
 
+@app.post("/api/drill/stop", response_model=DrillResult)
 def drill_stop():
     """건물 드릴 종료 — 라이브 세션 층 일괄 finalize·저장 후 롤업 반환."""
     sid = _stop_live_drill()
