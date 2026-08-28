@@ -79,6 +79,19 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 
 근거·제약·롤백 절차: [docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md](../docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md)
 
+## 리허설 패키지 (ADR 09 — 파일 모드)
+
+`media/vsource/<site>/<set>/rehearsal.json` 이 영상·시나리오·카메라·매핑의 정본. ⑤ 리허설 탭에서
+패키지 시나리오를 고르면 카메라(rh_*)가 사이트 층에 자동으로 얹히고, 종료하면 떼어진다
+(사이트 파일 무변경). 기본 **파일 모드** — RTSP 송출 없이 영상을 프레임 잠금 동기로 읽어
+호스트 AnalyzerThread(DS 워커와 동일 설정)로 분석한다. `system/vsource/README.md` 참조.
+
+| 환경변수 | 기본 | 내용 |
+|---|---|---|
+| `MAP_STREAM_HZ` | `5` | 맵 SSE 송출 주기 — analyze_fps 와 같게 (더 높으면 같은 스냅샷 반복, 낮으면 끊김) |
+| `VSOURCE_FILE_DECODE_WORKERS` | `8` | 파일 모드 디코드 스레드(1080p 채널당 14ms → 병렬화, ~15ch@5fps) |
+| `VSOURCE_FILE_START_MARGIN` | `0.8` | 시작 여유(초) — t0 = 지금 + 여유, 경보 시각 = t0 |
+
 ## 카메라 일괄 등록 (벌크)
 
 현장 수십 채널을 웹 UI에서 **한 대씩** 추가하면 안 된다. deepstream 백엔드는

@@ -590,3 +590,38 @@ body.rehearsing .rhbanner{ display:block; }
 .rhb{ font-size:10px; padding:0 4px; border-radius:3px; white-space:nowrap;
   color:var(--pia-cyan); border:1px solid var(--pia-cyan); background:rgba(48,220,251,.10); }
 .rhb.off{ color:var(--text-3); border-color:var(--stroke-2); background:none; }
+
+
+/* ---- ⑤ 리허설 정리 (ADR 09) — 사실은 격자로, 경고는 한 줄로, 버튼은 주1·보조2 ---- */
+.rhpick{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.rhpick select#vsScenario{ flex:1; min-width:240px; }
+.rhfloor{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-3); white-space:nowrap; }
+.rhfacts{ display:grid; grid-template-columns:repeat(auto-fit, minmax(96px, 1fr)); gap:6px; }
+.rhfacts .fact{ background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-md);
+  padding:6px 10px; display:flex; flex-direction:column; gap:2px; min-width:0; }
+.rhfacts .fact span{ font-size:10px; color:var(--text-3); letter-spacing:.02em; }
+.rhfacts .fact b{ font-size:14px; color:var(--text-1); font-weight:600; font-family:var(--font-num);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rhfacts .fact b.ok{ color:var(--success); } .rhfacts .fact b.warn{ color:var(--warning); }
+.rhfacts .fact.wide{ grid-column:1 / -1; }
+.rhfacts .fact.wide b{ font-family:inherit; font-size:12px; font-weight:500; color:var(--text-2); }
+.rhwarn{ font-size:12px; color:var(--text-3); line-height:1.5; }
+.rhwarn:empty{ display:none; }
+.rhwarn .warn{ color:var(--warning); } .rhwarn .err{ color:var(--danger); }
+.btn.ghost{ background:transparent; border-color:var(--stroke-2); color:var(--text-3); }
+.btn.ghost:hover{ color:var(--danger); border-color:var(--danger); }
+.rhbtns .vsloop{ margin-left:auto; }
+.vsrow .sub{ font-size:11px; color:var(--text-3); white-space:nowrap; }
+.vsmp.warn{ color:var(--warning); border-color:var(--warning); }
+
+/* ---- ② 카메라 추가 — 맨 위 접이식 ---- */
+.camadd{ border:1px dashed var(--stroke-2); border-radius:var(--r-md); padding:0 10px; }
+.camadd summary{ cursor:pointer; list-style:none; padding:9px 0; font-size:13px; font-weight:600;
+  color:var(--text-2); display:flex; align-items:center; gap:8px; }
+.camadd summary::-webkit-details-marker{ display:none; }
+.camadd summary .camadd-sub{ font-size:11px; font-weight:400; color:var(--text-3); margin-left:auto; }
+.camadd[open] summary{ border-bottom:1px solid var(--stroke-1); margin-bottom:8px; }
+.camadd .group{ padding-bottom:10px; }
+/* 행은 두 줄만 — conf 편집은 선택한 카메라에만 펼친다 */
+.camrow .r3{ display:none; }
+.camrow.sel .r3{ display:flex; }

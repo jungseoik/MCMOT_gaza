@@ -8,6 +8,7 @@
 var VSource = (() => {
   const $ = (id) => document.getElementById(id);
   let scenarios = [];
+  let packages = [];      // 리허설 패키지 요약 (ADR 09) — media/vsource/*/*/rehearsal.json
   let poll = null;
   let inited = false;
   let busy = false;
@@ -17,6 +18,7 @@ var VSource = (() => {
   // 성공/실패 메시지가 2초 폴링에 덮여 사라지는 걸 막는다 — 눌렀는데 아무 반응이
   // 없어 보이면 또 누르게 된다(추론 모델 패널에서 같은 문제를 겪었다).
   let stickyUntil = 0;
+  let lastOwnMapped = -1;   // 리허설 매핑 수 — 바뀌면 시나리오 목록을 다시 읽는다
 
   function msg(html, holdSec) {
     const el = $("vsMsg");
@@ -49,16 +51,25 @@ var VSource = (() => {
     try {
       const d = await jget("/api/vsource/scenarios");
       scenarios = d.scenarios || [];
-    } catch (e) { scenarios = []; }
+      packages = d.packages || [];
+    } catch (e) { scenarios = []; packages = []; }
     if (!scenarios.length) {
-      sel.innerHTML = `<option value="">(시나리오 없음 — data/scenarios/*.json)</option>`;
+      sel.innerHTML = `<option value="">(시나리오 없음 — media/vsource/&lt;site&gt;/&lt;set&gt;/ 패키지)</option>`;
       $("vsMeta").textContent = "";
       return;
     }
+    // 패키지별 optgroup — 리허설 패키지(신규 기준)가 위, legacy mock 이 아래 (ADR 09)
     const cur = sel.value;
-    sel.innerHTML = scenarios.map((s) =>
-      `<option value="${s.id}"${s.id === cur ? " selected" : ""}>` +
-      `${s.name}${s.ok ? "" : " ⚠"}</option>`).join("");
+    const opt = (s) => `<option value="${s.id}"${s.id === cur ? " selected" : ""}>` +
+      `${s.package_id ? s.name.replace(`${s.package_name} — `, "") : s.name}${s.ok ? "" : " ⚠"}</option>`;
+    let html = "";
+    for (const p of packages) {
+      const mine = scenarios.filter((s) => s.package_id === p.id);
+      if (mine.length) html += `<optgroup label="📦 ${p.name}">${mine.map(opt).join("")}</optgroup>`;
+    }
+    const legacy = scenarios.filter((s) => !s.package_id);
+    if (legacy.length) html += `<optgroup label="수동 시나리오 (legacy mock)">${legacy.map(opt).join("")}</optgroup>`;
+    sel.innerHTML = html;
     renderMeta();
   }
 
@@ -67,35 +78,68 @@ var VSource = (() => {
     return scenarios.find((s) => s.id === id) || null;
   }
 
-  function renderMeta() {
-    const s = current(), el = $("vsMeta");
-    if (!el) return;
-    if (!s) { el.textContent = ""; return; }
-    // 영상 길이가 제각각이라 채널별 루프는 못 쓴다 — 사이클을 명시해 준다(ADR 08 §4).
-    const durs = s.streams.map((x) => x.duration_sec).filter((v) => v != null);
-    const range = durs.length
-      ? (Math.min(...durs).toFixed(0) === Math.max(...durs).toFixed(0)
-          ? `${Math.min(...durs).toFixed(0)}s`
-          : `${Math.min(...durs).toFixed(0)}~${Math.max(...durs).toFixed(0)}s`)
-      : "—";
-    // 송출만 되고 운영뷰가 비는 상태를 미리 알린다 — 원인 찾기가 제일 어려운 구간이다.
-    const mapped = s.streams.filter((x) => x.cam_mapped && x.cam_enabled).length;
-    el.innerHTML = `${s.streams.length}채널 · 영상 ${range} · 사이클 <b>${fmtSec(s.cycle_sec)}</b>`
-      + `<br>카메라 매핑 <b class="${mapped === s.streams.length ? "ok" : "warn"}">`
-      + `${mapped}/${s.streams.length}</b>`
-      + (mapped === s.streams.length ? " — 운영 뷰에 바로 표출됩니다"
-                                      : " — 매핑 안 된 채널은 운영 뷰에 안 찍힙니다")
-      + (s.ok ? "" : `<br><span class="warn">⚠ ${s.problems.join(" / ")}</span>`)
-      + ((s.warns || []).length ? `<br><span class="warn">⚠ ${s.warns.join("<br>⚠ ")}</span>` : "");
+  /** 패키지 시나리오의 "붙일 층" — 사이트 층 중 하나 (ADR 09 §7 빙의 모드).
+   *  기본값은 manifest 가 정한 층. 여기서 바꾸면 standby/start 때 서버가 manifest 에
+   *  되써서 다음부터는 그 층이다. 사이트에 없는 층을 가리키면 경고. */
+  function renderFloorPick(s) {
+    const lab = $("vsFloorLab"), sel = $("vsFloor");
+    if (!lab || !sel) return;
+    const isPkg = !!(s && s.package_id);
+    lab.classList.toggle("hidden", !isPkg);
+    if (!isPkg) return;
+    const floors = (App.site && App.site.floors) || [];
+    const want = (s.streams.find((x) => x.cam_floor) || {}).cam_floor || "";
+    const known = floors.some((f) => f.id === want);
+    sel.innerHTML = floors.map((f) =>
+      `<option value="${f.id}"${f.id === want ? " selected" : ""}>${f.name || f.id}</option>`).join("")
+      + (known || !want ? "" : `<option value="" selected>⚠ ${want} — 사이트에 없음 (① 맵설정에서 만들기)</option>`);
   }
 
-  /** 경로별 카메라 상태 한 줄 — 왜 안 뜨는지 바로 보이게. */
-  function camLabel(sc, path) {
-    const st = sc && sc.streams.find((x) => x.path === path);
-    if (!st) return "";
-    if (!st.cam_id) return `<span class="vscam warn">카메라 없음</span>`;
-    const bad = !st.cam_enabled ? "비활성" : (!st.cam_mapped ? "매핑 없음" : null);
-    return `<span class="vscam${bad ? " warn" : ""}">${st.cam_id}${bad ? " · " + bad : " ✓"}</span>`;
+  function pickedFloor() {
+    const s = current(), sel = $("vsFloor");
+    if (!s || !s.package_id || !sel) return undefined;
+    const cur = (s.streams.find((x) => x.cam_floor) || {}).cam_floor || "";
+    return sel.value && sel.value !== cur ? sel.value : undefined;   // 바뀐 경우만 보낸다
+  }
+
+  const isFile = (s) => !!(s && s.source === "file");
+
+  function renderMeta() {
+    const s = current(), el = $("vsMeta"), wn = $("vsWarn");
+    renderFloorPick(s);
+    const sb = $("vsStandby");
+    if (sb) sb.textContent = isFile(s) ? "▶ 준비 (파일)" : "⏸ 대기 송출";
+    if (!el) return;
+    if (!s) { el.innerHTML = ""; if (wn) wn.innerHTML = ""; return; }
+    const durs = s.streams.map((x) => x.duration_sec).filter((v) => v != null);
+    const range = !durs.length ? "—"
+      : (Math.min(...durs).toFixed(0) === Math.max(...durs).toFixed(0)
+          ? `${Math.min(...durs).toFixed(0)}s` : `${Math.min(...durs).toFixed(0)}~${Math.max(...durs).toFixed(0)}s`);
+    const n = s.streams.length;
+    const mapped = s.streams.filter((x) => x.cam_mapped && x.cam_enabled).length;
+    const noCam = s.streams.filter((x) => !x.cam_id).length;
+    const p = s.package_id && packages.find((x) => x.id === s.package_id);
+    const floorTxt = (s.floors || []).map((f) => App.floorName ? App.floorName(f) : f).join(", ") || "—";
+    const fact = (k, v, cls) => `<div class="fact"><span>${k}</span><b class="${cls || ""}">${v}</b></div>`;
+    el.innerHTML =
+      fact("채널", n) + fact("영상", range) + fact("사이클", fmtSec(s.cycle_sec)) + fact("층", floorTxt)
+      + fact("매핑", `${mapped}/${n}`, mapped === n ? "ok" : "warn")
+      + (p ? fact("사전검증", p.prep_ok === true ? "통과" : p.prep_ok === false ? "실패" : "미실행",
+                  p.prep_ok === true ? "ok" : "warn") : "")
+      + (p ? `<div class="fact wide"><span>패키지</span><b title="${p.root}">📦 ${p.name} · 카메라 ${p.cameras_mapped}/${p.cameras_total} 매핑</b></div>` : "");
+    // 경고는 **종류별 한 줄**로 — 채널마다 같은 문장을 5번 반복하면 읽을 수 없다.
+    const lines = [];
+    if (!s.ok) lines.push(`<span class="err">✕ ${s.problems.join(" / ")}</span>`);
+    if (p && (p.prep_fails || []).length) lines.push(`<span class="err">✕ 사전검증 실패 ${p.prep_fails.length}건 — ${p.prep_fails[0]}</span>`);
+    if (p) for (const f of p.floors) {
+      if (f.mode === "site" && !((App.site && App.site.floors) || []).some((x) => x.id === f.id))
+        lines.push(`<span class="warn">⚠ 층 ${f.id} 가 사이트에 없음 — ① 맵 설정에서 먼저 만드세요</span>`);
+    }
+    if (noCam) lines.push(`<span class="warn">⚠ 카메라 없는 채널 ${noCam} — ② 카메라 등록 필요</span>`);
+    const unmapped = n - mapped - noCam;
+    if (unmapped > 0) lines.push(`<span class="warn">⚠ 매핑 없는 채널 ${unmapped} — 대기 송출을 켜고 채널을 클릭해 매핑하세요</span>`);
+    if (!lines.length && n) lines.push(`<span class="ok">✓ 바로 송출·표출 가능</span>`);
+    if (wn) wn.innerHTML = lines.join("<br>");
   }
 
   // ------------------------------------------------------------ 상태
@@ -107,26 +151,31 @@ var VSource = (() => {
         box.innerHTML = "";
       } else {
         const sc = scenarios.find((x) => x.id === st.scenario_id);
+        const standby = st.mode === "standby";
         box.innerHTML = (st.streams || []).map((s) => {
           const cs = sc && sc.streams.find((x) => x.path === s.path);
           const cid = cs && cs.cam_id;
           // 송출(dot)과 카메라 수신(rx)은 다르다 — 송출은 떴는데 카메라가 아직
           // 안 붙은 구간이 20초쯤 있어서, 둘을 갈라 보여야 오해가 없다.
-          const rx = s.receiving
-            ? `<span class="vsrx on">수신</span>`
-            : `<span class="vsrx">붙는 중…</span>`;
-          // 리허설 전용 매핑이 있나 — 없으면 원래 카메라 매핑을 상속한다.
-          // 새로 준비한 영상은 시점이 달라 대개 다시 잡아야 한다.
-          const mp = s.own_mapping
-            ? `<span class="vsmp on" title="이 리허설용으로 따로 잡은 매핑을 씁니다">리허설 매핑</span>`
-            : `<span class="vsmp" title="원래 카메라 매핑을 그대로 씁니다. 영상 시점이 다르면 클릭해 다시 잡으세요">매핑 상속</span>`;
+          const rx = st.source === "file"
+            ? (s.receiving ? `<span class="vsrx on">파일</span>` : `<span class="vsrx">끝</span>`)
+            : (s.receiving ? `<span class="vsrx on">수신</span>` : `<span class="vsrx">붙는 중</span>`);
+          // 매핑 배지는 하나만: 없음 / 있음(리허설용 or 원래 것 상속)
+          let mp;
+          if (!cid) mp = `<span class="vsmp warn" title="이 경로를 보는 카메라가 없다 — ②에서 등록">카메라 없음</span>`;
+          else if (s.mapping_stale) mp = `<span class="vsmp warn" title="매핑 당시와 도면이 달라졌다 — 다시 찍어야 한다">매핑 낡음</span>`;
+          else if (s.own_mapping) mp = `<span class="vsmp on" title="이 리허설용으로 잡은 매핑">매핑 ✓</span>`;
+          else if (cs && cs.cam_mapped) mp = `<span class="vsmp on" title="원래 카메라 매핑을 그대로 쓴다 — 시점이 다르면 클릭해 다시">매핑 ✓ 상속</span>`;
+          else mp = `<span class="vsmp warn">매핑 필요</span>`;
+          const sub = cid ? `${cid}${cs.cam_floor ? " · " + (App.floorName ? App.floorName(cs.cam_floor) : cs.cam_floor) : ""}` : "";
+          // 위치는 재생 중에만 — 대기(정지화면)는 시간 개념이 없다 (예전엔 '종료'로 잘못 떴다)
+          const pos = standby ? "" : `<span class="pos">${s.pos_sec != null ? s.pos_sec.toFixed(0) + "s" : "끝"}</span>`;
           return `<div class="vsrow${s.publishing ? " on" : ""}${cid ? " clk" : ""}"` +
             `${cid ? ` data-cam="${cid}" title="클릭하면 ${cid} 매핑 화면으로 이동"` : ""}>
              <span class="dot"></span>
              <span class="nm" title="${s.file}">${s.path}</span>
-             ${rx}${mp}
-             ${camLabel(sc, s.path)}
-             <span class="pos">${s.pos_sec != null ? s.pos_sec.toFixed(0) + "s" : "종료"}</span>
+             <span class="sub">${sub}</span>
+             ${rx}${mp}${pos}
            </div>`;
         }).join("");
         box.querySelectorAll(".vsrow.clk").forEach((row) => {
@@ -134,6 +183,11 @@ var VSource = (() => {
         });
       }
     }
+    const sh = $("vsStreamsHint");
+    if (sh) sh.textContent = (st && st.running) ? "채널을 클릭하면 그 카메라 매핑 화면으로 갑니다." : "";
+    // 매핑을 찍고 돌아오면 목록의 매핑 수가 낡아 있다 — 바뀐 걸 감지해 다시 읽는다
+    const om = st && st.running ? (st.own_mapped || 0) : -1;
+    if (om !== lastOwnMapped) { lastOwnMapped = om; loadScenarios(); }
     if (msgEl && st && st.running && !busy && Date.now() >= stickyUntil) {
       const rxN = st.cams_receiving, rxT = st.cams_total;
     if (st.mode === "standby" && rxT && rxN === rxT && standbyAt && attachSec == null) {
@@ -143,7 +197,7 @@ var VSource = (() => {
         ? `<br><span class="warn">카메라 붙는 중 ${rxN}/${rxT} — 20초쯤 걸립니다</span>`
         : "";
       if (st.mode === "standby") {
-        msgEl.innerHTML = `<span class="ok">대기 중</span> — 정지화면 (영상 멈춤)` + rxTxt
+        msgEl.innerHTML = `<span class="ok">${st.source === "file" ? "준비됨 (파일 모드)" : "대기 중"}</span> — 정지화면 (영상 멈춤)` + rxTxt
           + `<br><span class="vshint">채널을 클릭해 매핑 → 끝나면 ③ 운영 뷰에서 [🎬 리허설 훈련 시작]</span>`;
       } else {
         msgEl.innerHTML = `<span class="ok">훈련 재생 중</span> — 위치 ${fmtSec(st.cycle_pos_sec)}` + rxTxt
@@ -173,9 +227,19 @@ var VSource = (() => {
     const prevKey = window.VSourceState && window.VSourceState._key;
     window.VSourceState = st ? { ...st, _key: key } : null;
     document.body.classList.toggle("rehearsing", nowOn);
-    if ((wasOn !== nowOn || prevKey !== key)
-        && typeof Views !== "undefined" && Views.cams && Views.cams.renderList) {
-      Views.cams.renderList();
+    if (wasOn !== nowOn || prevKey !== key) {
+      // 리허설 패키지는 가상 카메라(rh_*)·가상 층(rh_*)을 **서버에서** 얹었다
+      // 뗐다 한다(ADR 09) — 다시 그리기 전에 반드시 API에서 재조회해야 한다.
+      // (기존엔 renderList만 불러서 stale 목록이 그려졌다 — rh 카메라 안 보임)
+      Promise.all([
+        App.reloadCameras(),
+        API.getFloors().then((f) => { App.floors = f; }).catch(() => {}),
+      ]).then(() => {
+        if (typeof Views !== "undefined" && Views.cams && Views.cams.renderList) {
+          Views.cams.renderList();
+        }
+        if (App.renderFloorSelector) App.renderFloorSelector();
+      });
     }
     const who = $("rhBannerWho");
     if (who && nowOn) {
@@ -240,7 +304,7 @@ var VSource = (() => {
     msg("송출 시작 중…");
     try {
       const st = await jpost("/api/vsource/start",
-        { scenario_id: s.id, loop: $("vsLoop").checked });
+        { scenario_id: s.id, loop: $("vsLoop").checked, floor_id: pickedFloor() });
       const n = (st.pm2_stopped || []).length;
       msg(`<span class="ok">훈련 시작</span> — ${st.streams.length}채널 t=0 동시 재생`
         + (n ? ` · pm2 ${n}개 정지` : "")
@@ -263,17 +327,24 @@ var VSource = (() => {
     let dots = 0;
     const tick = setInterval(() => {
       dots = (dots + 1) % 4;
-      msg("대기 송출 준비 중" + ".".repeat(dots)
-        + `<br><span class="vshint">첫 프레임 추출 · 상시송출 정지 · 리허설 밖 카메라 정리</span>`);
+      msg((isFile(s) ? "준비 중" : "대기 송출 준비 중") + ".".repeat(dots)
+        + `<br><span class="vshint">${isFile(s) ? "영상 열기 · 첫 프레임 · 분석 모델 로드(첫 1회 수 초)" : "첫 프레임 추출 · 상시송출 정지 · 리허설 밖 카메라 정리"}</span>`);
     }, 500);
     $("vsStandby").disabled = true;
     try {
       standbyAt = Date.now(); attachSec = null;   // 부착시간 측정 시작
-      const st = await jpost("/api/vsource/standby", { scenario_id: s.id });
+      const st = await jpost("/api/vsource/standby",
+        { scenario_id: s.id, floor_id: pickedFloor() });
+      await loadScenarios();                          // 층을 바꿨으면 manifest 가 갱신됐다
       const n = (st.pm2_stopped || []).length;
-      msg(`<span class="ok">대기 송출 시작</span> — ${st.streams.length}채널 정지화면`
-        + (n ? ` · pm2 ${n}개 정지` : "")
-        + `<br><b>카메라가 붙는 데 20초쯤 걸립니다</b> — 아래 채널이 전부 '수신'이 되면 매핑하세요.`, 25);
+      if (st.source === "file") {
+        msg(`<span class="ok">준비 완료</span> — ${st.streams.length}채널 첫 프레임 (파일 모드)`
+          + `<br>바로 매핑하거나 [🎬 훈련 시작]을 누르세요 — 카메라 대기 없음.`, 12);
+      } else {
+        msg(`<span class="ok">대기 송출 시작</span> — ${st.streams.length}채널 정지화면`
+          + (n ? ` · pm2 ${n}개 정지` : "")
+          + `<br><b>카메라가 붙는 데 20초쯤 걸립니다</b> — 아래 채널이 전부 '수신'이 되면 매핑하세요.`, 25);
+      }
     } catch (e) {
       msg(`<span class="warn">대기 실패: ${e.message}</span>`, 15);
     } finally {
@@ -322,11 +393,12 @@ var VSource = (() => {
     if (busy) {                       // 요청 처리 중 — 직전 상태를 보여 오해를 만들지 않는다
       step = "standby"; txt = "전환 중… (첫 프레임 추출 · 상시송출 정지)";
     } else if (!running) {
-      step = "pick"; txt = "리허설이 꺼져 있습니다 — 시나리오를 고르고 [⏸ 대기 송출 시작].";
+      step = "pick"; txt = "리허설이 꺼져 있습니다 — 시나리오를 고르고 [⏸ 대기 송출].";
     } else if (st.mode === "standby" && !allRx) {
       step = "standby"; txt = `대기 송출 준비 중 — 카메라 붙는 중 ${rxN}/${rxT} (20초쯤 걸립니다)`;
     } else if (st.mode === "standby") {
-      step = "map"; txt = "대기 중(정지화면) — 매핑할 채널을 클릭하거나, ③ 운영 뷰에서 [🎬 리허설 훈련 시작]";
+      step = "map"; txt = (st.source === "file" ? "준비됨 · 파일 모드(RTSP 없음) — " : "대기 중(정지화면) — ")
+        + "매핑할 채널을 클릭하거나, [🎬 훈련 시작]";
     } else if (st.in_lead) {
       // 앞머리 = 정지화면으로 카메라 복귀를 덮는 구간. 본영상은 아직 안 흐른다.
       step = "run";
@@ -335,7 +407,7 @@ var VSource = (() => {
     } else if (!allRx) {
       step = "run"; txt = `훈련 재생 중 · 위치 ${fmtSec(st.cycle_pos_sec)} — 카메라 붙는 중 ${rxN}/${rxT}`;
     } else {
-      step = "run"; txt = `훈련 재생 중 · 위치 ${fmtSec(st.cycle_pos_sec)} · 전 채널 수신`;
+      step = "run"; txt = `훈련 재생 중 · 위치 ${fmtSec(st.cycle_pos_sec)}` + (st.source === "file" ? " · 파일 모드(프레임 동기)" : " · 전 채널 수신");
     }
     const order = ["pick", "standby", "map", "run"];
     const cur = order.indexOf(step);
@@ -370,7 +442,7 @@ var VSource = (() => {
     // 대기 송출 실측 부착시간 — session.js 가 앞머리 길이를 정하는 데 쓴다
     get attachSec() { return attachSec; },
     // ⑤ 탭 진입점 — App.switchView 가 부른다
-    enter() { init(); refresh(); },
+    enter() { init(); loadScenarios().then(refresh); },
     leave() {},
   };
 })();

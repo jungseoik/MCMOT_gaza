@@ -21,8 +21,12 @@ Views.cams = (() => {
   const mapImages = {};                 // floor_id -> Image (층별 맵 캐시)
 
   const multiFloor = () => ((App.site && App.site.floors) || []).length > 1;
-  const selFloorObj = () => ((App.site && App.site.floors) || [])
-    .find((f) => f.id === selFloor) || (App.site && App.floor) || null;
+  // 리허설 가상 층(rh_*)은 site.floors 에 없다 — App.floors(백엔드 요약)에서 찾는다.
+  // 여기서 못 찾고 현재 층으로 폴백하면 **엉뚱한 층 도면 위에 매핑**하게 된다.
+  const selFloorObj = () =>
+    ((App.site && App.site.floors) || []).find((f) => f.id === selFloor)
+    || (App.floors || []).find((f) => f.id === selFloor)
+    || (App.site && App.floor) || null;
 
   const pairColor = (i) => `hsl(${(i * 47) % 360},80%,60%)`;
 
@@ -77,7 +81,10 @@ Views.cams = (() => {
   }
 
   // ------------------------------------------------------------ 층(floor)
+  const isRhCam = (id) => typeof id === "string" && id.startsWith("rh_");
+
   function floorOptions(selected) {
+    // 사이트 실재 층만 — 리허설 가상 층(rh_*)은 카메라 등록 대상이 아니다
     return ((App.site && App.site.floors) || []).map((f) =>
       `<option value="${f.id}"${f.id === selected ? " selected" : ""}>${f.name || f.id}</option>`
     ).join("");
@@ -92,7 +99,17 @@ Views.cams = (() => {
     if (bc) { bc.innerHTML = floorOptions(bc.value || App.currentFloor); }
     if (bcl) bcl.classList.toggle("hidden", !multi);
     const mf = $("mapFloorSel"), mfl = $("mapFloorLab");
-    if (mf) mf.innerHTML = floorOptions(selFloor);
+    if (mf) {
+      if (isRhCam(sel)) {
+        // 리허설 가상 카메라 — 층은 패키지(rehearsal.json)가 정한다. 사이트 층으로
+        // 폴백돼 저장되면 매니페스트가 오염되므로 그 층 하나만 잠가서 보여준다.
+        mf.innerHTML = `<option value="${selFloor}" selected>${App.floorName(selFloor)}</option>`;
+        mf.disabled = true;
+      } else {
+        mf.disabled = false;
+        mf.innerHTML = floorOptions(selFloor);
+      }
+    }
     if (mfl) mfl.classList.toggle("hidden", !(multi && sel));
   }
 
@@ -143,7 +160,7 @@ Views.cams = (() => {
     const hdr = $("camListDefConf");
     if (hdr) hdr.textContent = `기본 conf ${siteMinConf()}`;
     if (!App.cameras.length) {
-      box.innerHTML = `<div class="grow">등록된 카메라가 없습니다. 아래에서 추가하세요.</div>`;
+      box.innerHTML = `<div class="grow">등록된 카메라가 없습니다. 위 [＋ 카메라 추가]에서 등록하세요.</div>`;
     }
     const def = siteMinConf();
     // 층별 소제목 — 12대쯤 되면 목록만 봐선 어느 층 것인지 분간이 안 된다.
@@ -166,21 +183,25 @@ Views.cams = (() => {
       // 층은 그룹 소제목에 이미 있으므로 행마다 배지로 또 달지 않는다.
       // 이름이 먼저다 — 예전엔 배지 4개가 폭을 다 먹어 이름이 "1..."로 눌렸다.
       // 층·활성 배지는 아랫줄로 내리고, 활성은 체크박스와 중복이라 배지를 뺐다.
+      // 리허설 가상 카메라(rh_*) — 설정의 정본이 패키지 rehearsal.json 이라
+      // 삭제·활성·conf 편집이 서버에서 409 로 막힌다. 편집 UI를 아예 안 보인다.
+      const rh = isRhCam(c.cam_id);
       div.innerHTML = `
         <div class="r1"><span class="dotc" style="background:${camColor(c.cam_id, App.cameras)}"></span>
           <span class="nm" title="${c.name || c.cam_id}">${c.name || c.cam_id}</span>
           ${rhBadge(c)}
           ${c.mapping ? badge("ok", "매핑 ✓") : badge("warn", "매핑 필요")}
-          <button class="del" title="삭제">🗑</button></div>
+          ${rh ? "" : `<button class="del" title="삭제">🗑</button>`}</div>
         <div class="r2"><span class="cid">${c.cam_id}</span>
           <span class="rtsp" title="${c.rtsp}">${rtspTail(c.rtsp)}</span>
-          <label style="cursor:pointer"><input type="checkbox" class="en" ${c.enabled ? "checked" : ""} /> 활성</label></div>
-        <div class="r3">
+          ${rh ? `<span class="cfst" title="설정은 패키지 rehearsal.json 소관">패키지 관리</span>`
+               : `<label style="cursor:pointer"><input type="checkbox" class="en" ${c.enabled ? "checked" : ""} /> 활성</label>`}</div>
+        ${rh ? "" : `<div class="r3">
           <span class="cflab" title="이 카메라의 최소 검출 신뢰도. 값을 지우고 적용하면 기본값(${def}) 상속.">검출 신뢰도</span>
           <input type="number" class="cfin" min="0" max="1" step="0.05" value="${effVal}" placeholder="기본 ${def}" />
           <button class="tag-btn cfap" title="이 카메라에 적용">적용</button>
           <span class="cfst">${overridden ? "오버라이드" : "기본값 상속"}</span>
-        </div>`;
+        </div>`}`;
       // 행 선택 (입력/버튼 클릭은 제외)
       div.onclick = (e) => {
         const t = e.target;
@@ -188,7 +209,8 @@ Views.cams = (() => {
             t.classList.contains("cflab") || t.classList.contains("cfst")) return;
         select(c.cam_id);
       };
-      div.querySelector(".del").onclick = async (e) => {
+      const delBtn = div.querySelector(".del");        // rh 행에는 없다(패키지 관리)
+      if (delBtn) delBtn.onclick = async (e) => {
         e.stopPropagation();
         if (!confirm(`${c.name || c.cam_id} 카메라를 삭제할까요?`)) return;
         try {
@@ -197,18 +219,21 @@ Views.cams = (() => {
           await App.reloadCameras(); renderList(); renderSel();
         } catch (err) { alert("삭제 실패: " + err.message); }
       };
-      div.querySelector("input.en").onchange = async (e) => {
+      const enChk = div.querySelector("input.en");
+      if (enChk) enChk.onchange = async (e) => {
         try {
           await API.updateCamera(c.cam_id, { enabled: e.target.checked });
           await App.reloadCameras(); renderList();
         } catch (err) { alert("변경 실패: " + err.message); }
       };
       // conf 인라인 적용 — 값 있으면 오버라이드, 비우면 null(상속). 0~1 검증.
-      div.querySelector(".cfap").onclick = (e) => {
+      const cfap = div.querySelector(".cfap");
+      if (cfap) cfap.onclick = (e) => {
         e.stopPropagation();
         applyMinConf(c.cam_id, div.querySelector(".cfin"));
       };
-      div.querySelector(".cfin").onkeydown = (e) => {
+      const cfin = div.querySelector(".cfin");
+      if (cfin) cfin.onkeydown = (e) => {
         if (e.key === "Enter") { e.preventDefault(); applyMinConf(c.cam_id, e.target); }
       };
       box.appendChild(div);
@@ -432,6 +457,9 @@ Views.cams = (() => {
     sel = camId;
     const cam = App.cameras.find((c) => c.cam_id === camId);
     renderList();
+    // ⑤에서 채널을 클릭해 넘어오면 목록이 17대라 선택 행이 화면 밖에 있다 — 끌어온다
+    const row = document.querySelector("#camList .camrow.sel");
+    if (row) row.scrollIntoView({ block: "nearest" });
     if (!cam) { renderSel(); return; }
     $("selCamLabel").textContent = `${cam.name || cam.cam_id} (${cam.cam_id})`;
     // 이 카메라가 매핑될 층 (map_pts는 이 층의 맵 px 기준)

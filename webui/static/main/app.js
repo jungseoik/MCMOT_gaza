@@ -63,10 +63,12 @@ const App = {
     }
     if (!App.site.floors || !App.site.floors.length) App.site.floors = [App.defaultSite().floors[0]];
     // 층 요약 목록 (백엔드 우선, 실패 시 site.floors에서 파생)
+    // — 리허설 가상 층(rh_*, rehearsal:true)은 여기에만 있고 site.floors엔 없다
     try { App.floors = await API.getFloors(); }
     catch (e) { App.floors = App.deriveFloors(); }
-    // 현재 층 유효성 보정
-    if (!App.site.floors.some((f) => f.id === App.currentFloor)) App.currentFloor = "default";
+    // 현재 층 유효성 보정 (리허설 층에 서 있다면 유지 — App.floors 기준)
+    if (!(App.floors || []).some((f) => f.id === App.currentFloor)
+        && !App.site.floors.some((f) => f.id === App.currentFloor)) App.currentFloor = "default";
     App.applyFloor();
     await App.loadMapImage();
     App.updateChip();
@@ -121,7 +123,8 @@ const App = {
     const wrap = document.getElementById("floorSelWrap");
     const sel = document.getElementById("floorSel");
     if (!wrap || !sel) return;
-    const floors = App.site.floors || [];
+    // App.floors(백엔드 요약)가 있으면 그걸 쓴다 — 리허설 가상 층(rh_*)까지 포함
+    const floors = (App.floors && App.floors.length) ? App.floors : (App.site.floors || []);
     wrap.classList.toggle("hidden", floors.length <= 1);
     sel.innerHTML = floors.map((f) =>
       `<option value="${f.id}"${f.id === App.currentFloor ? " selected" : ""}>${f.name || f.id}</option>`

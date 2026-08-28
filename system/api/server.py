@@ -55,7 +55,9 @@ import model_zoo
 from system.metrics.engine import MetricsEngine
 from system.metrics.recorder import SessionRecorder
 from system.vsource import controller as vsource
+from system.vsource import filesource as vfile
 from system.vsource import overlay as voverlay
+from system.vsource import package as vpkg
 from system.vsource import scenario as vscenario
 
 logger = logging.getLogger("system.api")
@@ -93,6 +95,18 @@ class Runtime:
         # 층(floor)마다 엔진 1개 — 층=독립 좌표계 (v1.7). floor_id → MetricsEngine.
         self.engines: dict[str, MetricsEngine] = {}
         self._cam_floor: dict[str, str] = {}   # cam_id → floor_id (라우팅 캐시)
+        # 리허설 패키지(ADR 09) — 활성 패키지의 가상 카메라(rh_*)·가상 층(rh_*)을
+        # 런타임에 얹는다. 사이트 파일은 안 건드리므로 끄면 그걸로 복원 끝.
+        self._rh_pkg_id: str | None = None
+        self._rh_scen_id: str | None = None    # 활성 시나리오 — 그 카메라만 얹는다
+        self._rh_cam_ids: set[str] = set()     # 얹힌 가상 카메라 (cameras() 필터)
+        self._rh_ingested: set[str] = set()    # 그중 ingest(RTSP)에 실제로 넣은 것 — rtsp 모드만
+        # 파일 소스 모드 (ADR 09 §11) — 영상을 직접 읽어 잠금 동기로 분석 큐에 넣는다.
+        # 분석 스레드는 첫 사용 때 띄운다(TRT 로드 수 초) — DS 백엔드 서버엔 없기 때문.
+        self._file_queue = FrameQueue(maxsize=64)
+        self._file_analyzer = None
+        self.filesrc = vfile.FileSourceRunner(queue_put=self._file_put,
+                                              rtsp_host=vsource.RTSP_HOST)
         self.analyzer = None  # AnalyzerThread | None — TRT 로드 실패 시 None
         self._lock = threading.Lock()
 
@@ -125,6 +139,11 @@ class Runtime:
         fid = floor_id or DEFAULT_FLOOR_ID
         if fid not in self.engines:
             raise HTTPException(404, f"층 없음: {fid}")
+        if fid.startswith(vpkg.FLOOR_PREFIX):
+            # 리허설 가상 층은 사이트에 실재하지 않는다 — 쓰기를 허용하면
+            # get_floor() 폴백으로 **default 층이 조용히 덮인다** (실측 위험과 동형).
+            raise HTTPException(409, f"리허설 가상 층은 편집할 수 없습니다: {fid} — "
+                                     "도면·설정은 패키지 폴더에서 관리하세요 (ADR 09)")
         return fid
 
     def engine_for(self, floor_id: str | None = None) -> MetricsEngine | None:
@@ -156,15 +175,131 @@ class Runtime:
         production JSON 은 읽기만 한다. 리허설용 매핑은 시나리오 옆에 따로 저장돼
         (`data/scenarios/<id>.cams.json`) 여기서만 얹히므로, 리허설이 죽거나 꺼지면
         원래 설정이 그대로 남는다 (ADR 08 §5-2).
+
+        리허설 **패키지**(ADR 09)가 활성이면 그 패키지의 가상 카메라(rh_*)를
+        뒤에 붙인다 — 매핑·층까지 매니페스트에서 온다. 패키지가 꺼지면 목록에서
+        빠지는 것으로 복원 끝.
         """
         cams = self.store.list_cameras(SITE_ID)
-        return voverlay.apply(cams, vsource.active_overlay())
+        cams = voverlay.apply(cams, vsource.active_overlay())
+        pkg = self.rehearsal_pkg()
+        if pkg:
+            # 활성 시나리오가 쓰는 카메라만 — 나머지는 송출이 없어 슬롯 낭비다
+            cams = cams + [c for c in
+                           vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST)
+                           if c.cam_id in self._rh_cam_ids]
+        return cams
+
+    # ------------------------------------------------------ 리허설 패키지 (ADR 09)
+    def rehearsal_pkg(self) -> dict | None:
+        """활성 리허설 패키지 매니페스트 — 없으면 None."""
+        return vpkg.get(self._rh_pkg_id) if self._rh_pkg_id else None
+
+    def _site_plus_rehearsal(self, site: SiteConfig) -> SiteConfig:
+        """사이트 + 활성 패키지의 가상 층을 합친 **읽기 전용 뷰**.
+
+        절대 save_site() 로 되쓰면 안 된다 — 가상 층이 영구화된다. 쓰기 경로는
+        전부 rt.site() 원본을 쓰므로 이 뷰는 엔진 구성·층 해석에만 쓴다.
+        """
+        pkg = self.rehearsal_pkg()
+        if not pkg:
+            return site
+        extra = [fl for fl in vpkg.virtual_floors(pkg)
+                 if fl.id not in {f.id for f in site.floors}]
+        if not extra:
+            return site
+        view = site.model_copy()
+        view.floors = list(site.floors) + extra
+        return view
+
+    def set_rehearsal(self, pkg_id: str | None, scen_id: str | None = None) -> None:
+        """가상 카메라를 ingest/analyzer 에 반영(diff)하고 엔진을 재구성한다.
+
+        **활성 시나리오의 카메라만** 얹는다 — 시나리오에 없는 카메라는 송출이
+        없어 영원히 reconnecting 으로 DS 슬롯(16ch 한계)만 차지한다.
+        pkg_id=None 이 곧 복원이다 — 넣었던 rh_* 카메라를 빼고 엔진에서 가상
+        층이 사라진다. 사이트 파일은 처음부터 안 건드렸으므로 되돌릴 게 없다.
+        추가·제거 모두 벌크 경로 — DS 백엔드에서 대당 1회 슬롯 재시작(~8s)을
+        슬롯당 1회로 묶는다 (14대 개별 제거 실측 ~2분 → 수 초).
+        """
+        pkg = vpkg.get(pkg_id) if pkg_id else None
+        subset = vpkg.scenario_cam_ids(pkg, scen_id) if (pkg and scen_id) else None
+        want = [c for c in
+                (vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST) if pkg else [])
+                if subset is None or c.cam_id in subset]
+        want_ids = {c.cam_id for c in want}
+        # 파일 모드(기본)는 ingest(RTSP)에 넣지 않는다 — 프레임은 파일 러너가 분석 큐에 직접
+        ingest_want = want if (pkg and vpkg.source(pkg) == "rtsp") else []
+        ingest_ids = {c.cam_id for c in ingest_want}
+        gone = sorted(self._rh_ingested - ingest_ids)
+        new = [c for c in ingest_want if c.cam_id not in self._rh_ingested]
+        if gone:
+            try:
+                self.ingest.remove_cameras(gone)
+            except Exception:
+                logger.exception("리허설 카메라 일괄 제거 실패(계속): %s", gone)
+            if self.analyzer is not None:
+                for cid in gone:
+                    self.analyzer.remove_camera(cid)
+        if new:
+            self.ingest.add_cameras(new)
+            if self.analyzer is not None:
+                for c in new:
+                    self.analyzer.set_camera_fps(c.cam_id, c.analyze_fps)
+        self._rh_pkg_id = pkg["id"] if pkg else None
+        self._rh_scen_id = scen_id if pkg else None
+        self._rh_cam_ids = want_ids
+        self._rh_ingested = ingest_ids
+        for c in want:                          # 파일 모드 트래커 max_age 기준 fps
+            self.file_analyzer_set_fps(c.cam_id, c.analyze_fps)
+        self.reload_engine()
+        if gone or new:
+            logger.info("리허설 패키지 전환: %s/%s (가상카메라 +%d/-%d)",
+                        self._rh_pkg_id, scen_id, len(new), len(gone))
+
+    # ------------------------------------------------------ 파일 소스 모드 (ADR 09 §11)
+    def _file_put(self, item) -> None:
+        """파일 러너 → 분석 큐. ffmpeg 백엔드면 라이브와 같은 AnalyzerThread 큐를 공유."""
+        if self.analyzer is not None:
+            self.queue.put(item)
+        else:
+            self._file_queue.put(item)
+
+    def ensure_file_analyzer(self) -> None:
+        """DS 백엔드 서버엔 호스트 분석 스레드가 없다 — 파일 모드용으로 하나 띄운다.
+        설정은 라이브 ffmpeg 백엔드·DS 워커와 동일(프로파일 auto, max_age=fps×2s, ECC off)."""
+        if self.analyzer is not None or self._file_analyzer is not None:
+            return
+        from system.tracking.analyzer import AnalyzerThread
+        self._file_analyzer = AnalyzerThread(self._file_queue, on_tracks=self._dispatch_tracks,
+                                             camera_fps={})
+        self._file_analyzer.start()
+        logger.info("파일 모드 분석 스레드 기동 (호스트 TRT)")
+
+    def file_analyzer_set_fps(self, cam_id: str, fps: float) -> None:
+        an = self.analyzer or self._file_analyzer
+        if an is not None:
+            an.set_camera_fps(cam_id, fps)
+
+    def cam_states(self) -> list:
+        """ingest 카메라 상태 + 파일 모드 카메라 상태."""
+        return list(self.ingest.states()) + self.filesrc.states()
+
+    def find_camera(self, cam_id: str) -> CameraConfig | None:
+        """등록 카메라 + 리허설 가상 카메라에서 찾는다 (스냅샷·매핑용)."""
+        cfg = self.store.load_camera(SITE_ID, cam_id)
+        if cfg is not None:
+            return cfg
+        for c in self.cameras():
+            if c.cam_id == cam_id:
+                return c
+        return None
 
     def reload_engine(self) -> None:
         """층 목록·카메라 매핑 변경을 엔진에 반영 — 층마다 엔진을 유지/생성/삭제.
         기존 엔진은 reload()로 통과선 카운트·진행 세션을 보존한다."""
         with self._lock:
-            site, cams = self.site(), self.cameras()
+            site, cams = self._site_plus_rehearsal(self.site()), self.cameras()
             self._cam_floor = {c.cam_id: site.floor_id_of_camera(c) for c in cams}
             floor_ids = {fl.id for fl in site.floors}
             for fid in list(self.engines):          # 삭제된 층 엔진 정리
@@ -202,13 +337,21 @@ class Runtime:
         참여로 세면 경보 원점을 요구하면서 롤업에는 빈 결과가 들어간다
         (리허설이 다른 층 카메라를 파킹할 때 실제로 걸렸다 — ADR 08 §5-1).
         카메라 없는 층(예: 지상1층)은 그대로 제외. floors 순서 유지."""
-        site, cams = self.site(), self.cameras()
+        site, cams = self._site_plus_rehearsal(self.site()), self.cameras()
         have = {site.floor_id_of_camera(c) for c in cams
                 if c.mapping is not None and c.enabled}
         return [fl.id for fl in site.floors if fl.id in have]
 
     # ------------------------------------------------------------ 수명주기
     def startup(self) -> None:
+        # 리허설 패키지 재부착 — vsource 퍼블리셔는 detach 라 서버 재시작에도
+        # 살아남는다. 패키지 시나리오가 돌고 있으면 가상 카메라도 같이 살린다.
+        ps = vpkg.parse_scenario_id(vsource.active_scenario_id() or "")
+        if ps and vpkg.get(ps[0]):
+            self._rh_pkg_id, self._rh_scen_id = ps
+            self._rh_cam_ids = vpkg.scenario_cam_ids(vpkg.get(ps[0]), ps[1])
+            logger.info("리허설 패키지 재부착: %s/%s (%d대)",
+                        ps[0], ps[1], len(self._rh_cam_ids))
         self.reload_engine()          # 층별 엔진 생성 + cam→floor 캐시 구성
         cams = self.cameras()
         self.ingest.start(cams)
@@ -251,7 +394,9 @@ class Runtime:
 
         deepstream 모드에서는 get_snapshot()이 항상 None(픽셀이 컨테이너 밖으로
         안 나옴) → 아래 ffmpeg 단발 캡처(cv2 CAP_FFMPEG)로 폴백된다."""
-        frame = self.ingest.get_snapshot(cfg.cam_id)
+        frame = self.filesrc.snapshot(cfg.cam_id)   # 파일 모드 카메라 (정지 프레임/최근 프레임)
+        if frame is None:
+            frame = self.ingest.get_snapshot(cfg.cam_id)
         if frame is not None:
             return frame
         cap = cv2.VideoCapture(cfg.rtsp, cv2.CAP_FFMPEG)
@@ -276,10 +421,18 @@ app = FastAPI(title="MACS-EVAC 멀티카메라 시스템", lifespan=_lifespan)
 
 
 def _cam_or_404(cam_id: str) -> CameraConfig:
-    cfg = rt.store.load_camera(SITE_ID, cam_id)
+    """등록 카메라 + 리허설 가상 카메라(rh_*, 패키지 활성 중에만) 조회."""
+    cfg = rt.find_camera(cam_id)
     if cfg is None:
         raise HTTPException(404, f"카메라 없음: {cam_id}")
     return cfg
+
+
+def _reject_virtual(cam_id: str) -> None:
+    """가상 카메라(rh_*)는 사이트 store 에 없다 — 수정·삭제 대상이 아니다."""
+    if cam_id.startswith(vpkg.CAM_PREFIX):
+        raise HTTPException(409, "리허설 가상 카메라입니다 — 설정은 패키지 "
+                                 "rehearsal.json 에서, 매핑은 매핑 화면에서 바꾸세요")
 
 
 # ================================================================ 사이트
@@ -377,6 +530,13 @@ async def post_site_map(image: UploadFile = File(...), meta: str | None = Form(N
 
 @app.get("/api/site/map")
 def get_site_map(floor: str = DEFAULT_FLOOR_ID):
+    # 리허설 가상 층(rh_*) — 도면이 사이트가 아니라 패키지 폴더에 있다 (ADR 09)
+    pkg = rt.rehearsal_pkg()
+    if pkg and floor.startswith(vpkg.FLOOR_PREFIX):
+        fp = vpkg.floorplan_path(pkg, floor)
+        if fp is None:
+            raise HTTPException(404, "패키지에 도면 이미지 없음 — rehearsal.json floors[].image")
+        return FileResponse(fp, media_type="image/png")
     p = rt.store.map_path(SITE_ID, rt.resolve_floor(floor))
     if not p.is_file():
         raise HTTPException(404, "맵 이미지 없음")
@@ -488,7 +648,7 @@ async def put_site_floor_elements(request: Request, floor: str = DEFAULT_FLOOR_I
 # ================================================================ 카메라
 @app.get("/api/cameras")
 def list_cameras():
-    states = {s.cam_id: s for s in rt.ingest.states()}
+    states = {s.cam_id: s for s in rt.cam_states()}
     out = []
     for c in rt.cameras():
         s = states.get(c.cam_id)
@@ -606,6 +766,7 @@ async def update_cameras_bulk(request: Request):
 
 @app.put("/api/cameras/{cam_id}")
 async def update_camera(cam_id: str, request: Request):
+    _reject_virtual(cam_id)
     old = _cam_or_404(cam_id)
     patch = await request.json()
     patch.pop("cam_id", None)
@@ -623,6 +784,7 @@ async def update_camera(cam_id: str, request: Request):
 
 @app.delete("/api/cameras/{cam_id}")
 def delete_camera(cam_id: str):
+    _reject_virtual(cam_id)
     _cam_or_404(cam_id)
     rt.ingest.remove_camera(cam_id)
     if rt.analyzer is not None:
@@ -700,7 +862,28 @@ async def set_mapping(cam_id: str, request: Request):
     if "floor_id" in body:            # 층 매핑 (v1.7) — map_pts는 해당 층 맵 px
         cfg.floor_id = body["floor_id"]
     sid = vsource.active_scenario_id()
-    if sid:
+    if cam_id.startswith(vpkg.CAM_PREFIX):
+        # 리허설 **패키지** 가상 카메라 — 매핑의 정본은 패키지 rehearsal.json 이다
+        # (ADR 09 결정 ②: UI에서 찍고 폴더로 저장). 다음에 폴더만 있으면 재현된다.
+        pkg = rt.rehearsal_pkg()
+        if not pkg:
+            raise HTTPException(409, "리허설 패키지가 활성이 아닙니다")
+        patch = {"mapping": cfg.mapping.model_dump() if cfg.mapping else None,
+                 "valid_roi": cfg.valid_roi}
+        fid = cfg.floor_id or ""
+        # 매핑의 map_pts 는 이 층 도면 px 기준 — 도면이 교체되면 무효다. 사이트
+        # 카메라는 업로드 때 자동 해제되지만 패키지 매핑은 못 건드리므로, 저장 시
+        # 도면 크기를 스탬프해 두고 상태 조회에서 불일치를 경고한다.
+        fl_now = rt._site_plus_rehearsal(rt.site()).get_floor(fid) if fid else None
+        patch["map_wh"] = [fl_now.map.w, fl_now.map.h] if (fl_now and fl_now.map) else None
+        if fid.startswith(vpkg.FLOOR_PREFIX):
+            patch["floor"] = fid[len(vpkg.FLOOR_PREFIX):]
+        # rh_ 접두가 아닌 층 id(사이트 층)는 무시 — 가상 카메라의 층은 패키지가
+        # 정한다. UI 셀렉트가 사이트 층으로 폴백해도 매니페스트가 오염되면 안 된다.
+        ok = vpkg.save_camera(pkg["id"], cam_id, patch)
+        if not ok:
+            raise HTTPException(404, f"패키지에 없는 카메라: {cam_id}")
+    elif sid:
         # 리허설 중 — 시나리오 옆에 저장한다. 새로 준비한 영상은 시점이 달라
         # 매핑을 다시 잡아야 하는데, 그걸 카메라에 쓰면 현장용 매핑이 날아간다.
         voverlay.save_cam(sid, cam_id, {
@@ -716,10 +899,14 @@ async def set_mapping(cam_id: str, request: Request):
 @app.delete("/api/cameras/{cam_id}/rehearsal-mapping")
 def clear_rehearsal_mapping(cam_id: str):
     """리허설 전용 매핑을 지운다 → 그 카메라는 다시 원래 매핑을 쓴다."""
-    sid = vsource.active_scenario_id()
+    sid = vsource.active_scenario_id() or (rt.filesrc.scenario_id() if rt.filesrc.active else None)
     if not sid:
         raise HTTPException(409, "리허설이 실행 중이 아닙니다")
-    ok = voverlay.clear_cam(sid, cam_id)
+    if cam_id.startswith(vpkg.CAM_PREFIX):        # 패키지 정본에서 매핑 제거
+        pkg = rt.rehearsal_pkg()
+        ok = bool(pkg) and vpkg.save_camera(pkg["id"], cam_id, {"mapping": None})
+    else:
+        ok = voverlay.clear_cam(sid, cam_id)
     rt.reload_engine()
     return {"cleared": ok, "cam_id": cam_id, "scenario_id": sid}
 
@@ -735,9 +922,19 @@ def _floor_summary(cfg: SiteConfig, fl: Floor) -> dict:
 
 @app.get("/api/floors")
 def list_floors():
-    """층 목록(요약) — 운영뷰 층 전환 탭용."""
-    cfg = rt.site()
-    return [_floor_summary(cfg, fl) for fl in cfg.floors]
+    """층 목록(요약) — 운영뷰 층 전환 탭용.
+
+    리허설 패키지가 활성이면 그 가상 층(rh_*)도 함께 준다(rehearsal 표시) —
+    운영 뷰가 리허설 층으로 전환할 수 있어야 한다. 꺼지면 목록에서 사라진다.
+    """
+    cfg = rt._site_plus_rehearsal(rt.site())
+    out = []
+    for fl in cfg.floors:
+        s = _floor_summary(cfg, fl)
+        if fl.id.startswith(vpkg.FLOOR_PREFIX) and rt.rehearsal_pkg():
+            s["rehearsal"] = True
+        out.append(s)
+    return out
 
 
 @app.post("/api/floors")
@@ -1278,9 +1475,79 @@ def vsource_scenarios():
     영상(존재·길이·fps·코덱)뿐 아니라 **경로를 보는 카메라**(등록·활성·매핑)까지
     확인한다 — 송출만 해서는 운영 뷰에 아무것도 안 뜨기 때문이다.
     """
-    return {"scenarios": [s.to_dict() for s in vscenario.load_all(cameras=rt.cameras())],
+    scenarios = [s.to_dict() for s in vscenario.load_all(cameras=rt.cameras())]
+    # 패키지 소속 표시 — UI가 패키지별로 묶어 보여주고 prep·매핑 진행도를 띄운다
+    pkgs = {p["id"]: vpkg.summary(p) for p in vpkg.discover()}
+    for s in scenarios:
+        ps = vpkg.parse_scenario_id(s["id"])
+        if ps and ps[0] in pkgs:
+            s["package_id"], s["package_name"] = ps[0], pkgs[ps[0]]["name"]
+            s["source"] = vpkg.source(vpkg.get(ps[0]) or {})
+    return {"scenarios": scenarios,
+            "packages": list(pkgs.values()),
+            "active_package": rt._rh_pkg_id,
             "media_dir": str(vscenario.MEDIA_DIR),
             "scenario_dir": str(vscenario.SCENARIO_DIR)}
+
+
+def _rehearsal_bind_floor(sid: str, floor_id: str | None) -> None:
+    """패키지 시나리오의 카메라를 사이트 층에 붙인다 (ADR 09 §7 빙의 모드).
+
+    UI 층 선택이 오면 그 시나리오 카메라들의 manifest `floor` 를 그 층으로 갱신한다
+    — 다음부터는 안 골라도 그 층. 사이트에 없는 층이면 404 (오타로 default 층에
+    조용히 붙는 사고 방지).
+    """
+    if not floor_id:
+        return
+    ps = vpkg.parse_scenario_id(sid)
+    if not ps:
+        return
+    pkg = vpkg.get(ps[0])
+    if not pkg:
+        return
+    if floor_id not in {fl.id for fl in rt.site().floors}:
+        raise HTTPException(404, f"사이트에 없는 층: {floor_id} — ① 맵설정에서 먼저 만드세요")
+    for cid in sorted(vpkg.scenario_cam_ids(pkg, ps[1])):
+        vpkg.save_camera(pkg["id"], cid, {"floor": floor_id})
+
+
+def _file_mode(sid: str) -> dict | None:
+    """패키지 시나리오이고 source=file 이면 패키지 dict, 아니면 None."""
+    ps = vpkg.parse_scenario_id(sid)
+    pkg = vpkg.get(ps[0]) if ps else None
+    return pkg if (pkg and vpkg.source(pkg) == "file") else None
+
+
+def _file_standby(sid: str) -> dict:
+    pkg = _file_mode(sid)
+    ps = vpkg.parse_scenario_id(sid)
+    rt.ensure_file_analyzer()
+    cams_floor = {c.cam_id: (c.floor_id or DEFAULT_FLOOR_ID)
+                  for c in vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST)}
+    fps = next((c.analyze_fps for c in vpkg.virtual_cameras(pkg)), 5.0)
+    return rt.filesrc.standby(pkg, ps[1], cams_floor=cams_floor, fps=fps)
+
+
+def _rehearsal_switch(sid: str) -> str | None:
+    """시나리오가 리허설 패키지 소속이면 가상 카메라·층을 먼저 얹는다 (ADR 09).
+
+    legacy 시나리오면 얹어둔 패키지를 떼어낸다. 반환값은 전환 **이전** 패키지 id —
+    이후 송출 시작이 실패하면 호출부가 그 값으로 되돌린다.
+    """
+    ps = vpkg.parse_scenario_id(sid)
+    target, scen = (ps[0], ps[1]) if ps else (None, None)
+    prev = (rt._rh_pkg_id, rt._rh_scen_id)
+    if (target, scen) == prev:
+        return prev
+    if target and vpkg.get(target) is None:
+        raise HTTPException(404, f"리허설 패키지 없음: {target}")
+    # 세션 진행 중 층·카메라 구성 전환 금지 — 같은 세션 안에서 기하가 갈린다.
+    for fid, eng in rt.engines.items():
+        if eng.session_live() is not None:
+            raise HTTPException(409, f"'{fid}' 층에서 평가 세션이 진행 중입니다 — "
+                                     "세션을 종료한 뒤 리허설을 전환하세요")
+    rt.set_rehearsal(target, scen)
+    return prev
 
 
 @app.post("/api/vsource/start")
@@ -1302,6 +1569,19 @@ async def vsource_start(request: Request):
     if not sid:
         raise HTTPException(422, "scenario_id 필요")
     at = body.get("attach_sec")
+    _rehearsal_bind_floor(sid, body.get("floor_id"))
+    prev_pkg = _rehearsal_switch(sid)   # 패키지면 가상 카메라·층을 먼저 얹는다
+    if _file_mode(sid):
+        # 파일 모드 — 준비가 안 돼 있으면 여기서 준비부터. 앞머리·부착시간 개념 없음.
+        try:
+            if not (rt.filesrc.active and rt.filesrc.scenario_id() == sid):
+                _file_standby(sid)
+            r = rt.filesrc.start(loop=bool(body.get("loop", True)))
+            rt.reload_engine()
+            return r
+        except (FileNotFoundError, ValueError) as e:
+            rt.set_rehearsal(*prev_pkg)
+            raise HTTPException(409, str(e))
     try:
         r = vsource.start(sid, loop=bool(body.get("loop", True)),
                           cameras=rt.cameras(),
@@ -1309,8 +1589,10 @@ async def vsource_start(request: Request):
         rt.reload_engine()          # 리허설 매핑 유지 (대기→재생 전환에도 그대로)
         return r
     except FileNotFoundError:
+        rt.set_rehearsal(*prev_pkg)
         raise HTTPException(404, f"시나리오 없음: {sid}")
     except ValueError as e:
+        rt.set_rehearsal(*prev_pkg)
         raise HTTPException(409, str(e))
 
 
@@ -1328,13 +1610,27 @@ async def vsource_standby(request: Request):
     sid = str(body.get("scenario_id") or "").strip()
     if not sid:
         raise HTTPException(422, "scenario_id 필요")
+    _rehearsal_bind_floor(sid, body.get("floor_id"))
+    prev_pkg = _rehearsal_switch(sid)   # 패키지면 가상 카메라·층을 먼저 얹는다
+    if _file_mode(sid):
+        try:
+            vsource.stop()                       # rtsp 리허설이 돌고 있었다면 내린다
+            r = _file_standby(sid)
+            rt.reload_engine()
+            return r
+        except (FileNotFoundError, ValueError) as e:
+            rt.set_rehearsal(*prev_pkg)
+            raise HTTPException(409, str(e))
+    rt.filesrc.stop()                            # 파일 리허설이 돌고 있었다면 내린다
     try:
         r = vsource.standby(sid, cameras=rt.cameras())
         rt.reload_engine()          # 이 시나리오의 리허설 매핑을 얹는다
         return r
     except FileNotFoundError:
+        rt.set_rehearsal(*prev_pkg)
         raise HTTPException(404, f"시나리오 없음: {sid}")
     except ValueError as e:
+        rt.set_rehearsal(*prev_pkg)
         raise HTTPException(409, str(e))
 
 
@@ -1346,7 +1642,11 @@ async def vsource_stop(request: Request):
     except Exception:
         body = {}
     rp = body.get("restore_pm2")
+    fr = rt.filesrc.stop()
     r = vsource.stop(restore_pm2=None if rp is None else bool(rp))
+    if fr.get("stopped"):
+        r = {**r, "stopped": r.get("stopped", 0) + fr["stopped"], "source": "file"}
+    rt.set_rehearsal(None)          # 패키지 가상 카메라·층을 떼어낸다 = 복원 (ADR 09)
     rt.reload_engine()              # 리허설 매핑을 떼고 원래 설정으로 돌아간다
     return r
 
@@ -1359,10 +1659,10 @@ def vsource_status():
     그 사이 화면에 아무 변화가 없으면 "안 켜졌다"고 오해하므로, 채널별로
     지금 받고 있는지를 함께 돌려준다.
     """
-    st = vsource.status()
-    if not st.get("running"):
+    st = rt.filesrc.status() if (rt.filesrc.active or rt.filesrc.mode == "done") else vsource.status()
+    if not st.get("running") and not st.get("done"):
         return st
-    fps = {s.cam_id: s.fps_in for s in rt.ingest.states()}
+    fps = {s.cam_id: s.fps_in for s in rt.cam_states()}
     cam_of = {}
     try:
         for c in rt.cameras():
@@ -1371,16 +1671,34 @@ def vsource_status():
         pass
     n_rx = 0
     for s in st.get("streams", []):
-        cid = cam_of.get(s["path"])
+        cid = s.get("cam_id") or cam_of.get(s["path"])
         s["cam_id"] = cid
-        s["receiving"] = bool(cid and fps.get(cid, 0) > 1.0)
+        if st.get("source") != "file":           # 파일 모드는 러너가 receiving 을 직접 준다
+            s["receiving"] = bool(cid and fps.get(cid, 0) > 1.0)
         n_rx += 1 if s["receiving"] else 0
     st["cams_receiving"] = n_rx
     st["cams_total"] = len(st.get("streams", []))
-    # 채널마다 "리허설 전용 매핑을 잡아뒀는가" — 안 잡았으면 원래 매핑을 상속한다
+    # 채널마다 "리허설 전용 매핑을 잡아뒀는가" — 안 잡았으면 원래 매핑을 상속한다.
+    # 패키지 가상 카메라(rh_*)는 매핑 정본이 rehearsal.json 이라 거기서 본다.
     ov = voverlay.load(st.get("scenario_id") or "")
+    pkg = rt.rehearsal_pkg()
+    pkg_mapped = {vpkg.cam_id_of(c["cam"]) for c in (pkg or {}).get("cameras", [])
+                  if c.get("cam") and c.get("mapping")}
+    stale: set[str] = set()
+    if pkg:
+        site_v = rt._site_plus_rehearsal(rt.site())
+        for c in pkg.get("cameras", []):
+            wh, fid = c.get("map_wh"), vpkg.floor_id_of(c.get("floor"), pkg)
+            if c.get("mapping") and wh and fid:
+                fl = site_v.get_floor(fid)
+                if fl.id == fid and fl.map and [fl.map.w, fl.map.h] != list(wh):
+                    stale.add(vpkg.cam_id_of(c["cam"]))
     for s2 in st.get("streams", []):
-        s2["own_mapping"] = bool(s2.get("cam_id") and ov.get(s2["cam_id"], {}).get("mapping"))
+        cid = s2.get("cam_id")
+        s2["own_mapping"] = bool(cid and (cid in pkg_mapped
+                                          or ov.get(cid, {}).get("mapping")))
+        # 도면이 매핑 당시와 달라졌다 — map_pts 좌표계가 어긋났으니 다시 찍어야 한다
+        s2["mapping_stale"] = bool(cid in stale)
     st["own_mapped"] = sum(1 for s2 in st.get("streams", []) if s2.get("own_mapping"))
     return st
 
@@ -1391,7 +1709,7 @@ def _map_state(floor_id: str = DEFAULT_FLOOR_ID) -> MapState:
     fid = rt.resolve_floor(floor_id)
     eng = rt.engines.get(fid)
     ms = eng.snapshot() if eng is not None else MapState(ts=0.0)
-    ms.cameras = [s for s in rt.ingest.states()
+    ms.cameras = [s for s in rt.cam_states()
                   if rt._cam_floor.get(s.cam_id, DEFAULT_FLOOR_ID) == fid]
     return ms
 
@@ -1401,13 +1719,20 @@ def map_state(floor: str = DEFAULT_FLOOR_ID):
     return _map_state(floor)
 
 
+# 맵 SSE 송출 주기(Hz). 예전 1Hz 는 분석(5fps)의 1/5만 내보내 프론트가 1초 간격
+# 샘플을 선형 보간했다 — 객체가 1초 뒤처져 직선으로 미끄러지고 짧은 ID 는 툭툭 튄다
+# (오프라인 시각화와 비교 실측: 같은 점인데 웹만 "끊기고 싱크 안 맞음"). 분석 fps 에 맞춘다.
+MAP_STREAM_HZ = float(os.environ.get("MAP_STREAM_HZ", "5"))
+
+
 @app.get("/api/map/stream")
 async def map_stream(floor: str = DEFAULT_FLOOR_ID):
     async def gen():
+        interval = 1.0 / max(0.5, MAP_STREAM_HZ)
         while True:
             payload = _map_state(floor).model_dump_json()
             yield f"event: state\ndata: {payload}\n\n"
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(interval)
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
@@ -1464,7 +1789,7 @@ def status():
             "backend": INGEST_BACKEND,
             "pipeline": pipeline,
             "queue": {"size": rt.queue.qsize(), "drops": rt.queue.dropped},
-            "cameras": [s.model_dump() for s in rt.ingest.states()],
+            "cameras": [s.model_dump() for s in rt.cam_states()],
         }
     except Exception as e:  # 원인 노출 (임시 디버그 겸 방어)
         logger.exception("/api/status 실패")

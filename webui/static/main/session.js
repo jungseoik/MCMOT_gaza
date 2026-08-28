@@ -229,10 +229,37 @@ const Session = (() => {
    *  ③ 에 리허설 대기 중일 때만 나타나는 별도 버튼이 부른다. */
   async function onRehearsalBtn() {
     if (live || drillActive) return;
+    let st0 = null;
+    try { st0 = await (await fetch("/api/vsource/status")).json(); } catch (e) { /* 아래서 처리 */ }
+    if (!st0 || !st0.running || st0.mode !== "standby") {
+      hint("리허설이 준비 중이 아닙니다 — ⑤ 리허설에서 [준비]를 먼저 누르세요.", true); return;
+    }
+    const floors = st0.floors || [];
+    // ① 리허설 층으로 자동 전환 — 상단 층 셀렉터를 손으로 바꾸지 않으면 다른 층 도면을
+    //    보고 있게 되고 "아무것도 안 나온다"로 읽힌다(실측).
+    if (floors.length && App.currentFloor !== floors[0]
+        && (App.floors || []).some((f) => f.id === floors[0])) {
+      try { await App.setFloor(floors[0], { discardEdits: true }); } catch (e) { /* 무시 */ }
+    }
+    // ② 경보 발생원 사전 검사 — **재생을 시작하기 전에**. 시작한 뒤 걸리면 영상 한
+    //    사이클(27s)을 허비한다(실측). 규칙은 _startAlarm 과 같다.
+    if (floors.length >= 2) {
+      const missing = floors.filter((f) => !(drillOrigins[f] && drillOrigins[f].length));
+      if (missing.length) {
+        hint(`경보 발생원 미지정 층: ${missing.map((f) => App.floorName(f)).join(", ")} — 도면을 클릭해 [+ 추가]`, true);
+        return;
+      }
+    } else {
+      syncPending();
+      if (!pendingOrigins.length) {
+        hint("경보 발생원을 먼저 추가하세요 — 이 층 도면에서 [+ 추가] 후 클릭 (IDR 기준점)", true);
+        return;
+      }
+    }
     const r = await startRehearsalIfStandby();
-    if (!r) { hint("리허설이 대기 중이 아닙니다 — ⑤ 리허설에서 [대기 송출]을 먼저 켜세요.", true); return; }
-    // 앞머리(정지화면) 구간이 있으면 그게 끝나는 순간 = 본영상 t=0 = 경보 시각.
-    // 그 전에 경보를 걸면 카메라가 아직 안 붙어 영상 앞부분이 분석에서 빠진다.
+    if (!r) { hint("리허설 시작 실패 — ⑤ 리허설 탭 상태를 확인하세요.", true); return; }
+    // 앞머리(정지화면) 구간이 있으면(rtsp 모드) 그게 끝나는 순간 = 본영상 t=0 = 경보 시각.
+    // 파일 모드는 lead 0 → 바로.
     if (r.leadSec > 0 && r.alarmAt) {
       await waitForAlarm(r.alarmAt, r.leadSec);
     }

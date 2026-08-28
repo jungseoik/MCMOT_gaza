@@ -80,6 +80,12 @@ class IngestManager:
             worker.stop()
             worker.join(timeout=5.0)
 
+    def remove_cameras(self, cam_ids: list[str]) -> None:
+        """여러 대 일괄 제거 — DsIngestManager와의 인터페이스 대칭.
+        이 백엔드는 카메라별 독립 워커라 순차 제거와 결과가 같다."""
+        for cam_id in cam_ids:
+            self.remove_camera(cam_id)
+
     def update_cameras(self, cfgs: list[CameraConfig]) -> None:
         """여러 대 변경 일괄 반영 — 이 백엔드에서는 순차 변경과 결과가 같다
         (카메라별 독립 워커라 묶어서 얻는 이득이 없다)."""

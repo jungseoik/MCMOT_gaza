@@ -93,3 +93,28 @@ UI는 **② 카메라 등록·매핑** 좌측 [훈련영상 송출] 패널. 송�
 - 채널별 퍼블리셔 로그: `data/vsource_logs/<path>.log`
 - 상태파일: `data/vsource_state.json` (detach 프로세스 재부착용)
 - 스트림 확인: `ffprobe -rtsp_transport tcp -i rtsp://127.0.0.1:8554/<path>`
+
+## 리허설 패키지 (ADR 09)
+
+`media/vsource/<site>/<set>/rehearsal.json` 폴더가 영상·시나리오·카메라·매핑·도면의
+**진실의 원천**이다 (`package.py`). 시나리오 id 는 `pkg:<패키지>:<시나리오>`.
+
+- 시작하면 가상 카메라(`rh_*`)가 **자동으로 얹히고**, 종료하면 떼어진다 — 사이트
+  (`data/sites/`)는 한 글자도 안 바뀐다.
+- 층은 **사이트 층을 빌려 쓴다**(manifest `floor` = 사이트 층 id, ⑤ [붙일 층]).
+  도면·구역·출구·경로는 ① 맵설정 소관 → 거기서 고치면 리허설 지표에 그대로 반영.
+  (패키지 `floors[]` 에 `image` 가 있으면 예외적으로 가상 층 `rh_*` 자립 모드)
+- 매핑을 UI에서 찍으면 **패키지 rehearsal.json 에 저장**된다 (폴더만 옮기면 재현).
+- 활성 시나리오가 쓰는 카메라만 ingest 에 들어간다 (DS 16ch 한계 보호).
+- 사전 검증: `python tools/rehearsal_prep.py <폴더>` (`--scaffold`, `--encode`,
+  `--floorplan-from-site <층id>` — 구조 동일한 사이트 층 도면을 패키지로 복사).
+- `data/scenarios/*.json` 은 legacy mock (drill-16f 등) — 그대로 동작.
+- **오프라인 진단**: `python tools/rehearsal_viz.py --package cj-rehearsal --scenario scenario_02`
+  → 라이브와 같은 5fps 분석으로 카메라 그리드(ID·헐·통과선) + 공유 2D 맵(패키지 매핑·사이트 층)
+  영상을 만든다. 헐 밖(라이브 폐기) 관측을 빨간 ✕로 보여 "추론 문제 vs 매핑 범위 문제"를 가른다.
+
+## 파일 소스 모드 (ADR 09 §11, 기본)
+
+패키지 리허설은 RTSP 송출 없이 **영상 파일을 직접 읽어** 프레임 잠금 동기로 분석한다
+(`filesource.py` → AnalyzerThread 큐 → 엔진). 준비 즉시, 경보 = t0, 앞머리·재부착 없음.
+`rehearsal.json` 의 `"source": "rtsp"` 로 바꾸면 예전 송출 경로(현장 RTSP 검증용).

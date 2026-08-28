@@ -15,6 +15,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from system.vsource import package
+
 SCENARIO_DIR = Path("data/scenarios")
 MEDIA_DIR = Path("media/vsource")
 
@@ -190,9 +192,26 @@ def load(scenario_id: str, cameras=None) -> Scenario:
     """시나리오 1개 로드 + 검증. 없으면 FileNotFoundError.
 
     cameras 를 주면 경로↔카메라 매칭까지 확인한다(등록·활성·매핑).
+    `pkg:<패키지>:<시나리오>` 는 리허설 패키지 매니페스트에서 온다 (ADR 09) —
+    이때 그 패키지의 가상 카메라를 매칭 대상에 합친다(리허설이 아직 안 돌면
+    사이트에 없지만, 돌기 시작하면 얹힐 카메라들이므로 미리 그 기준으로 본다).
     """
-    f = SCENARIO_DIR / f"{scenario_id}.json"
-    d = json.loads(f.read_text(encoding="utf-8"))
+    if scenario_id.startswith(package.SCENARIO_PREFIX):
+        ps = package.parse_scenario_id(scenario_id)
+        pkg = package.get(ps[0]) if ps else None
+        d = package.scenario_def(pkg, ps[1]) if pkg else None
+        if d is None:
+            raise FileNotFoundError(scenario_id)
+        if cameras is not None:
+            # 리허설이 이미 돌고 있으면 RT.cameras() 에 가상 카메라가 들어 있다 —
+            # 또 붙이면 "같은 경로를 보는 카메라 2대" 라는 가짜 경고가 뜬다.
+            have = {getattr(c, "cam_id", None) or (c.get("cam_id") if isinstance(c, dict) else None)
+                    for c in cameras}
+            cameras = list(cameras) + [c for c in package.virtual_cameras(pkg)
+                                       if c.cam_id not in have]
+    else:
+        f = SCENARIO_DIR / f"{scenario_id}.json"
+        d = json.loads(f.read_text(encoding="utf-8"))
     streams = [Stream(path=str(s["path"]), file=str(s["file"]))
                for s in d.get("streams", [])]
     for s in streams:
@@ -210,14 +229,20 @@ def load(scenario_id: str, cameras=None) -> Scenario:
 
 
 def load_all(cameras=None) -> list[Scenario]:
-    """data/scenarios/*.json 전부 (id 순)."""
-    if not SCENARIO_DIR.is_dir():
-        return []
+    """리허설 패키지 시나리오(ADR 09) + data/scenarios/*.json (legacy mock)."""
     out = []
-    for f in sorted(SCENARIO_DIR.glob("*.json")):
-        try:
-            out.append(load(f.stem, cameras=cameras))
-        except Exception as e:                      # 깨진 정의 하나가 목록을 못 막게
-            out.append(Scenario(id=f.stem, name=f"{f.stem} (로드 실패)",
-                                streams=[], note=str(e)))
+    for pkg in package.discover():                  # 패키지 먼저 — 신규 기준 구조
+        for sid in package.scenario_ids(pkg):
+            try:
+                out.append(load(sid, cameras=cameras))
+            except Exception as e:
+                out.append(Scenario(id=sid, name=f"{sid} (로드 실패)",
+                                    streams=[], note=str(e)))
+    if SCENARIO_DIR.is_dir():
+        for f in sorted(SCENARIO_DIR.glob("*.json")):
+            try:
+                out.append(load(f.stem, cameras=cameras))
+            except Exception as e:                  # 깨진 정의 하나가 목록을 못 막게
+                out.append(Scenario(id=f.stem, name=f"{f.stem} (로드 실패)",
+                                    streams=[], note=str(e)))
     return out

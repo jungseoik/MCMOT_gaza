@@ -117,8 +117,10 @@ local_settings.py
 *.manifest
 MANIFEST
 # (원고.md·README.md 는 git 소관 — 편집 원본이므로 변경 추적이 필요)
-media/vsource/*
-!media/vsource/README.md
+# media/vsource — 영상은 전역 *.mp4 규칙으로 제외(HF 보관). 리허설 패키지 정의
+# (rehearsal.json·매핑·도면·README)는 손작업 산출물이라 git 추적 (ADR 09)
+media/vsource/**/*.avi
+media/vsource/**/.cache/
 # mkdocs documentation
 *.mo
 # Model weights & TRT engines
@@ -206,3 +208,8 @@ venv.bak/
 .webassets-cache
 wheels/
 # YOLO26 비교 실험 산출물 (대용량 — 스크립트/JSON만 추적)
+
+# 코어덤프(root 소유) · 리허설 시각화 산출물(영상, 재생성 가능)
+/core
+results/rehearsal_viz/
+!.env.example

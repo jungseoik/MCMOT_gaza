@@ -306,6 +306,20 @@
       <aside class="side left">
         <div class="sidehead">카메라 목록 <span id="camListDefConf" class="hdr-def" title="사이트 전역 기본 검출 신뢰도 — 카메라별로 비워두면 이 값을 상속">기본 conf —</span></div>
         <div class="sidebody">
+          <!-- 등록은 맨 위, 접이식 — 목록이 길어지면(17대) 아래로 밀려 찾기 어렵다.
+               주 작업은 "카메라 골라 매핑"이라 접어두고, 필요할 때만 펼친다. -->
+          <details class="camadd" id="camAddBox">
+            <summary>＋ 카메라 추가 <span class="camadd-sub">RTSP 1대 · 여러 대</span></summary>
+            <div class="group">
+              <input id="newCamName" type="text" placeholder="이름 (예: 1층 로비)" />
+              <input id="newCamRtsp" type="text" placeholder="rtsp://..." />
+              <label class="camfloor-lab" id="newCamFloorLab">매핑 층
+                <select id="newCamFloor" title="이 카메라를 매핑할 도면(층)"></select></label>
+              <button class="btn primary sm" id="camAdd" style="width:100%">+ 추가 후 연결 테스트</button>
+              <div class="grow" id="camAddMsg"></div>
+              <button class="btn sm" id="camBulkOpen" style="width:100%">⿻ 여러 대 한 번에 등록…</button>
+            </div>
+          </details>
           <div class="rhbanner" id="rhBanner" title="리허설 중에 잡는 매핑은 시나리오에만 저장되고, 원래 카메라 매핑은 그대로 남습니다">
             🎬 <b>리허설 매핑</b> — 원본 매핑은 안 건드림
             <span id="rhBannerWho"></span>
@@ -314,16 +328,6 @@
           <button class="btn sm hidden" id="camEnableMapped" style="width:100%"
             title="매핑을 끝냈지만 비활성인 카메라를 한 번에 켭니다 — 워커 재시작 1회">
             ▶ 매핑 완료 카메라 전부 활성화</button>
-          <div class="group">
-            <div class="gtitle">카메라 추가</div>
-            <input id="newCamName" type="text" placeholder="이름 (예: 1층 로비)" />
-            <input id="newCamRtsp" type="text" placeholder="rtsp://..." />
-            <label class="camfloor-lab" id="newCamFloorLab">매핑 층
-              <select id="newCamFloor" title="이 카메라를 매핑할 도면(층)"></select></label>
-            <button class="btn primary sm" id="camAdd" style="width:100%">+ 추가 후 연결 테스트</button>
-            <div class="grow" id="camAddMsg"></div>
-            <button class="btn sm" id="camBulkOpen" style="width:100%">⿻ 여러 대 한 번에 등록…</button>
-          </div>
         </div>
       </aside>
 
@@ -579,26 +583,28 @@
         <div class="rhbody">
           <div class="rhcol">
             <div class="gtitle">시나리오</div>
-            <select id="vsScenario" title="송출할 훈련영상 묶음"></select>
-            <div class="grow" id="vsMeta"></div>
-            <label class="vsloop"><input type="checkbox" id="vsLoop" checked />
-              사이클마다 전 채널 함께 되감기</label>
+            <div class="rhpick">
+              <select id="vsScenario" title="송출할 훈련영상 묶음"></select>
+              <label class="rhfloor hidden" id="vsFloorLab"
+                title="리허설 카메라를 붙일 사이트 층. 도면·구역·출구·경로는 ① 맵설정에서 관리한다 — 거기서 고치면 리허설 지표에도 그대로 반영">
+                층 <select id="vsFloor"></select></label>
+            </div>
+            <div class="rhfacts" id="vsMeta"></div>
+            <div class="rhwarn" id="vsWarn"></div>
             <div class="rhbtns">
               <button class="btn primary" id="vsStandby"
-                title="첫 프레임을 정지화면으로 내보낸다 — 카메라가 붙어 매핑은 되고 영상은 멈춰 있다">⏸ 대기 송출 시작</button>
+                title="첫 프레임을 정지화면으로 내보낸다 — 카메라가 붙어 매핑은 되고 영상은 멈춰 있다">⏸ 대기 송출</button>
               <button class="btn" id="vsStartDrill"
-                title="훈련 영상을 t=0부터 틀고 ③ 운영 뷰로 이동한다">🎬 훈련 시작 → ③</button>
-              <button class="tag-btn danger" id="vsStop">■ 리허설 종료</button>
+                title="훈련 영상을 t=0부터 틀고 ③ 운영 뷰로 이동한다">🎬 훈련 시작</button>
+              <button class="btn ghost" id="vsStop">■ 종료</button>
+              <label class="vsloop" title="사이클마다 전 채널이 함께 되감긴다"><input type="checkbox" id="vsLoop" checked />반복</label>
             </div>
             <div class="grow" id="vsMsg"></div>
-            <div class="grow gnote">리허설은 <b>송출만</b> 담당한다. 기존 카메라 설정은
-              건드리지 않고, 훈련 지표는 이 시나리오가 다루는 층으로만 집계된다.
-              종료하면 상시송출이 되돌아온다.</div>
           </div>
           <div class="rhcol">
             <div class="gtitle">채널 <span class="cnt" id="rhChanN">0</span></div>
             <div id="vsStreams" class="ellist"></div>
-            <div class="grow gnote">채널을 클릭하면 그 카메라 <b>매핑 화면</b>으로 갑니다.</div>
+            <div class="gnote" id="vsStreamsHint"></div>
           </div>
         </div>
       </div>

@@ -23,7 +23,7 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 - **추론 엔진**: `src/` — `inference.py`(PyTorch), `inference_gpu.py`/`inference_trt.py`(TRT 최적화), `build_trt.py`. **검출기 투트랙**(YOLOX ↔ RF-DETR): `BoostTrackGPUInference(detector=...)`·CLI `--detector`, RF-DETR은 `src/rfdetr_trt.py`(라이브러리 불필요)+`tools/setup_rfdetr.sh`. 근거·사용법 `docs/reports/RF-DETR-TRT-변환-사용법.md`
 - **추론 프로파일(모델 교체)**: 검출기·ReID·트래커 조합을 레포 루트 **`model_zoo.py`** 한 곳에서 갈아끼운다 — `yolox_fastreid`(기본, 기존 동작) ↔ `yolo26_clipreid`(YOLO26-L v6.3 + CLIP-ReID). 세 호출 지점(단일영상·ffmpeg 백엔드·DS 컨테이너)이 프로파일 id 하나만 받는다. **:8900 [① 설정 → 추론 모델]에서 전환**(세션 중 불가). 엔진 빌드 `tools/build_profile_engines.sh [--ds]`, ONNX는 `tools/fetch_assets.sh --onnx`. 설계 `docs/architecture/07-추론-프로파일-교체구조.md` · 실측 `docs/reports/2026-08-20_신규-추론스택-YOLO26-CLIPReID-도입-실측.md`
 - **단일채널 웹 UI**: `webui/` — `server.py`, 속도/밀도/카운팅/뎁스 모듈, RTSP 라이브 (포트 8000)
-- **멀티카메라 시스템**: `system/` — 다채널 RTSP·TRT·4대 지표 세션·2D 맵 UI + **세션 리플레이·지표 재계산(v1.10)** · **건물 훈련(전 층 공유 세션·4대지표 롤업·전 층 리플레이, v1.11 — UI 표기 "건물 훈련", 내부 코드·API는 `drill`)** · 간이 로그인 게이트 (포트 8900). `system/README.md` 참조
+- **멀티카메라 시스템**: `system/` — 다채널 RTSP·TRT·4대 지표 세션·2D 맵 UI + **세션 리플레이·지표 재계산(v1.10)** · **건물 훈련(전 층 공유 세션·4대지표 롤업·전 층 리플레이, v1.11 — UI 표기 "건물 훈련", 내부 코드·API는 `drill`)** · **리허설 패키지(ADR 09 — `media/vsource/<site>/<set>/rehearsal.json` = 영상·시나리오·카메라·매핑 정본, 사이트 층 빙의, RTSP 없는 파일 모드 잠금 동기 추론; 영상은 HF `PIA-SPACE/C-lab`, `tools/fetch_assets.sh --rehearsal`)** · 간이 로그인 게이트 (포트 8900). `system/README.md` 참조
 - **트래커**: `tracker/`, `boostracker/`, 외부 의존 `external/`
 
 ## 문서 맵 (docs/)
@@ -38,11 +38,12 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 | `docs/reports/` | YOLO26·해상도·다채널 비교 실측 보고서 + 요구사항 점검 + 벤치 스크립트 |
 | `docs/guide/` | **사용 가이드 허브(3종)** — 단일영상-분석-MVP(:8000) · 멀티카메라-시스템 4대지표(:8900) · 도면-편집기(:8910). 각 하위폴더 README + img (스크린샷 기반) |
 | `docs/optimization-report.md` | 추론 최적화 보고서 |
-| `docs/재현-새-GPU서버에서-현재상태-그대로.md` | **새 서버/노트북에서 현재 운영상태 그대로 재현** — clone + HF 토큰만으로 12채널·17F/16F 도면·편집기까지. `tools/fetch_assets.sh` + `tools/seed_version.py restore v3 --apply` |
+| `docs/재현-새-GPU서버에서-현재상태-그대로.md` | **새 서버/노트북에서 현재 운영상태 그대로 재현** — clone + HF 토큰만으로 12채널·17F/16F/10F 도면·리허설 패키지·편집기까지. `tools/fetch_assets.sh [--rehearsal]` + `tools/seed_version.py restore v8 --apply` |
 | `docs/설치-맨서버-부트스트랩.md` | **순정 우분투(드라이버만) 0단계 시스템 준비** — conda·docker·nvidia-container-toolkit·ffmpeg·node/pm2·CAD 복붙 체크리스트 + 기능별 필수의존 표 + 재현 판정. 대용량은 `tools/fetch_assets.sh`(HF `backseollgi/MCMOT`) |
 | `docs/이관가이드-다른-GPU-서버로.md` | **다른 GPU 서버 이관 체크리스트** — 현 기준은 전부 Blackwell(sm_120). 다른 아키텍처(RTX 5000 Ada 등)면 TRT 엔진 재빌드·한계 재측정·`GPU_DEVICES` 실인덱스 확인 필수 |
 | `docs/현장-NVR-RTSP-수집-대응계획.md` | **PoC 현장(CJ제일제당) NVR 수집 계획** — H.265/VBR/RTSP 세션 개념 정리 + 수집 아키텍처 3안 비교(권장: 로컬 mediamtx 허브) + 현장 진단 체크리스트·업체 요청서 |
 | `docs/RTSP-송출서버-구성.md` | **RTSP 테스트 송출** — WebRTC 호환 인코딩·mediamtx·pm2 절차 + HF `backseollgi/MCMOT`(model, `videos/`, 비공개→`HF_TOKEN` 필요)에서 받아 재현하는 `tools/rtsp/setup_rtsp_streams.sh` |
+| `media/vsource/` | **리허설 패키지** — `<site>/<set>/rehearsal.json`(git) + 영상(HF). 준비 CLI `tools/rehearsal_prep.py`, 오프라인 진단 `tools/rehearsal_viz.py`. 설계 `docs/architecture/09-리허설-패키지-구조.md` |
 | `data/seed_versions/` | **디폴트 세팅(seed) 버전 보관** — [Reset] 이 복원하는 상태를 이름 붙여 저장·복원. `tools/seed_version.py` (save/list/show/restore) |
 | `system/README.md` | 멀티카메라 2D맵 시스템 실행·환경변수·pm2·모듈별 소유 정보 |
 

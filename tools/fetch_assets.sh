@@ -30,7 +30,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; DO_MANUAL=0; FORCE=0; ANY=0
+DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; DO_MANUAL=0; DO_REHEARSAL=0; FORCE=0; ANY=0
+# 레포 루트 .env 가 있으면 HF_TOKEN 을 읽는다 (커밋 금지 파일 — .env.example 참조)
+if [ -f "$(dirname "$0")/../.env" ]; then set -a; . "$(dirname "$0")/../.env"; set +a; fi
 for a in "$@"; do
   case "$a" in
     --weights) DO_WEIGHTS=1; ANY=1 ;;
@@ -38,6 +40,7 @@ for a in "$@"; do
     --cad)     DO_CAD=1;     ANY=1 ;;
     --field)   DO_FIELD=1;   ANY=1 ;;
     --manual)  DO_MANUAL=1;  ANY=1 ;;
+    --rehearsal) DO_REHEARSAL=1; ANY=1 ;;
     --all)     DO_WEIGHTS=1; DO_ONNX=1; DO_CAD=1; ANY=1 ;;   # field·manual은 무거워서 --all 제외
     --force)   FORCE=1 ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
@@ -136,6 +139,22 @@ if [ "$DO_FIELD" -eq 1 ]; then
   else
     echo "  [실패] field — 비공개 MCMOT 접근 토큰(HF_TOKEN) 필요" >&2; RC=1
   fi
+fi
+
+if [ "$DO_REHEARSAL" -eq 1 ]; then
+  echo "== 리허설 패키지 영상 (PIA-SPACE/C-lab dataset :: rehearsal_packages/ → media/vsource/) =="
+  # 패키지 정의(rehearsal.json·README)는 git 소관 — HF 에는 영상(mp4)만 있다 (ADR 09).
+  # HF 경로 rehearsal_packages/<site>/<set>/... 가 로컬 media/vsource/<site>/<set>/... 로 간다.
+  TMPR="$(mktemp -d)"
+  if "$HF_BIN" download PIA-SPACE/C-lab --repo-type dataset --include "rehearsal_packages/**" --local-dir "$TMPR" >/dev/null; then
+    mkdir -p media/vsource
+    if [ "$FORCE" -eq 1 ]; then cp -r "$TMPR"/rehearsal_packages/. media/vsource/; else cp -rn "$TMPR"/rehearsal_packages/. media/vsource/; fi
+    echo "  ↓ rehearsal_packages/** → media/vsource/  ($(du -sh media/vsource 2>/dev/null | cut -f1))"
+    echo "  검증: python tools/rehearsal_prep.py media/vsource/cj/rehearsal"
+  else
+    echo "  [실패] rehearsal — PIA-SPACE/C-lab(비공개) 토큰(HF_TOKEN, PIA-SPACE org) 필요" >&2; RC=1
+  fi
+  rm -rf "$TMPR"
 fi
 
 if [ "$DO_MANUAL" -eq 1 ]; then

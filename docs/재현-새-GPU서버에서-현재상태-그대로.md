@@ -43,6 +43,13 @@ export HF_TOKEN=hf_xxxxxxxxxxxxxxxx            # 절대 커밋 금지
 # 또는:  hf auth login
 ```
 
+### 리허설 패키지용 토큰 (PIA-SPACE org)
+리허설 영상은 `PIA-SPACE/C-lab`(비공개 dataset)에 있어 **PIA-SPACE org 토큰**이 필요하다.
+레포 루트에 `.env` 를 만들어 두면 `tools/fetch_assets.sh` 가 자동으로 읽는다(커밋 금지):
+```bash
+cp .env.example .env && $EDITOR .env      # HF_TOKEN=hf_xxx (PIA-SPACE)
+```
+
 ## 3. 대용량 자산 내려받기
 
 git 에는 없는 것들(가중치·ONNX·CAD 원본·현장 영상)을 한 번에 받는다.
@@ -80,6 +87,14 @@ field/encoded/1F/*.mp4 · 16F/*.mp4          현장 RTSP 송출본  (MCMOT, 토�
 > 다만 **완성된 맵 이미지는 git 에 있으므로 운영 재현에는 지장이 없다**
 > (`data/seed_versions/v*/map_floor3.png`, 7단계 `restore` 로 복원).
 > 1층 도면을 새로 손봐야 할 때만 A-101 에서 해당 층을 다시 잘라내면 된다.
+
+### 리허설 패키지 영상 (ADR 09)
+```bash
+bash tools/fetch_assets.sh --rehearsal    # PIA-SPACE/C-lab → media/vsource/cj/rehearsal/ (1.3GB)
+python tools/rehearsal_prep.py media/vsource/cj/rehearsal   # 64파일 baseline 검증 → ✅
+```
+패키지 정의(`media/vsource/cj/rehearsal/rehearsal.json` — 시나리오·카메라·**매핑**)는 git 에
+들어 있으므로 clone 만으로 따라온다. 영상만 HF 에서 받는다.
 
 ## 4. TRT 엔진 빌드 (GPU마다 필수)
 
@@ -240,6 +255,16 @@ cam10~cam12  지상1층 미매핑·비활성 (field_1f_*)
 
 `restore` 는 되돌리기 직전 상태를 `auto-<타임스탬프>` 로 자동 보관한다.
 세부는 [data/seed_versions/README.md](../data/seed_versions/README.md).
+
+## 7-b. 리허설 시연 (RTSP 불필요 — 파일 모드)
+리허설 패키지는 **RTSP 송출 없이** 영상 파일을 직접 읽어 프레임 잠금 동기로 분석한다
+(ADR 09 §11). 5절의 송출 서버가 없어도 시연된다. 사이트 seed 는 **v8**(10F 층 포함)로:
+```bash
+python tools/seed_version.py restore v8 --apply    # 17F·16F·1F + 10F(리허설 층) 세팅
+```
+:8900 → ⑤ 리허설 → 📦 CJ제일제당센터 리허설 → 시나리오 선택 → [층] 10F → **[▶ 준비 (파일)]**
+→ (매핑은 패키지에 이미 저장돼 있음) → ③ 운영 뷰에서 경보 발생원 [+ 추가] → **[🎬 리허설 훈련 시작]**
+→ 27~33초 재생 · 4대 지표 · 세션 결과. 호스트 GPU 에 추론 프로파일 엔진(4-3절)이 있어야 한다.
 
 ## 8. 확인
 

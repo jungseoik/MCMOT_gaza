@@ -174,10 +174,20 @@ class WorkerContainer:
         return subprocess.run(["docker", *args], capture_output=True,
                               text=True, check=check)
 
+    _RUNNING_TTL_SEC = 1.0
+
     def running(self) -> bool:
+        """컨테이너 생존 여부 — `docker inspect` 는 호출당 ~25ms(실측). states() 가
+        /api/cameras·맵 SSE(5Hz×클라이언트)마다 부르므로 1초 캐시한다."""
+        now = time.monotonic()
+        cached = getattr(self, "_running_cache", None)
+        if cached is not None and now - cached[0] < self._RUNNING_TTL_SEC:
+            return cached[1]
         r = self._docker("inspect", "-f", "{{.State.Running}}", self.name,
                          check=False)
-        return r.returncode == 0 and r.stdout.strip() == "true"
+        ok = r.returncode == 0 and r.stdout.strip() == "true"
+        self._running_cache = (now, ok)
+        return ok
 
     def logs(self, tail: int = 50) -> str:
         r = self._docker("logs", "--tail", str(tail), self.name, check=False)
@@ -427,6 +437,27 @@ class DsIngestManager:
             self._last_frame_ts.pop(cam_id, None)
         if slot is not None:
             self._restart_slot(slot)
+
+    def remove_cameras(self, cam_ids: list[str]) -> list[Slot]:
+        """여러 대를 한 번에 제거 — 영향받은 슬롯만 1회씩 재시작.
+
+        N대를 remove_camera로 하나씩 빼면 워커가 N번 재시작한다(등록과 같은
+        비용 — 리허설 패키지 14대 해제 실측에서 걸림). 등록의 add_cameras와
+        대칭으로, 제거도 슬롯당 1회로 묶는다.
+        """
+        touched: set[Slot] = set()
+        with self._lock:
+            for cam_id in cam_ids:
+                self._cfgs.pop(cam_id, None)
+                slot = self._cam_slot.pop(cam_id, None)
+                self._recv_ts.pop(cam_id, None)
+                self._last_frame_ts.pop(cam_id, None)
+                if slot is not None:
+                    touched.add(slot)
+        for slot in self.slots:                # 결정적 순서
+            if slot in touched:
+                self._restart_slot(slot)
+        return [s for s in self.slots if s in touched]
 
     def update_camera(self, cfg, *, defer_restart: bool = False) -> Slot | None:
         """rtsp/analyze_fps/enabled 변경 반영 — 배정 슬롯 유지, 그 워커만 재시작.
