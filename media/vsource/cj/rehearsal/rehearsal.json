@@ -426,7 +426,7 @@
   "scenarios": [
     {
       "id": "scenario_01",
-      "name": "시나리오 01",
+      "name": "피난 시나리오 1",
       "cycle_sec": 0,
       "streams": [
         {
@@ -454,11 +454,27 @@
           "file": "scenario_01/cam14.mp4",
           "duration_sec": 32.0
         }
-      ]
+      ],
+      "shot_time": "15:20:36~15:21:11",
+      "route": [
+        "cam14",
+        "cam11",
+        "cam10",
+        "cam9",
+        "cam8"
+      ],
+      "physical_cams": {
+        "cam3": "cam6",
+        "cam11": "cam1",
+        "cam10": "cam2",
+        "cam8": "cam3",
+        "cam9": "cam4",
+        "cam14": "cam5"
+      }
     },
     {
       "id": "scenario_02",
-      "name": "시나리오 02",
+      "name": "피난 시나리오 2",
       "cycle_sec": 0,
       "streams": [
         {
@@ -486,11 +502,27 @@
           "file": "scenario_02/cam14.mp4",
           "duration_sec": 27.0
         }
-      ]
+      ],
+      "shot_time": "15:21:52~15:22:30",
+      "route": [
+        "cam14",
+        "cam11",
+        "cam10",
+        "cam9",
+        "cam8"
+      ],
+      "physical_cams": {
+        "cam3": "cam6",
+        "cam11": "cam1",
+        "cam10": "cam2",
+        "cam8": "cam3",
+        "cam9": "cam4",
+        "cam14": "cam5"
+      }
     },
     {
       "id": "scenario_03",
-      "name": "시나리오 03",
+      "name": "피난 시나리오 3",
       "cycle_sec": 0,
       "streams": [
         {
@@ -518,11 +550,27 @@
           "file": "scenario_03/cam11.mp4",
           "duration_sec": 32.0
         }
-      ]
+      ],
+      "shot_time": "15:23:15~15:23:56",
+      "route": [
+        "cam3",
+        "cam11",
+        "cam10",
+        "cam9",
+        "cam8"
+      ],
+      "physical_cams": {
+        "cam3": "cam6",
+        "cam11": "cam1",
+        "cam10": "cam2",
+        "cam8": "cam3",
+        "cam9": "cam4",
+        "cam14": "cam5"
+      }
     },
     {
       "id": "scenario_04",
-      "name": "시나리오 04",
+      "name": "피난 시나리오 4",
       "cycle_sec": 0,
       "streams": [
         {
@@ -550,11 +598,27 @@
           "file": "scenario_04/cam11.mp4",
           "duration_sec": 29.0
         }
-      ]
+      ],
+      "shot_time": "15:24:13~15:24:44",
+      "route": [
+        "cam3",
+        "cam11",
+        "cam10",
+        "cam9",
+        "cam8"
+      ],
+      "physical_cams": {
+        "cam3": "cam6",
+        "cam11": "cam1",
+        "cam10": "cam2",
+        "cam8": "cam3",
+        "cam9": "cam4",
+        "cam14": "cam5"
+      }
     },
     {
       "id": "scenario_05",
-      "name": "시나리오 05",
+      "name": "피난 시나리오 5",
       "cycle_sec": 0,
       "streams": [
         {
@@ -582,11 +646,26 @@
           "file": "scenario_05/cam7.mp4",
           "duration_sec": 33.0
         }
-      ]
+      ],
+      "shot_time": "15:29:18~15:29:50",
+      "route": [
+        "cam1",
+        "cam4",
+        "cam5",
+        "cam7",
+        "cam6"
+      ],
+      "physical_cams": {
+        "cam1": "cam6",
+        "cam4": "cam1",
+        "cam5": "cam2",
+        "cam7": "cam4",
+        "cam6": "cam3"
+      }
     },
     {
       "id": "scenario_06",
-      "name": "시나리오 06",
+      "name": "피난 시나리오 6",
       "cycle_sec": 0,
       "streams": [
         {
@@ -614,11 +693,26 @@
           "file": "scenario_06/cam7.mp4",
           "duration_sec": 27.0
         }
-      ]
+      ],
+      "shot_time": "15:30:31~15:30:57",
+      "route": [
+        "cam1",
+        "cam4",
+        "cam5",
+        "cam7",
+        "cam6"
+      ],
+      "physical_cams": {
+        "cam1": "cam6",
+        "cam4": "cam1",
+        "cam5": "cam2",
+        "cam7": "cam4",
+        "cam6": "cam3"
+      }
     },
     {
       "id": "scenario_07",
-      "name": "시나리오 07",
+      "name": "피난 시나리오 7",
       "cycle_sec": 0,
       "streams": [
         {
@@ -646,11 +740,26 @@
           "file": "scenario_07/cam12.mp4",
           "duration_sec": 29.033
         }
-      ]
+      ],
+      "shot_time": "15:31:23~15:31:53",
+      "route": [
+        "cam12",
+        "cam4",
+        "cam5",
+        "cam7",
+        "cam6"
+      ],
+      "physical_cams": {
+        "cam1": "cam6",
+        "cam4": "cam1",
+        "cam5": "cam2",
+        "cam7": "cam4",
+        "cam6": "cam3"
+      }
     },
     {
       "id": "scenario_08",
-      "name": "시나리오 08",
+      "name": "피난 시나리오 8",
       "cycle_sec": 0,
       "streams": [
         {
@@ -678,11 +787,26 @@
           "file": "scenario_08/cam12.mp4",
           "duration_sec": 30.033
         }
-      ]
+      ],
+      "shot_time": "15:32:17~15:32:48",
+      "route": [
+        "cam12",
+        "cam4",
+        "cam5",
+        "cam7",
+        "cam6"
+      ],
+      "physical_cams": {
+        "cam1": "cam6",
+        "cam4": "cam1",
+        "cam5": "cam2",
+        "cam7": "cam4",
+        "cam6": "cam3"
+      }
     },
     {
       "id": "scenario_09",
-      "name": "시나리오 09",
+      "name": "피난 시나리오 9",
       "cycle_sec": 0,
       "streams": [
         {
@@ -705,11 +829,25 @@
           "file": "scenario_09/cam13.mp4",
           "duration_sec": 26.0
         }
-      ]
+      ],
+      "shot_time": "15:35:27~15:35:51",
+      "route": [
+        "cam13",
+        "cam5",
+        "cam7",
+        "cam6"
+      ],
+      "physical_cams": {
+        "cam13": "cam1",
+        "cam5": "cam2",
+        "cam7": "cam4",
+        "cam6": "cam3",
+        "cam2": "cam6"
+      }
     },
     {
       "id": "scenario_10",
-      "name": "시나리오 10",
+      "name": "피난 시나리오 10",
       "cycle_sec": 0,
       "streams": [
         {
@@ -732,11 +870,25 @@
           "file": "scenario_10/cam13.mp4",
           "duration_sec": 23.0
         }
-      ]
+      ],
+      "shot_time": "15:36:21~15:36:44",
+      "route": [
+        "cam13",
+        "cam5",
+        "cam7",
+        "cam6"
+      ],
+      "physical_cams": {
+        "cam13": "cam1",
+        "cam5": "cam2",
+        "cam7": "cam4",
+        "cam6": "cam3",
+        "cam2": "cam6"
+      }
     },
     {
       "id": "scenario_11",
-      "name": "시나리오 11",
+      "name": "피난 시나리오 11",
       "cycle_sec": 0,
       "streams": [
         {
@@ -759,11 +911,25 @@
           "file": "scenario_11/cam7.mp4",
           "duration_sec": 28.0
         }
-      ]
+      ],
+      "shot_time": "15:37:31~15:38:00",
+      "route": [
+        "cam2",
+        "cam5",
+        "cam7",
+        "cam6"
+      ],
+      "physical_cams": {
+        "cam13": "cam1",
+        "cam5": "cam2",
+        "cam7": "cam4",
+        "cam6": "cam3",
+        "cam2": "cam6"
+      }
     },
     {
       "id": "scenario_12",
-      "name": "시나리오 12",
+      "name": "피난 시나리오 12",
       "cycle_sec": 0,
       "streams": [
         {
@@ -786,11 +952,25 @@
           "file": "scenario_12/cam7.mp4",
           "duration_sec": 28.0
         }
-      ]
+      ],
+      "shot_time": "15:38:26~15:38:56",
+      "route": [
+        "cam2",
+        "cam5",
+        "cam7",
+        "cam6"
+      ],
+      "physical_cams": {
+        "cam13": "cam1",
+        "cam5": "cam2",
+        "cam7": "cam4",
+        "cam6": "cam3",
+        "cam2": "cam6"
+      }
     },
     {
       "id": "scenario_13",
-      "name": "시나리오 13",
+      "name": "피난 시나리오 13",
       "cycle_sec": 0,
       "streams": [
         {
@@ -813,11 +993,25 @@
           "file": "scenario_13/cam10.mp4",
           "duration_sec": 31.033
         }
-      ]
+      ],
+      "shot_time": "15:41:13~15:41:43",
+      "route": [
+        "cam2",
+        "cam10",
+        "cam9",
+        "cam8"
+      ],
+      "physical_cams": {
+        "cam2": "cam6",
+        "cam10": "cam2",
+        "cam9": "cam5",
+        "cam8": "cam3",
+        "cam13": "cam1"
+      }
     },
     {
       "id": "scenario_14",
-      "name": "시나리오 14",
+      "name": "피난 시나리오 14",
       "cycle_sec": 0,
       "streams": [
         {
@@ -840,7 +1034,21 @@
           "file": "scenario_14/cam13.mp4",
           "duration_sec": 25.0
         }
-      ]
+      ],
+      "shot_time": "15:42:24~15:42:49",
+      "route": [
+        "cam13",
+        "cam10",
+        "cam9",
+        "cam8"
+      ],
+      "physical_cams": {
+        "cam2": "cam6",
+        "cam10": "cam2",
+        "cam9": "cam5",
+        "cam8": "cam3",
+        "cam13": "cam1"
+      }
     }
   ],
   "prep": {
@@ -1429,5 +1637,6 @@
     }
   },
   "_prep_TODO": "tools 준비 CLI(ADR 09 §구현)가 검증 결과를 채운다",
-  "note": "전 시나리오(01~14) 공통 10층 촬영. 카메라는 사이트 층 floor10(10F)에 붙는다(ADR 09 §7 빙의 모드)."
+  "note": "전 시나리오(01~14) 공통 10층 촬영. cam1~14 는 **도면 위치 번호**(실카메라 6대를 그룹별로 옮겨 촬영 — scenarios[].physical_cams). 카메라는 사이트 층 floor10(10F)에 붙는다(ADR 09 §7). 촬영 기록: docs/촬영기록-및-카메라-매핑.md",
+  "docs": "docs/"
 }
