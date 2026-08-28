@@ -68,15 +68,38 @@ class _Cam:
         self.duration = self.total / self.src_fps if self.src_fps else 0.0
         self.ended = False
 
-    def read_first(self) -> np.ndarray | None:
-        """0번 프레임 — 준비(정지) 단계와 매핑 스냅샷용."""
-        if self.cap is None:
-            self.open()
-        ok, fr = self.cap.read()
-        self.frame0 = fr if ok else None
+    BLACK_MEAN = 12.0          # 이 밝기 아래면 "검정 구간"으로 본다 (0~255)
+
+    def frame_at(self, sec: float) -> np.ndarray | None:
+        """임의 시각의 프레임 — 재생용 cap 을 건드리지 않는 별도 캡처."""
+        cap = cv2.VideoCapture(self.file)
+        try:
+            if not cap.isOpened():
+                return None
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, sec) * 1000.0)
+            ok, fr = cap.read()
+            return fr if ok else None
+        finally:
+            cap.release()
+
+    def read_first(self, candidates: list[float] | None = None) -> np.ndarray | None:
+        """준비(정지) 단계·매핑용 스냅샷.
+
+        전체 연속 시나리오에선 이 카메라가 첫 구간에 없어 0번 프레임이 **검정**일 수 있다.
+        candidates(등장 구간 시각)를 차례로 시도해 밝은 프레임을 고르고, 다 검정이면
+        마지막 것을 쓴다(그래도 매핑 화면에 "구간에 없음" 경고가 뜬다).
+        """
+        pick = None
+        for t in (candidates or [0.0]):
+            fr = self.frame_at(t)
+            if fr is None:
+                continue
+            pick = fr
+            if float(fr.mean()) >= self.BLACK_MEAN:
+                break
+        self.frame0 = pick
         self.last = self.frame0
-        # 재생은 다시 0부터 — 다시 열어 정확히 맞춘다
-        self.open()
+        self.open()                         # 재생은 정확히 0번 프레임부터
         return self.frame0
 
     def read_step(self, k: int) -> np.ndarray | None:
@@ -170,7 +193,8 @@ class FileSourceRunner:
                 continue
             c = _Cam(vpkg.cam_id_of(cam), vpkg.stream_path(pkg, cam), str(root / st["file"]), fps)
             c.open()
-            c.read_first()
+            c.snapshot_candidates = vpkg.snapshot_times(pkg, scen_id, cam)
+            c.read_first(c.snapshot_candidates)
             cams.append(c)
         if not cams:
             raise ValueError("시나리오에 영상이 없습니다")
@@ -299,12 +323,21 @@ class FileSourceRunner:
             playing = self.mode == "play"
             return [c.state(playing) for c in self.cams]
 
-    def snapshot(self, cam_id: str) -> np.ndarray | None:
+    def snapshot(self, cam_id: str, t: float | None = None) -> np.ndarray | None:
+        """준비 프레임(기본) 또는 t 초 프레임(매핑 화면 [다른 장면])."""
         with self._lock:
-            for c in self.cams:
-                if c.cam_id == cam_id:
-                    return c.last if c.last is not None else c.frame0
-        return None
+            cam = next((c for c in self.cams if c.cam_id == cam_id), None)
+        if cam is None:
+            return None
+        if t is not None:
+            return cam.frame_at(float(t))
+        return cam.last if cam.last is not None else cam.frame0
+
+    def snapshot_is_black(self, cam_id: str) -> bool | None:
+        with self._lock:
+            cam = next((c for c in self.cams if c.cam_id == cam_id), None)
+        fr = cam.frame0 if cam is not None else None
+        return None if fr is None else bool(float(fr.mean()) < _Cam.BLACK_MEAN)
 
     def status(self) -> dict:
         with self._lock:
@@ -320,6 +353,7 @@ class FileSourceRunner:
             for c in self.cams:
                 streams.append({"path": c.path, "file": c.file, "cam_id": c.cam_id,
                                 "duration_sec": round(c.duration, 3),
+                                "snapshot_candidates_sec": list(getattr(c, "snapshot_candidates", []) or []),
                                 "publishing": not c.ended if playing else True,
                                 "receiving": (not c.ended) if playing else True,
                                 "pos_sec": (round(in_cycle, 1) if playing and c.duration > in_cycle else None)})

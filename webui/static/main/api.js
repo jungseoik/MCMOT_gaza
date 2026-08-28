@@ -65,7 +65,7 @@ const API = {
   // 비활성→활성은 신규 추가와 같은 경로라 하나씩 하면 매번 워커가 재시작된다.
   updateCameras: (body) => API._put("/api/cameras/bulk", body),
   deleteCamera: (id) => API._j(`/api/cameras/${id}`, { method: "DELETE" }),
-  testCamera: (id) => API._post(`/api/cameras/${id}/test`),
+  testCamera: (id, t) => API._post(`/api/cameras/${id}/test` + (t != null ? `?t=${t}` : "")),
   snapshotUrl: (id) => `/api/cameras/${id}/snapshot?ts=` + Date.now(),
   putMapping: (id, body) => API._put(`/api/cameras/${id}/mapping`, body),
 

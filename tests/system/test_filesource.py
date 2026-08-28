@@ -98,3 +98,37 @@ def test_stop_midway_releases(pkg):
     out = r.stop()
     assert out["running"] is False and out["stopped"] == 2
     assert r.mode is None and r.cams == []
+
+
+def test_snapshot_skips_black_segments(pkg, tmp_path):
+    """전체 연속 시나리오 엣지 — 카메라가 첫 구간에 없으면 0번 프레임이 검정이라 매핑을
+    못 한다. segments 로 등장 구간을 알면 그 시각의 (밝은) 프레임을 준비 스냅샷으로 쓴다."""
+    root = tmp_path / "media" / "vsource" / "t" / "rehearsal"
+    (root / "scenario_full").mkdir()
+    # cam1: 앞 1초 검정 + 뒤 2초 회색 (= 두 번째 구간 1~3s 에만 등장)
+    subprocess.run(["ffmpeg", "-v", "error", "-y",
+                    "-f", "lavfi", "-i", "color=c=black:s=64x64:r=10:d=1",
+                    "-f", "lavfi", "-i", "color=c=gray:s=64x64:r=10:d=2",
+                    "-filter_complex", "[0][1]concat=n=2:v=1:a=0[v]", "-map", "[v]",
+                    "-c:v", "libx264", "-profile:v", "baseline", "-pix_fmt", "yuv420p",
+                    str(root / "scenario_full" / "cam1.mp4")], check=True)
+    m = json.loads((root / "rehearsal.json").read_text(encoding="utf-8"))
+    m["scenarios"].append({"id": "scenario_full", "name": "full", "cycle_sec": 0,
+                           "segments": [{"scenario": "a", "start_sec": 0.0, "end_sec": 1.0, "cams": ["cam2"]},
+                                        {"scenario": "b", "start_sec": 1.0, "end_sec": 3.0, "cams": ["cam1"]}],
+                           "streams": [{"cam": "cam1", "file": "scenario_full/cam1.mp4"}]})
+    (root / "rehearsal.json").write_text(json.dumps(m), encoding="utf-8")
+    vpkg._cache.clear()
+    p = vpkg.get("t-rehearsal")
+    assert vpkg.snapshot_times(p, "scenario_full", "cam1") == [2.0]      # 등장 구간 시작 + 1s
+    assert vpkg.snapshot_times(p, "scenario_01", "cam1") == [0.0]        # segments 없으면 0
+    r = vf.FileSourceRunner(queue_put=lambda it: None)
+    r.standby(p, "scenario_full", fps=5.0)
+    try:
+        fr = r.snapshot("rh_cam1")
+        assert fr is not None and float(fr.mean()) > 60, "준비 스냅샷이 검정 구간을 피해야 한다"
+        assert r.snapshot_is_black("rh_cam1") is False
+        assert r.snapshot("rh_cam1", t=0.2) is not None and float(r.snapshot("rh_cam1", t=0.2).mean()) < 12
+        assert r.status()["streams"][0]["snapshot_candidates_sec"] == [2.0]
+    finally:
+        r.stop()

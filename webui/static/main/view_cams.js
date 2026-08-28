@@ -440,13 +440,42 @@ Views.cams = (() => {
     }
   }
 
-  async function testCamera(camId) {
-    const r = await API.testCamera(camId);
+  async function testCamera(camId, t) {
+    const r = await API.testCamera(camId, t);
     if (!r.ok) throw new Error("연결 실패");
     const img = new Image();
     await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = r.snapshot_b64; });
-    frames[camId] = { img, w: r.width, h: r.height };
+    frames[camId] = { img, w: r.width, h: r.height, black: !!r.black, t: r.t };
     return frames[camId];
+  }
+
+  // 전체 연속 시나리오(scenario_15_full)의 엣지: 이 카메라가 첫 구간에 없으면 준비 프레임이
+  // **검정**이라 매핑을 못 한다. 리허설 상태의 등장 구간 시각을 순환해 다른 장면을 띄운다.
+  let sceneIdx = {};
+  function sceneCandidates(camId) {
+    const st = window.VSourceState;
+    const s = st && (st.streams || []).find((x) => x.cam_id === camId);
+    return (s && s.snapshot_candidates_sec) || [];
+  }
+  async function nextScene(camId) {
+    const cands = sceneCandidates(camId);
+    if (!cands.length) return;
+    sceneIdx[camId] = ((sceneIdx[camId] ?? -1) + 1) % cands.length;
+    const t = cands[sceneIdx[camId]];
+    hint(`다른 장면 불러오는 중 (t=${t.toFixed(0)}s, ${sceneIdx[camId] + 1}/${cands.length})…`);
+    try {
+      const f = await testCamera(camId, t);
+      camMc.setImage(f.img, f.w, f.h);
+      hint(f.black ? `t=${t.toFixed(0)}s 도 검정 — 이 카메라가 없는 구간입니다. [다른 장면]을 다시 누르세요.`
+                   : `장면 ${sceneIdx[camId] + 1}/${cands.length} (t=${t.toFixed(0)}s) — 대응점을 찍으세요.`, f.black);
+    } catch (e) { hint("장면 불러오기 실패: " + e.message, true); }
+  }
+  function renderSceneBtn(camId) {
+    const b = $("camNextScene");
+    if (!b) return;
+    const cands = sceneCandidates(camId);
+    b.classList.toggle("hidden", !(isRhCam(camId) && cands.length > 1));
+    b.title = cands.length ? `이 카메라가 찍힌 구간 ${cands.length}개를 순환 (전체 연속 시나리오)` : "";
   }
 
   // ------------------------------------------------------------ 선택·매핑
@@ -472,7 +501,9 @@ Views.cams = (() => {
       if (!frames[camId]) { hint("연결 테스트 중…"); await testCamera(camId); }
       const f = frames[camId];
       camMc.setImage(f.img, f.w, f.h);
-      hint();
+      renderSceneBtn(camId);
+      if (f.black) hint("준비 프레임이 검정 — 이 카메라는 이 구간에 없습니다. [🔄 다른 장면]으로 찍힌 구간을 불러오세요.", true);
+      else hint();
     } catch (e) { hint("연결 테스트 실패: " + e.message, true); camMc.setImage(null, 640, 360); }
     await loadSelFloorMap();                           // 선택 카메라 층의 맵 표시
     renderSel();
@@ -1102,6 +1133,8 @@ Views.cams = (() => {
     $("pvStop").onclick = () => { pvHalt(true); pvSet("pv0", "정지됨"); };
     $("pvUrl").addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); pvStart(); } });
+
+    $("camNextScene").onclick = () => { if (sel) nextScene(sel); };
 
     $("camRetest").onclick = async () => {
       if (!sel) return;

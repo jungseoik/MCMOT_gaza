@@ -127,6 +127,22 @@ def scenario_cam_ids(pkg: dict, scen_id: str) -> set[str]:
     return set()
 
 
+def snapshot_times(pkg: dict, scen_id: str, cam: str) -> list[float]:
+    """이 시나리오 영상에서 카메라 `cam` 이 **실제로 찍힌** 구간의 대표 시각(초) 목록.
+
+    전체 연속 시나리오(scenario_15_full)는 카메라가 없는 구간이 검정이라 0번 프레임으로
+    매핑을 못 한다(엣지). 매니페스트 `segments` 가 있으면 그 카메라가 등장하는 구간마다
+    시작+1s 를 돌려주고, 없으면 [0.0].
+    """
+    for s in pkg.get("scenarios", []):
+        if s.get("id") != scen_id:
+            continue
+        segs = s.get("segments") or []
+        ts = [float(g["start_sec"]) + 1.0 for g in segs if cam in (g.get("cams") or [])]
+        return ts or [0.0]
+    return [0.0]
+
+
 # ------------------------------------------------------------------ 가상 카메라·층
 def cam_id_of(cam: str) -> str:
     return f"{CAM_PREFIX}{cam}"

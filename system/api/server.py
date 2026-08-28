@@ -418,12 +418,12 @@ class Runtime:
         return self.next_cam_ids(1)[0]
 
     # ------------------------------------------------------------ 스냅샷
-    def grab_frame(self, cfg: CameraConfig) -> np.ndarray | None:
+    def grab_frame(self, cfg: CameraConfig, t: float | None = None) -> np.ndarray | None:
         """실행 중 워커 프레임 우선, 없으면 1회성 캡처(test/미기동 카메라용).
 
         deepstream 모드에서는 get_snapshot()이 항상 None(픽셀이 컨테이너 밖으로
         안 나옴) → 아래 ffmpeg 단발 캡처(cv2 CAP_FFMPEG)로 폴백된다."""
-        frame = self.filesrc.snapshot(cfg.cam_id)   # 파일 모드 카메라 (정지 프레임/최근 프레임)
+        frame = self.filesrc.snapshot(cfg.cam_id, t)   # 파일 모드 카메라 (준비 프레임/최근/t초)
         if frame is None:
             frame = self.ingest.get_snapshot(cfg.cam_id)
         if frame is not None:
@@ -844,15 +844,19 @@ async def probe_rtsp(request: Request):
 
 
 @app.post("/api/cameras/{cam_id}/test")
-def test_camera(cam_id: str):
+def test_camera(cam_id: str, t: float | None = None):
+    """연결 테스트 + 스냅샷. `t`(초) 는 파일 모드 카메라에서 그 시각 프레임(매핑 [다른 장면])."""
     cfg = _cam_or_404(cam_id)
-    frame = rt.grab_frame(cfg)
+    frame = rt.grab_frame(cfg, t)
     if frame is None:
         return {"ok": False, "width": 0, "height": 0, "snapshot_b64": None}
     ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
     # snapshot_b64는 data URL 형식 (CONTRACT v1.1 §4 — 프론트 <img>.src 직행)
     b64 = ("data:image/jpeg;base64," + base64.b64encode(jpg.tobytes()).decode()) if ok else None
-    return {"ok": True, "width": frame.shape[1], "height": frame.shape[0], "snapshot_b64": b64}
+    # 전체 연속 시나리오의 검정 구간(카메라 없음) 경고 — 이 프레임으론 매핑 못 한다
+    black = bool(float(frame.mean()) < 12.0)
+    return {"ok": True, "width": frame.shape[1], "height": frame.shape[0], "snapshot_b64": b64,
+            "black": black, "t": t}
 
 
 @app.get("/api/cameras/{cam_id}/snapshot")
