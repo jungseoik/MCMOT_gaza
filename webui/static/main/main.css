@@ -681,3 +681,24 @@ body.rehearsing .rhbanner{ display:block; }
 .modalbox.report .drill-tbl th, .modalbox.report .drill-tbl td{ padding:7px 10px; }
 .repnote{ margin-top:20px; padding-top:12px; border-top:1px solid var(--stroke-3);
   font-size:10.5px; color:var(--text-3); line-height:1.7; }
+
+/* 지표 이름 — 얇아 보인다는 피드백: 굵게 + 지표별 고유색 (③ 스파크 색과 동일 계열) */
+.repcard-h b.mname{ font-size:16px; font-weight:800; letter-spacing:.05em; }
+.repcard-h b.m-epfi{ color:#3FB950; } .repcard-h b.m-sei{ color:#30DCFB; }
+.repcard-h b.m-cbs{ color:#FF6F21; } .repcard-h b.m-idr{ color:#B98CFF; }
+.repcard-v{ font-weight:700; letter-spacing:-.01em; }
+.repsum b{ font-weight:700; }
+
+/* 종합평 — 총평 한 문장 + 잘된 점/개선 지점 두 줄 (일반인용 요약) */
+.repverdict{ margin-top:10px; padding:13px 18px; border:1px solid var(--stroke-3);
+  border-left:3px solid #3FB950; border-radius:var(--r-md); background:var(--bg-2); }
+.repverdict.g-mid{ border-left-color:#F5A623; }
+.repverdict.g-bad{ border-left-color:#FF5B5B; }
+.repverdict-head{ font-size:14.5px; font-weight:700; color:var(--text-1); margin-bottom:7px; }
+.repverdict-head b{ color:inherit; }
+.repverdict.g-good .repverdict-head b{ color:#3FB950; }
+.repverdict.g-mid .repverdict-head b{ color:#F5A623; }
+.repverdict.g-bad .repverdict-head b{ color:#FF5B5B; }
+.repverdict-line{ font-size:12.5px; line-height:1.75; color:var(--text-2); }
+.repverdict-line.good::before{ content:"✔ "; color:#3FB950; font-weight:700; }
+.repverdict-line.warn::before{ content:"⚠ "; color:#F5A623; font-weight:700; }

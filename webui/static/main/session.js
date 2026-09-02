@@ -1115,9 +1115,9 @@ const Session = (() => {
     idr:  "경보 후 각 구역이 피난을 시작했는가, 얼마나 빨리 반응했는가(개시 구역 수·반응 지연).",
   };
 
-  function repCard(name, sub, value, grade, what, read) {
+  function repCard(key, name, sub, value, grade, what, read) {
     return `<div class="repcard">
-      <div class="repcard-h"><b>${name}</b><span>${sub}</span>${pill(grade)}</div>
+      <div class="repcard-h"><b class="mname m-${key}">${name}</b><span>${sub}</span>${pill(grade)}</div>
       <div class="repcard-v t-num">${value}</div>
       <div class="repcard-what">${what}</div>
       <div class="repcard-read">${read}</div>
@@ -1188,6 +1188,43 @@ const Session = (() => {
     return `<div class="repsum">${seg.join(" · ")}</div>`;
   }
 
+  /** 종합평 — 일반인이 "훈련이 어땠는가"를 한 문단으로 읽게 한다.
+   *  등급을 잘된 점/개선 지점 두 줄로 풀고 총평 한 문장을 머리에 단다. */
+  function repVerdict(o) {
+    const pos = [], neg = [];
+    const add = (grade, posTxt, midTxt, badTxt) => {
+      if (!grade) return;
+      if (grade[1] === "g-good") pos.push(posTxt);
+      else neg.push(grade[1] === "g-mid" ? midTxt : badTxt);
+    };
+    add(gradeOf(o.epfi),
+        "재실자 대부분이 권장 피난경로를 따라 이동",
+        "일부 인원이 권장 경로를 벗어나 이동",
+        "다수 인원이 권장 경로를 벗어나 이동 — 경로 안내 점검 필요");
+    add(gradeOf(o.sei),
+        "출구가 설계 의도대로 고르게 사용됨",
+        "일부 출구로 이용이 쏠림 — 유도 안내 점검",
+        "특정 출구로 크게 쏠림 — 유도 안내 개선 필요");
+    add(gradeOf(o.cbs || 0, "cbs"),
+        "병목 정체 없이 원활하게 통과",
+        "병목에서 가벼운 정체 발생",
+        "병목에서 심한 정체 발생 — 위험 지점 점검 필요");
+    if (o.zTot) {
+      if (o.zStarted === o.zTot) pos.push("모든 구역에서 피난 개시 확인");
+      else neg.push(`${o.zTot - o.zStarted}개 구역은 피난 개시가 확인되지 않음`);
+    }
+    const head = !neg.length
+      ? ["이번 훈련은 전반적으로 <b>우수</b>했습니다.", "g-good"]
+      : neg.length <= pos.length
+        ? ["이번 훈련은 전반적으로 <b>양호</b>하나, 개선 지점이 있습니다.", "g-mid"]
+        : ["이번 훈련은 <b>개선이 필요</b>합니다.", "g-bad"];
+    return `<div class="repverdict ${head[1]}">
+      <div class="repverdict-head">${head[0]}</div>
+      ${pos.length ? `<div class="repverdict-line good">${pos.join(" · ")}</div>` : ""}
+      ${neg.length ? `<div class="repverdict-line warn">${neg.join(" · ")}</div>` : ""}
+    </div>`;
+  }
+
   /** 4대 지표 카드(설명+해석) 묶음. */
   function repCards(o) {
     const fn = o.fname || ((f) => f);
@@ -1196,13 +1233,13 @@ const Session = (() => {
       : started === o.zones.length ? ["우수", "g-good"]
       : started > 0 ? ["보통", "g-mid"] : ["미흡", "g-bad"];
     return `<div class="repgrid">`
-      + repCard("EPFI", "경로 충실도 (0~100)", o.epfi != null ? fmt1(o.epfi) : "—",
+      + repCard("epfi", "EPFI", "경로 충실도 (0~100)", o.epfi != null ? fmt1(o.epfi) : "—",
                 gradeOf(o.epfi), REP_WHAT.epfi, readEpfi(o.epfi, o.persons))
-      + repCard("SEI", "출구 활용 효율 (0~100)", o.sei != null ? fmt1(o.sei) : "—",
+      + repCard("sei", "SEI", "출구 활용 효율 (0~100)", o.sei != null ? fmt1(o.sei) : "—",
                 gradeOf(o.sei), REP_WHAT.sei, readSei(o.sei, o.exits, fn))
-      + repCard("CBS", "병목 혼잡 누적 (0=최선)", fmt1(o.cbs || 0),
+      + repCard("cbs", "CBS", "병목 혼잡 누적 (0=최선)", fmt1(o.cbs || 0),
                 gradeOf(o.cbs || 0, "cbs"), REP_WHAT.cbs, readCbs(o.cbs, o.bns, fn))
-      + repCard("IDR", "구역 반응 개시", `${started}/${o.zones.length}`,
+      + repCard("idr", "IDR", "구역 반응 개시", `${started}/${o.zones.length}`,
                 idrG, REP_WHAT.idr, readIdr(o.zones, fn))
       + `</div>`;
   }
@@ -1237,9 +1274,11 @@ const Session = (() => {
     const totOut = es.reduce((s, e) => s + (e.m.actual_count || 0), 0);
     const aos = (r.alarm_origins && r.alarm_origins.length) ? r.alarm_origins : [r.alarm_origin];
     $("resTitle").textContent = `평가 세션 결과 — ${r.session_id}`;
+    const ov = { sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
+                 zStarted: started, zTot: zs.length, totOut };
     $("resBody").innerHTML =
-      repSummary({ sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
-                   zStarted: started, zTot: zs.length, totOut })
+      repSummary(ov)
+      + repVerdict(ov)
       + `<div class="repsec-h">개요</div>`
       + `<div class="reprows">`
         + repRow("경보 시각", fmtDT(r.alarm_ts))
@@ -1291,9 +1330,11 @@ const Session = (() => {
       </tr>`;
     }).join("");
     $("resTitle").textContent = `건물 훈련 결과 리포트 — ${roll.session_id}`;
+    const ov = { sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
+                 zStarted, zTot: zones.length, totOut: s.total_passed };
     $("resBody").innerHTML =
-      repSummary({ sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
-                   zStarted, zTot: zones.length, totOut: s.total_passed })
+      repSummary(ov)
+      + repVerdict(ov)
       + `<div class="repsec-h">개요</div>`
       + `<div class="reprows">`
         + repRow("경보 시각", fmtDT(roll.alarm_ts))
