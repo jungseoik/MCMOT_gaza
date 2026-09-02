@@ -1094,47 +1094,185 @@ const Session = (() => {
   }
 
   // ================================================== 결과 모달
+  // ==================== 결과 리포트 헬퍼 (해석형, v1.13) ====================
+  // "지표 이름과 숫자만 있는 결과"는 훈련 담당자가 해석할 수 없다 — 지표마다
+  // ①무엇을 재는지 ②이번 값을 어떻게 읽는지 문장을 자동으로 붙인다.
+  // 등급(우수/보통/미흡)은 표시용 참고 기준(80·60, CBS 0.5·10) — 요구사항에 규정 없음.
+  function gradeOf(v, kind) {
+    if (v == null) return null;
+    if (kind === "cbs") return v <= 0.5 ? ["원활", "g-good"] : v <= 10 ? ["주의", "g-mid"] : ["혼잡", "g-bad"];
+    return v >= 80 ? ["우수", "g-good"] : v >= 60 ? ["보통", "g-mid"] : ["미흡", "g-bad"];
+  }
+  const pill = (g) => g ? `<span class="gpill ${g[1]}">${g[0]}</span>`
+                        : `<span class="gpill g-na">표본부족</span>`;
+  const repRow = (k, v) => `<div class="resrow"><span>${k}</span><b class="t-num">${v}</b></div>`;
+  const fmtDT = (ts) => ts ? new Date(ts * 1000).toLocaleString("ko-KR", { hour12: false }) : "—";
+
+  const REP_WHAT = {
+    epfi: "재실자들이 권장 피난경로를 얼마나 충실히 따라갔는가. 100 = 전원 경로 위로 이동, 낮을수록 경로 이탈이 많았다는 뜻.",
+    sei:  "출구들이 설계 의도대로 골고루 쓰였는가. 100 = 실제 이용 분포가 설계 분포와 일치, 낮을수록 특정 출구로 쏠림.",
+    cbs:  "병목(문·계단 앞)에서 임계밀도를 넘긴 혼잡이 시간에 걸쳐 얼마나 쌓였는가. 0 = 정체 없음, 클수록 오래·심하게 막힘.",
+    idr:  "경보 후 각 구역이 피난을 시작했는가, 얼마나 빨리 반응했는가(개시 구역 수·반응 지연).",
+  };
+
+  function repCard(name, sub, value, grade, what, read) {
+    return `<div class="repcard">
+      <div class="repcard-h"><b>${name}</b><span>${sub}</span>${pill(grade)}</div>
+      <div class="repcard-v t-num">${value}</div>
+      <div class="repcard-what">${what}</div>
+      <div class="repcard-read">${read}</div>
+    </div>`;
+  }
+
+  // 해석 문장 — 아래 함수들의 인자는 {m: 지표, floor: 층id|null} 목록 (드릴은 층 표기 포함)
+  function readEpfi(avg, persons) {
+    if (avg == null) return "표본 부족 — 경로에 배정된 이동 객체가 없어 산출하지 못했습니다.";
+    const ps = persons.filter((p) => p.epfi != null);
+    const low = ps.filter((p) => p.epfi < 60).length;
+    const devs = ps.map((p) => p.mean_deviation_m).filter((v) => v != null);
+    const md = devs.length ? devs.reduce((a, v) => a + v, 0) / devs.length : null;
+    let t = `추적 ${ps.length}명 평균 <b>${fmt1(avg)}점</b>`
+          + (md != null ? ` · 평균 경로이탈 ${fmt1(md)}m` : "") + ".";
+    t += low ? ` 이 중 ${low}명은 60점 미만 — 권장 경로를 크게 벗어나 이동했습니다.`
+             : " 대부분 권장 경로를 따라 이동했습니다.";
+    return t;
+  }
+  function readSei(sei, exits, fname) {
+    if (sei == null) return "표본 부족 — 출구를 통과한 인원이 없어 산출하지 못했습니다.";
+    const es = exits.filter((e) => e.m.actual_share != null && e.m.design_share != null);
+    if (!es.length) return `<b>${fmt1(sei)}점</b>.`;
+    let w = es[0];
+    es.forEach((e) => {
+      if (Math.abs(e.m.actual_share - e.m.design_share)
+          > Math.abs(w.m.actual_share - w.m.design_share)) w = e;
+    });
+    const d = (w.m.actual_share - w.m.design_share) * 100;
+    const nm = (w.floor ? fname(w.floor) + " " : "") + w.m.exit_id;
+    return Math.abs(d) < 5
+      ? "실제 출구 이용이 설계 분포와 거의 일치했습니다."
+      : `<b>${nm}</b> 출구가 설계보다 ${Math.abs(d).toFixed(0)}%p ${d > 0 ? "많이" : "적게"} 사용됨 — 안내·유도 개선 검토 지점.`;
+  }
+  function readCbs(total, bns, fname) {
+    if (!bns.length) return "병목이 설정되지 않아 관측 대상이 없습니다.";
+    if ((total || 0) <= 0.01) return "훈련 내내 모든 병목이 임계밀도 아래 — 정체 없이 통과했습니다.";
+    let w = bns[0];
+    bns.forEach((b) => { if ((b.m.cbs || 0) > (w.m.cbs || 0)) w = b; });
+    const nm = (w.floor ? fname(w.floor) + " " : "") + w.m.bottleneck_id;
+    return `가장 막힌 곳은 <b>${nm}</b> — 임계 초과 ${Math.round(w.m.over_threshold_sec)}초, `
+         + `최대 ${fmt1(w.m.peak_density)}명/㎡ (위험도 ${w.m.risk_level}).`;
+  }
+  function readIdr(zones, fname) {
+    if (!zones.length) return "구역이 설정되지 않았습니다.";
+    const zn = (z) => (z.floor ? fname(z.floor) + " " : "") + z.m.zone_id;
+    const st = zones.filter((z) => z.m.status === "started");
+    const miss = zones.filter((z) => z.m.status !== "started");
+    let t = `<b>${st.length}/${zones.length}</b> 구역 피난 개시.`;
+    const dl = st.filter((z) => z.m.response_delay_sec != null);
+    if (dl.length) {
+      let w = dl[0];
+      dl.forEach((z) => { if (z.m.response_delay_sec > w.m.response_delay_sec) w = z; });
+      t += ` 가장 늦은 <b>${zn(w)}</b> — 경보 후 ${Math.round(w.m.response_delay_sec)}초에 개시.`;
+    }
+    if (miss.length) t += ` 미개시: ${miss.map(zn).join(", ")} (판정조건 미충족 또는 인원 없음).`;
+    return t;
+  }
+
+  /** 종합 요약 배너 — 한 줄로 "이번 훈련이 어땠는가". */
+  function repSummary(o) {
+    const seg = [];
+    seg.push(`경로 준수 <b class="t-num">${o.epfi != null ? fmt1(o.epfi) : "—"}</b> ${pill(gradeOf(o.epfi))}`);
+    seg.push(`출구 활용 <b class="t-num">${o.sei != null ? fmt1(o.sei) : "—"}</b> ${pill(gradeOf(o.sei))}`);
+    seg.push(`병목 혼잡 <b class="t-num">${fmt1(o.cbs || 0)}</b> ${pill(gradeOf(o.cbs || 0, "cbs"))}`);
+    seg.push(`반응 개시 <b class="t-num">${o.zStarted}/${o.zTot}</b> 구역`);
+    if (o.totOut != null) seg.push(`출구 통과 <b class="t-num">${o.totOut}</b>명`);
+    return `<div class="repsum">${seg.join(" · ")}</div>`;
+  }
+
+  /** 4대 지표 카드(설명+해석) 묶음. */
+  function repCards(o) {
+    const fn = o.fname || ((f) => f);
+    const started = o.zones.filter((z) => z.m.status === "started").length;
+    const idrG = !o.zones.length ? null
+      : started === o.zones.length ? ["우수", "g-good"]
+      : started > 0 ? ["보통", "g-mid"] : ["미흡", "g-bad"];
+    return `<div class="repgrid">`
+      + repCard("EPFI", "경로 충실도 (0~100)", o.epfi != null ? fmt1(o.epfi) : "—",
+                gradeOf(o.epfi), REP_WHAT.epfi, readEpfi(o.epfi, o.persons))
+      + repCard("SEI", "출구 활용 효율 (0~100)", o.sei != null ? fmt1(o.sei) : "—",
+                gradeOf(o.sei), REP_WHAT.sei, readSei(o.sei, o.exits, fn))
+      + repCard("CBS", "병목 혼잡 누적 (0=최선)", fmt1(o.cbs || 0),
+                gradeOf(o.cbs || 0, "cbs"), REP_WHAT.cbs, readCbs(o.cbs, o.bns, fn))
+      + repCard("IDR", "구역 반응 개시", `${started}/${o.zones.length}`,
+                idrG, REP_WHAT.idr, readIdr(o.zones, fn))
+      + `</div>`;
+  }
+
+  /** 출구별 실제(막대) vs 설계(주황 눈금) 분포 — SEI의 근거 시각화. */
+  function exitBars(exits, fname) {
+    const fn = fname || ((f) => f);
+    const es = exits.filter((e) => e.m.actual_share != null);
+    if (!es.length) return "";
+    return `<div class="repsec-h">출구별 이용 분포 — 막대=실제, <span style="color:#F5A623">▏주황 눈금</span>=설계 기대</div>`
+      + es.map((e) => {
+          const a = e.m.actual_share * 100, d = (e.m.design_share || 0) * 100;
+          const nm = (e.floor ? fn(e.floor) + " " : "") + e.m.exit_id;
+          return `<div class="ebar"><span>${nm}</span>
+            <div class="ebar-t"><i class="a" style="width:${a.toFixed(1)}%"></i><i class="d" style="left:${d.toFixed(1)}%"></i></div>
+            <span class="ebar-v">${e.m.actual_count}명 · ${a.toFixed(0)}% (설계 ${d.toFixed(0)}%)</span></div>`;
+        }).join("");
+  }
+
+  const REP_NOTE = `<div class="repnote">※ 등급(우수·보통·미흡)은 이해를 돕기 위한 표시 기준
+    (SEI·EPFI 80/60점, CBS 0.5/10)이며 공식 판정 기준이 아닙니다. SEI·EPFI는 0~100으로 높을수록,
+    CBS는 0에 가까울수록 좋고, IDR은 구역별 개시 여부와 반응 지연(초)으로 읽습니다.</div>`;
+
   function showResultModal() {
     if (!result) return;
     const r = result;
     const dur = r.ended_at ? (r.ended_at - r.alarm_ts) : 0;
-    const started = r.zone_metrics.filter((z) => z.status === "started").length;
-    const totOut = r.exit_metrics.reduce((s, e) => s + e.actual_count, 0);
-    const row = (k, v) => `<div class="resrow"><span>${k}</span><b class="t-num">${v}</b></div>`;
+    const zs = (r.zone_metrics || []).map((m) => ({ m, floor: null }));
+    const es = (r.exit_metrics || []).map((m) => ({ m, floor: null }));
+    const bs = (r.bottleneck_metrics || []).map((m) => ({ m, floor: null }));
+    const started = zs.filter((z) => z.m.status === "started").length;
+    const totOut = es.reduce((s, e) => s + (e.m.actual_count || 0), 0);
+    const aos = (r.alarm_origins && r.alarm_origins.length) ? r.alarm_origins : [r.alarm_origin];
     $("resTitle").textContent = `평가 세션 결과 — ${r.session_id}`;
-    $("resBody").innerHTML = `
-      <div class="resbig">
-        <div class="resmet"><span>SEI</span><b>${r.sei != null ? fmt1(r.sei) : "—"}</b><i>${r.sei == null ? "insufficient_data" : "출구 활용 효율"}</i></div>
-        <div class="resmet"><span>EPFI 평균</span><b>${r.epfi_avg != null ? fmt1(r.epfi_avg) : "—"}</b><i>경로 충실도</i></div>
-        <div class="resmet"><span>CBS 총</span><b>${fmt1(r.cbs_total)}</b><i>혼잡 누적</i></div>
-        <div class="resmet"><span>IDR 개시</span><b>${started}/${r.zone_metrics.length}</b><i>구역 반응</i></div>
-      </div>
-      ${row("경보 시각", hhmmss(r.alarm_ts))}
-      ${row("종료 시각", r.ended_at ? hhmmss(r.ended_at) : "—")}
-      ${row("평가 시간", `${Math.floor(dur / 60)}분 ${Math.floor(dur % 60)}초`)}
-      ${row("경보 발생원", (() => {
-        const aos = r.alarm_origins && r.alarm_origins.length
-          ? r.alarm_origins
-          : [r.alarm_origin];
-        return aos.map((o, i) => `#${i+1}(${Math.round(o[0])},${Math.round(o[1])})`).join(" · ");
-      })())}
-      ${row("출구 총 통과", `${totOut}명 · 출구 ${r.exit_metrics.length}곳`)}
-      ${row("추적 객체", `${r.person_metrics.length}개`)}
-      ${row("설정 버전", `calibration v${r.calibration_version} · config v${r.config_version}`)}
-    `;
+    $("resBody").innerHTML =
+      repSummary({ sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
+                   zStarted: started, zTot: zs.length, totOut })
+      + `<div class="reprows">`
+        + repRow("경보 시각", fmtDT(r.alarm_ts))
+        + repRow("평가 시간", `${Math.floor(dur / 60)}분 ${Math.floor(dur % 60)}초 (종료 ${r.ended_at ? hhmmss(r.ended_at) : "—"})`)
+        + repRow("경보 발생원", aos.map((o, i) => `#${i + 1}(${Math.round(o[0])},${Math.round(o[1])})`).join(" · "))
+        + repRow("출구 총 통과", `${totOut}명 · 출구 ${es.length}곳`)
+        + repRow("추적 객체", `${(r.person_metrics || []).length}개`)
+        + repRow("설정 버전", `calibration v${r.calibration_version} · config v${r.config_version}`)
+      + `</div>`
+      + repCards({ sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
+                   exits: es, persons: r.person_metrics || [], zones: zs, bns: bs })
+      + exitBars(es)
+      + REP_NOTE;
     $("resultModal").classList.remove("hidden");
   }
 
-  /** 건물 드릴 롤업 리포트 (ADR 06 §3) — 건물 4대지표 + 추가요약 + 층별 상세. */
+  /** 건물 드릴 롤업 리포트 (ADR 06 §3) — 종합 요약 + 지표 해석 카드 + 층별 상세. */
   function showDrillModal(roll) {
     if (!roll) return;
     const b = roll.building || {}, s = roll.summary || {};
     const fname = (f) => (typeof App !== "undefined" ? App.floorName(f) : f);
-    // IDR — 구역별 유지(건물 단일평균 없음). 전 층 구역 개시 집계만 표시.
-    let zStarted = 0, zTot = 0;
-    Object.values(b.idr_by_floor || {}).forEach((zs) =>
-      (zs || []).forEach((z) => { zTot++; if (z.status === "started") zStarted++; }));
-    const row = (k, v) => `<div class="resrow"><span>${k}</span><b class="t-num">${v}</b></div>`;
+    // IDR — 구역별 유지(건물 단일평균 없음). 층 표기를 붙여 전 층 구역을 나열.
+    const zones = [];
+    Object.entries(b.idr_by_floor || {}).forEach(([f, zs]) =>
+      (zs || []).forEach((z) => zones.push({ m: z, floor: f })));
+    // 층별 결과를 층 표기와 함께 평탄화 — 해석 문장("가장 막힌 곳은 10F b2")용
+    const exits = [], bns = [], persons = [];
+    (roll.per_floor || []).forEach((pf) => {
+      const r = pf.result || {};
+      (r.exit_metrics || []).forEach((m) => exits.push({ m, floor: pf.floor_id }));
+      (r.bottleneck_metrics || []).forEach((m) => bns.push({ m, floor: pf.floor_id }));
+      (r.person_metrics || []).forEach((m) => persons.push(m));
+    });
+    const zStarted = zones.filter((z) => z.m.status === "started").length;
     const startTxt = Object.entries(s.floor_start_ts || {})
       .map(([f, ts]) => `${fname(f)} ${ts != null ? hhmmss(ts) : "—"}`).join(" · ") || "—";
     const perFloor = (roll.per_floor || []).map((pf) => {
@@ -1150,25 +1288,29 @@ const Session = (() => {
         <td class="t-num">${started}/${(r.zone_metrics || []).length}</td>
       </tr>`;
     }).join("");
-    $("resTitle").textContent = `건물 훈련 롤업 — ${roll.session_id}`;
-    $("resBody").innerHTML = `
-      <div class="resbig">
-        <div class="resmet"><span>SEI(건물)</span><b>${b.sei != null ? fmt1(b.sei) : "—"}</b><i>출구 통합분포</i></div>
-        <div class="resmet"><span>EPFI 평균</span><b>${b.epfi_avg != null ? fmt1(b.epfi_avg) : "—"}</b><i>전 층 전원</i></div>
-        <div class="resmet"><span>CBS 합</span><b>${fmt1(b.cbs_total || 0)}</b><i>전 층 병목</i></div>
-        <div class="resmet"><span>IDR 개시</span><b>${zStarted}/${zTot}</b><i>구역별(전 층)</i></div>
-      </div>
-      ${row("참여 층", (roll.floors || []).map(fname).join(", "))}
-      ${row("총 통과 인원", `${s.total_passed != null ? s.total_passed : 0}명`)}
-      ${row("최대 혼잡 층", s.max_cbs_floor ? fname(s.max_cbs_floor) : "—")}
-      ${row("층별 개시시각", startTxt)}
-      <div class="drill-perfloor">
+    $("resTitle").textContent = `건물 훈련 결과 리포트 — ${roll.session_id}`;
+    $("resBody").innerHTML =
+      repSummary({ sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
+                   zStarted, zTot: zones.length, totOut: s.total_passed })
+      + `<div class="reprows">`
+        + repRow("경보 시각", fmtDT(roll.alarm_ts))
+        + repRow("참여 층", (roll.floors || []).map(fname).join(", "))
+        + repRow("총 통과 인원", `${s.total_passed != null ? s.total_passed : 0}명 · 출구 ${exits.length}곳`)
+        + repRow("최대 혼잡 층", s.max_cbs_floor ? fname(s.max_cbs_floor) : "—")
+        + repRow("층별 개시시각", startTxt)
+        + repRow("추적 객체", `${persons.length}개 (전 층)`)
+      + `</div>`
+      + repCards({ sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
+                   exits, persons, zones, bns, fname })
+      + exitBars(exits, fname)
+      + `<div class="drill-perfloor">
         <div class="drill-perfloor-h">층별 상세</div>
         <table class="drill-tbl">
           <thead><tr><th>층</th><th>SEI</th><th>EPFI</th><th>CBS</th><th>통과</th><th>IDR개시</th></tr></thead>
           <tbody>${perFloor}</tbody>
         </table>
-      </div>`;
+      </div>`
+      + REP_NOTE;
     $("resultModal").classList.remove("hidden");
   }
 
