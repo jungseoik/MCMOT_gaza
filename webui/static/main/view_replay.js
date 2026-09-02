@@ -10,6 +10,7 @@ Views.replay = (() => {
   let inited = false, active = false;
   let mc = null;
 
+  let bnPanel = null;       // CBS 병목 선택 집계 패널 (session.js CbsBnPanel — ③과 동일 UI)
   let sessions = [];        // 이력 목록 [{session_id, sei, epfi_avg, cbs_total, has_record}]
   let selId = null;         // 선택된 session_id
   let baseRow = null;       // 선택 세션의 원본 요약(비교용)
@@ -178,6 +179,7 @@ Views.replay = (() => {
     } else {
       goTo(0);
     }
+    renderRpBn();                       // 층 전환·재계산 후 그 층 병목 기준으로 갱신
     if (mc) mc.render();
   }
 
@@ -209,6 +211,31 @@ Views.replay = (() => {
     ["rpSei","rpEpfi","rpCbs","rpIdr"].forEach((id) => { $(id).textContent = "—"; });
     $("rpBase").innerHTML = "";
     $("rpTag").textContent = mode === "drill" ? "건물값" : "현재값";
+    $("rpBnTag").textContent = "";
+    if (bnPanel) bnPanel.clear("이력을 선택하면 병목별 CBS가 표시됩니다");
+  }
+
+  // CBS 병목 선택 집계 (v1.12 — ③ 운영뷰와 동일 패널). 결과의 병목별 CBS·초과초를
+  // 집계로, 재생 프레임(fps 격자)의 병목 밀도를 스파크라인으로 쓴다.
+  // 드릴 모드에선 현재 재생 중인 층의 병목 기준 — 층을 바꾸면 따라간다.
+  function renderRpBn() {
+    if (!bnPanel) return;
+    const res = (mode === "drill") ? floorResultOf(curDrillFloor) : (data && data.result);
+    const bns = (site && site.bottlenecks) || [];
+    $("rpBnTag").textContent = (mode === "drill" && curDrillFloor) ? floorName(curDrillFloor) : "";
+    if (!res || !bns.length) {
+      bnPanel.clear(bns.length ? "재계산 결과 없음" : "이 층에 병목 없음 — 맵 설정에서 추가");
+      return;
+    }
+    const per = {}, resBn = {};
+    (res.bottleneck_metrics || []).forEach((m) => { per[m.bottleneck_id] = m.cbs; resBn[m.bottleneck_id] = m; });
+    const frames = (data && data.frames) || [];
+    const dOf = (f, bid) => {
+      const b = (f.bottlenecks || []).find((x) => x.id === bid);
+      return (b && b.density != null) ? b.density : null;
+    };
+    bnPanel.render({ bns, per, resBn,
+                     series: (bid) => frames.map((f) => dOf(f, bid)) });
   }
 
   function setMode(m) {
@@ -409,6 +436,7 @@ Views.replay = (() => {
       $("rpBase").innerHTML = `<span class="rpbase">원본 저장값 — SEI ${fmtVal(baseRow.sei,0)} · `
         + `EPFI ${fmtVal(baseRow.epfi_avg,0)} · CBS ${fmtVal(baseRow.cbs_total,1)}</span>`;
     } else $("rpBase").innerHTML = "";
+    renderRpBn();
   }
 
   function showMetricsFromRow(s) {                 // 녹화 없는 세션 — 요약만
@@ -418,6 +446,8 @@ Views.replay = (() => {
     $("rpCbs").textContent = (s.cbs_total || 0).toFixed(1);
     $("rpIdr").textContent = "—";
     $("rpBase").innerHTML = "";
+    $("rpBnTag").textContent = "";
+    if (bnPanel) bnPanel.clear("녹화 이전 세션 — 병목별 CBS 없음");
   }
 
   // ------------------------------------------------------------ 임계값
@@ -479,6 +509,7 @@ Views.replay = (() => {
     if (inited) return;
     inited = true;
     mc = new MapCanvas($("rpCv"), { draw: overlay });
+    if (window.CbsBnPanel) bnPanel = CbsBnPanel($("rpBn"));
     $("rpPlay").onclick = togglePlay;
     $("rpToStart").onclick = () => { pause(); goTo(0); if (mc) mc.render(); };
     $("rpSeek").oninput = (e) => { pause(); goTo(parseInt(e.target.value)); if (mc) mc.render(); };

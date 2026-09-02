@@ -760,7 +760,96 @@ const Session = (() => {
   // ---------------------------------- CBS 선택 집계 (v1.12)
   // 전체 합계 하나로는 "어느 문·계단이 문제였나"가 묻힌다. 병목을 골라
   // 그 묶음의 합계·평균·최악을 본다. 그룹 라벨(맵 설정)은 빠른 선택용 프리셋.
-  let cbsSel = null;            // Set(bottleneck_id) | null = 전체
+  // ③ 운영뷰·④ 리플레이 공용 팩토리 — 선택 상태(sel)는 패널 인스턴스별 유지.
+  //
+  // render(d) 인자:
+  //   bns         SiteConfig.bottlenecks (id·name·group·rho_crit)
+  //   per         {bn_id: CBS 진행/최종값}
+  //   resBn       {bn_id: BottleneckMetric} — 결과 있을 때(위험도·초과초 표시)
+  //   tailDensity (bn_id)=>밀도|null — CBS 값이 아직 없을 때 우측 꼬리표 대체
+  //   series      (bn_id)=>밀도 시계열|null — 스파크라인 (없으면 "데이터 없음")
+  function makeCbsBnPanel(box) {
+    let sel = null;            // Set(bottleneck_id) | null = 전체
+    let last = null;           // 마지막 render 인자 — 선택 변경 시 재렌더용
+
+    function render(d) {
+      last = d;
+      const bns = d.bns || [];
+      if (!bns.length) { box.innerHTML = `<div class="mnote">병목 없음 — 맵 설정에서 추가</div>`; return; }
+      const per = d.per || {};
+      const resBn = d.resBn || {};
+      const hasRes = Object.keys(resBn).length > 0;
+      const groups = [...new Set(bns.map((b) => b.group).filter(Boolean))];
+      const chosen = bns.filter((b) => !sel || sel.has(b.id));
+
+      // 선택 집계 — 합계·1개당 평균·최악 병목
+      const vals = chosen.map((b) => per[b.id] || 0);
+      const sum = vals.reduce((a, v) => a + v, 0);
+      const worstI = vals.reduce((mi, v, i) => (v > vals[mi] ? i : mi), 0);
+      const overs = chosen.map((b) => (resBn[b.id] ? resBn[b.id].over_threshold_sec : 0));
+      const aggr = !chosen.length
+        ? `<span class="cbs-agg-none">선택된 병목 없음</span>`
+        : `<b class="t-num">합계 ${fmt1(sum)}</b>` +
+          `<span>평균 <span class="t-num">${fmt1(sum / chosen.length)}</span></span>` +
+          `<span>최악 <span class="t-num">${fmt1(vals[worstI])}</span> ` +
+            `(${nameOf(bns, chosen[worstI].id)})</span>` +
+          (hasRes ? `<span>초과 <span class="t-num">${fmt1(Math.max(...overs))}</span>s</span>` : "");
+
+      box.innerHTML =
+        `<div class="cbs-sel">` +
+          `<button class="tag-btn cbs-g${sel ? "" : " on"}" data-g="">전체 ${bns.length}</button>` +
+          groups.map((g) => {
+            const ids = bns.filter((b) => b.group === g).map((b) => b.id);
+            const on = sel && ids.length === sel.size && ids.every((i) => sel.has(i));
+            return `<button class="tag-btn cbs-g${on ? " on" : ""}" data-g="${g}">${g} ${ids.length}</button>`;
+          }).join("") +
+        `</div>` +
+        `<div class="cbs-agg">선택 ${chosen.length}/${bns.length} · ${aggr}</div>` +
+        bns.map((b) => {
+          const m = resBn[b.id];
+          const dens = d.tailDensity ? d.tailDensity(b.id) : null;
+          const tail = m ? `CBS ${fmt1(m.cbs)} · <span class="risk ${m.risk_level}">${m.risk_level}</span>`
+                         : (per[b.id] != null ? `CBS ${fmt1(per[b.id])}`
+                            : (dens != null ? `${fmt1(dens)}/m²` : "—"));
+          const on = !sel || sel.has(b.id);
+          return `<div class="bnrow${on ? "" : " off"}">
+            <div class="bnlab">
+              <label class="cbs-ck"><input type="checkbox" data-bn="${b.id}"${on ? " checked" : ""}>
+                ${nameOf(bns, b.id)}${b.group ? ` <i class="mtag">${b.group}</i>` : ""}</label>
+              <span class="bnval t-num">${tail}</span>
+            </div>
+            <canvas class="bnspark" data-bn="${b.id}"></canvas>
+          </div>`;
+        }).join("");
+
+      box.querySelectorAll(".cbs-g").forEach((btn) => {
+        btn.onclick = () => {
+          const g = btn.dataset.g;
+          sel = g ? new Set(bns.filter((b) => b.group === g).map((b) => b.id)) : null;
+          render(last);
+        };
+      });
+      box.querySelectorAll(".cbs-ck input").forEach((ck) => {
+        ck.onchange = () => {
+          if (!sel) sel = new Set(bns.map((b) => b.id));
+          if (ck.checked) sel.add(ck.dataset.bn); else sel.delete(ck.dataset.bn);
+          if (sel.size === bns.length) sel = null;     // 전체면 필터 해제
+          render(last);
+        };
+      });
+      box.querySelectorAll(".bnspark").forEach((cv) => {
+        const bid = cv.dataset.bn;
+        const b = bns.find((x) => x.id === bid);
+        spark(cv, (d.series && d.series(bid)) || [],
+          { min: 0, threshold: b ? b.rho_crit : null, color: "#FF6F21" });
+      });
+    }
+
+    return { render,
+             clear: (msg) => { last = null; box.innerHTML = msg ? `<div class="mnote">${msg}</div>` : ""; },
+             reset: () => { sel = null; } };
+  }
+  window.CbsBnPanel = makeCbsBnPanel;   // ④ 리플레이 탭도 같은 패널을 쓴다 (v1.12 공용화)
 
   /** 병목별 CBS 진행값 — 종료 후엔 결과, 진행 중엔 라이브 스냅샷. */
   function cbsPerBn() {
@@ -775,85 +864,24 @@ const Session = (() => {
     return out;
   }
 
-  function cbsSelected(bns) {
-    return bns.filter((b) => !cbsSel || cbsSel.has(b.id));
-  }
+  let bnPanel = null;           // ③ 운영뷰 인스턴스 (지연 생성)
 
   function renderCbs() {
     const cbs = live ? live.cbs_total : result.cbs_total;
     $("cbsVal").textContent = fmt1(cbs);
     spark($("cbsSpark"), timeline.map((t) => t.cbs_total), { min: 0, color: "#FF6F21" });
 
-    const bns = (App.site && App.site.bottlenecks) || [];
-    const box = $("cbsBn");
-    if (!bns.length) { box.innerHTML = `<div class="mnote">병목 없음 — 맵 설정에서 추가</div>`; return; }
+    if (!bnPanel) bnPanel = makeCbsBnPanel($("cbsBn"));
     const resBn = {};
     if (result) result.bottleneck_metrics.forEach((m) => { resBn[m.bottleneck_id] = m; });
-    const per = cbsPerBn();
-    const groups = [...new Set(bns.map((b) => b.group).filter(Boolean))];
-    const sel = cbsSelected(bns);
-
-    // 선택 집계 — 합계·1개당 평균·최악 병목
-    const vals = sel.map((b) => per[b.id] || 0);
-    const sum = vals.reduce((a, v) => a + v, 0);
-    const worstI = vals.reduce((mi, v, i) => (v > vals[mi] ? i : mi), 0);
-    const overs = sel.map((b) => (resBn[b.id] ? resBn[b.id].over_threshold_sec : 0));
-    const aggr = !sel.length
-      ? `<span class="cbs-agg-none">선택된 병목 없음</span>`
-      : `<b class="t-num">합계 ${fmt1(sum)}</b>` +
-        `<span>평균 <span class="t-num">${fmt1(sum / sel.length)}</span></span>` +
-        `<span>최악 <span class="t-num">${fmt1(vals[worstI])}</span> ` +
-          `(${nameOf(bns, sel[worstI].id)})</span>` +
-        (result ? `<span>초과 <span class="t-num">${fmt1(Math.max(...overs))}</span>s</span>` : "");
-
-    box.innerHTML =
-      `<div class="cbs-sel">` +
-        `<button class="tag-btn cbs-g${cbsSel ? "" : " on"}" data-g="">전체 ${bns.length}</button>` +
-        groups.map((g) => {
-          const ids = bns.filter((b) => b.group === g).map((b) => b.id);
-          const on = cbsSel && ids.length === cbsSel.size && ids.every((i) => cbsSel.has(i));
-          return `<button class="tag-btn cbs-g${on ? " on" : ""}" data-g="${g}">${g} ${ids.length}</button>`;
-        }).join("") +
-      `</div>` +
-      `<div class="cbs-agg">선택 ${sel.length}/${bns.length} · ${aggr}</div>` +
-      bns.map((b) => {
-        const m = resBn[b.id];
-        const last = timeline.length ? (timeline[timeline.length - 1].bottleneck_density || {})[b.id] : null;
-        const tail = m ? `CBS ${fmt1(m.cbs)} · <span class="risk ${m.risk_level}">${m.risk_level}</span>`
-                       : (per[b.id] != null ? `CBS ${fmt1(per[b.id])}`
-                          : (last != null ? `${fmt1(last)}/m²` : "—"));
-        const on = !cbsSel || cbsSel.has(b.id);
-        return `<div class="bnrow${on ? "" : " off"}">
-          <div class="bnlab">
-            <label class="cbs-ck"><input type="checkbox" data-bn="${b.id}"${on ? " checked" : ""}>
-              ${nameOf(bns, b.id)}${b.group ? ` <i class="mtag">${b.group}</i>` : ""}</label>
-            <span class="bnval t-num">${tail}</span>
-          </div>
-          <canvas class="bnspark" data-bn="${b.id}"></canvas>
-        </div>`;
-      }).join("");
-
-    box.querySelectorAll(".cbs-g").forEach((btn) => {
-      btn.onclick = () => {
-        const g = btn.dataset.g;
-        cbsSel = g ? new Set(bns.filter((b) => b.group === g).map((b) => b.id)) : null;
-        renderCbs();
-      };
-    });
-    box.querySelectorAll(".cbs-ck input").forEach((ck) => {
-      ck.onchange = () => {
-        if (!cbsSel) cbsSel = new Set(bns.map((b) => b.id));
-        if (ck.checked) cbsSel.add(ck.dataset.bn); else cbsSel.delete(ck.dataset.bn);
-        if (cbsSel.size === bns.length) cbsSel = null;     // 전체면 필터 해제
-        renderCbs();
-      };
-    });
-    box.querySelectorAll(".bnspark").forEach((cv) => {
-      const bid = cv.dataset.bn;
-      const b = bns.find((x) => x.id === bid);
-      spark(cv, timeline.map((t) => (t.bottleneck_density || {})[bid] != null
+    bnPanel.render({
+      bns: (App.site && App.site.bottlenecks) || [],
+      per: cbsPerBn(),
+      resBn,
+      tailDensity: (bid) => timeline.length
+        ? (timeline[timeline.length - 1].bottleneck_density || {})[bid] : null,
+      series: (bid) => timeline.map((t) => (t.bottleneck_density || {})[bid] != null
         ? t.bottleneck_density[bid] : null),
-        { min: 0, threshold: b ? b.rho_crit : null, color: "#FF6F21" });
     });
   }
 
