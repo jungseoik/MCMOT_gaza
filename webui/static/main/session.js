@@ -1240,6 +1240,7 @@ const Session = (() => {
     $("resBody").innerHTML =
       repSummary({ sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
                    zStarted: started, zTot: zs.length, totOut })
+      + `<div class="repsec-h">개요</div>`
       + `<div class="reprows">`
         + repRow("경보 시각", fmtDT(r.alarm_ts))
         + repRow("평가 시간", `${Math.floor(dur / 60)}분 ${Math.floor(dur % 60)}초 (종료 ${r.ended_at ? hhmmss(r.ended_at) : "—"})`)
@@ -1248,6 +1249,7 @@ const Session = (() => {
         + repRow("추적 객체", `${(r.person_metrics || []).length}개`)
         + repRow("설정 버전", `calibration v${r.calibration_version} · config v${r.config_version}`)
       + `</div>`
+      + `<div class="repsec-h">4대 지표 해석</div>`
       + repCards({ sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
                    exits: es, persons: r.person_metrics || [], zones: zs, bns: bs })
       + exitBars(es)
@@ -1292,6 +1294,7 @@ const Session = (() => {
     $("resBody").innerHTML =
       repSummary({ sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
                    zStarted, zTot: zones.length, totOut: s.total_passed })
+      + `<div class="repsec-h">개요</div>`
       + `<div class="reprows">`
         + repRow("경보 시각", fmtDT(roll.alarm_ts))
         + repRow("참여 층", (roll.floors || []).map(fname).join(", "))
@@ -1300,6 +1303,7 @@ const Session = (() => {
         + repRow("층별 개시시각", startTxt)
         + repRow("추적 객체", `${persons.length}개 (전 층)`)
       + `</div>`
+      + `<div class="repsec-h">4대 지표 해석</div>`
       + repCards({ sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
                    exits, persons, zones, bns, fname })
       + exitBars(exits, fname)

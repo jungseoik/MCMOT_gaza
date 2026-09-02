@@ -633,36 +633,51 @@ body.rehearsing .rhbanner{ display:block; }
 
 /* ---------------- 결과 리포트 모달 (해석형, v1.13) ---------------- */
 /* "지표 이름만 있는 결과"는 훈련 담당자가 읽을 수 없다 — 창을 키우고
-   지표마다 설명·해석 문장을 붙인 간단 리포트 형태로 보여준다. */
-.modalbox.report{ max-width:min(1020px,94vw); width:min(1020px,94vw); max-height:92vh;
-  display:flex; flex-direction:column; }
-.modalbox.report .resbody{ overflow-y:auto; min-height:0; padding-right:4px; }
-.repsum{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 12px;
+   지표마다 설명·해석 문장을 붙인 간단 리포트 형태로 보여준다.
+   여백 원칙: 섹션 사이는 구분선+20px 이상, 카드 안은 14px, 줄간 1.65+. */
+.modalbox.report{ max-width:min(1040px,94vw); width:min(1040px,94vw); max-height:92vh;
+  display:flex; flex-direction:column; padding:22px 26px 18px; }
+.modalbox.report .modalhead{ margin-bottom:14px; }
+.modalbox.report .modalhead b{ font-size:16px; letter-spacing:-.01em; }
+.modalbox.report .resbody{ overflow-y:auto; min-height:0; padding-right:10px; }
+.modalbox.report .resrow{ padding:8px 2px; font-size:12.5px; }
+.modalbox.report .resfoot{ margin-top:16px; }
+.repsum{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; padding:14px 18px;
   background:var(--bg-3); border:1px solid var(--stroke-3); border-radius:var(--r-md);
-  font-size:13px; color:var(--text-1); margin-bottom:10px; line-height:1.6; }
-.gpill{ font-size:11px; font-weight:700; padding:1px 8px; border-radius:999px; white-space:nowrap; }
+  font-size:13.5px; color:var(--text-1); margin-bottom:6px; line-height:1.8; }
+.repsum b{ font-size:15px; }
+.gpill{ font-size:11px; font-weight:700; padding:2px 10px; border-radius:999px; white-space:nowrap; }
 .g-good{ background:rgba(63,185,80,.15); color:#3FB950; }
 .g-mid{ background:rgba(245,166,35,.15); color:#F5A623; }
 .g-bad{ background:rgba(255,91,91,.15); color:#FF5B5B; }
 .g-na{ background:rgba(255,255,255,.08); color:var(--text-3); }
-.reprows{ display:grid; grid-template-columns:1fr 1fr; column-gap:22px; margin-bottom:10px; }
-.repgrid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:4px; }
-.repcard{ background:var(--bg-3); border:1px solid var(--stroke-3); border-radius:var(--r-md); padding:10px 12px; }
-.repcard-h{ display:flex; align-items:baseline; gap:8px; }
-.repcard-h b{ font-size:14px; color:var(--text-1); }
+/* 섹션 헤더 — 위쪽 구분선으로 리포트 리듬을 만든다 */
+.repsec-h{ font-size:12px; font-weight:700; color:var(--text-2); letter-spacing:.02em;
+  margin:22px 0 10px; padding-top:18px; border-top:1px solid var(--stroke-3); }
+.reprows{ display:grid; grid-template-columns:1fr 1fr; column-gap:44px; }
+.repgrid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.repcard{ background:var(--bg-3); border:1px solid var(--stroke-3); border-radius:var(--r-md);
+  padding:14px 16px 13px; }
+.repcard-h{ display:flex; align-items:baseline; gap:10px; margin-bottom:2px; }
+.repcard-h b{ font-size:14px; color:var(--text-1); letter-spacing:.03em; }
 .repcard-h span{ font-size:11px; color:var(--text-3); flex:1; }
 .repcard-h span.gpill{ flex:0 0 auto; font-size:11px; }   /* 등급 알약은 늘어나지 않게 */
-.repcard-v{ font-size:26px; font-family:var(--font-num); color:var(--text-1); margin:2px 0 4px; }
-.repcard-what{ font-size:11px; color:var(--text-3); line-height:1.5; padding-bottom:5px;
-  border-bottom:1px dashed var(--stroke-3); margin-bottom:6px; }
-.repcard-read{ font-size:12px; color:var(--text-2); line-height:1.55; }
+.repcard-v{ font-size:30px; font-family:var(--font-num); color:var(--text-1); margin:4px 0 10px; }
+.repcard-what{ font-size:11px; color:var(--text-3); line-height:1.65; padding-bottom:9px;
+  border-bottom:1px dashed var(--stroke-3); margin-bottom:9px; }
+.repcard-read{ font-size:12.5px; color:var(--text-2); line-height:1.7; }
 .repcard-read b{ color:var(--text-1); }
-.repsec-h{ font-size:12px; font-weight:700; color:var(--text-2); margin:12px 0 6px; }
-.ebar{ display:grid; grid-template-columns:150px 1fr 170px; gap:10px; align-items:center;
-  font-size:11px; color:var(--text-2); padding:2px 0; }
+.ebar{ display:grid; grid-template-columns:160px 1fr 200px; gap:14px; align-items:center;
+  font-size:11.5px; color:var(--text-2); padding:5px 0; }
 .ebar-t{ position:relative; height:10px; background:var(--bg-3); border:1px solid var(--stroke-3);
   border-radius:5px; overflow:visible; }
 .ebar-t .a{ position:absolute; left:0; top:0; bottom:0; background:#30DCFB; opacity:.7; border-radius:4px; }
 .ebar-t .d{ position:absolute; top:-3px; bottom:-3px; width:2px; background:#F5A623; }
 .ebar-v{ text-align:right; color:var(--text-1); white-space:nowrap; }
-.repnote{ margin-top:12px; font-size:10.5px; color:var(--text-3); line-height:1.6; }
+/* 층별 상세 — 섹션 헤더 스타일 통일 + 표 셀 여백 */
+.modalbox.report .drill-perfloor{ margin-top:0; }
+.modalbox.report .drill-perfloor-h{ font-size:12px; font-weight:700; color:var(--text-2);
+  letter-spacing:.02em; margin:22px 0 10px; padding-top:18px; border-top:1px solid var(--stroke-3); }
+.modalbox.report .drill-tbl th, .modalbox.report .drill-tbl td{ padding:7px 10px; }
+.repnote{ margin-top:20px; padding-top:12px; border-top:1px solid var(--stroke-3);
+  font-size:10.5px; color:var(--text-3); line-height:1.7; }
