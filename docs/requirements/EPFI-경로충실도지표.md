@@ -20,7 +20,7 @@
 | 권장 경로 polyline | 관리자 자유곡선 화살표 또는 CAD 산출 — 맵 좌표계 |
 | `assigned_route_id` | 세션 시작 시 각 객체에 배정된 경로 (최근접 경로 자동 배정) |
 | $T_i$ | 객체 $i$의 경로 평가 시간 ($t_{i,\mathrm{end}} - t_{i,\mathrm{start}}$) |
-| $d_{\mathrm{allow}}$ | 허용 이탈거리 [m] — UI/config 입력 (기본 2.0 m) |
+| $d_{\mathrm{allow}}$ | 허용 이탈거리 [m] — UI/config 입력 (기본 2.0 m). **경로 중심선에서 한쪽 반경** — $d_i$ 는 중심선까지의 부호 없는 최단거리라 좌/우 구분이 없다. "허용 통로 폭"으로 읽으면 **좌우 합 $2 \times d_{\mathrm{allow}}$** (예: 1.0 m → 폭 2 m) |
 
 ---
 
@@ -75,7 +75,7 @@ $$\mathrm{EPFI} = \frac{1}{n}\sum_{i=1}^{n}\mathrm{EPFI}_i \quad \text{(유효 �
 | $P_i(t)$ | 객체 $i$의 평면도 좌표 (m) |
 | $d_i(t)$ | 객체 $i$의 배정 경로 최근접 거리 (m) |
 | $T_i$ | 객체 $i$의 경로 평가 시간 (s) |
-| $d_{\mathrm{allow}}$ | 허용 이탈거리 (m) |
+| $d_{\mathrm{allow}}$ | 허용 이탈거리 (m) — 중심선 한쪽 반경, 좌우 합 폭 ×2 |
 | $\mathrm{EPFI}_i$ | 객체별 경로 충실도 (0~100) |
 | $\mathrm{EPFI}$ | 전체 평균 경로 충실도 (0~100) |
 | $n$ | 유효 객체 수 ($T_i > 0$인 객체) |

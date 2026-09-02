@@ -233,7 +233,9 @@ class Thresholds(BaseModel):
     a_th: float = 0.7      # 방향정렬도 임계 (cosine)
     r_th: float = 0.5      # 동시만족 객체비율 임계 (0~1)
     dt_hold: float = 3.0   # 연속 유지시간 (s)
-    d_allow: float = 2.0   # EPFI 허용 이탈거리 (m)
+    d_allow: float = 2.0   # EPFI 허용 이탈거리 (m) — **경로 중심선에서 한쪽 반경**.
+                           # 이탈거리 d 는 중심선까지의 부호 없는 최단거리라 좌/우 구분이 없다.
+                           # "허용 통로 폭"으로 읽으면 좌우 합 2×d_allow (예: 1.0 → 폭 2m).
     min_conf: float = 0.35  # 표출·지표 최소 검출 신뢰도 — 저신뢰 오탐(예: 의자)이
     q_design: float = Field(default=60.0, gt=0)  # SEI: 단위 유효폭당 설계 통과기준 [인/분/m]
     exit_extrap_m: float = Field(default=2.0, ge=0)  # 출입구 통과 판정에 헐 밖 관측을 쓰는 반경(m).
