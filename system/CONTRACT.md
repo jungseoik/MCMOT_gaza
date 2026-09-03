@@ -1,4 +1,29 @@
-# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.12)
+# system/ 계약 명세 (M1 동결 — 2026-07-13 · v1.13)
+
+> **v1.13 개정 (2026-09-03 — 글로벌 ID: 카메라 간 동일인 연결 + 개인 이동 기록)**
+> 요지: 요구사항 '카테고리 1 Multi-Camera ID 병합'(최종 단계) 1차. **온오프 토글** —
+> off(기본)면 기존 gid(`f"{cam}:{local}"`) 동작 그대로(코드 경로 미실행), on 이면
+> 같은 사람은 어느 카메라든 같은 `gN`. 전제: **카메라 매핑 헐은 서로 겹치지 않는다.**
+> - 신설 `system/identity/`(GlobalIdService): BoostTrack 트랙 EMA 임베딩 재사용(추가
+>   GPU 0) · 코사인 매칭(`cos_th` 기본 0.45) · TTL(기본 600s) · **동시 활성 기각**
+>   (같은 순간(0.3s) 다른 카메라에서 활성인 후보 = 배타 헐 전제상 반드시 타인 → 기각).
+>   설정 `data/global_id.json` — `GET/POST /api/infer/global_id`(세션 중 변경 409).
+> - `contracts.py`: `TrackedObject.emb`·`gid_hint`(선택) ·
+>   **`PersonJourney`/`JourneySegment`** 신설 · `EvaluationResult.global_id`·`journeys[]`.
+>   여정 = 시작(구역·시각) → 카메라 구간들(+갭 직선 브리지) → 최초 out 출구,
+>   총 이동거리·소요·평균속도·**coverage**(관측 시간 비율 — id 유실 가시화).
+> - 엔진 의미 분리: **운동학(속도·v_th·a_th 판정)은 카메라 로컬 키** — 핸드오버가
+>   순간속도를 오염 못 함. 글로벌 id 는 debounce·표시·EPFI 인원 병합·여정에만.
+>   출입구 카운터 키 2단(선분 부호 기억=로컬 / 집계 debounce=글로벌).
+>   특징 확정은 **헐 안 관측만**(헐 밖은 활성 touch 만).
+> - **녹화 스키마 3**: tracks 에 `gid` 열(그 프레임 확정 global_id) → 리플레이는
+>   갤러리 재현 없이 `gid_hint` 로 같은 id(결정성). 세션·드릴 meta 에 `global_id` 기록,
+>   ④ 목록·결과 리포트에 🌐 배지 + 개인 이동 기록 표. CSV export 에 `journey` 행.
+> - DS(DeepStream) 라이브 경로는 후속 — 워커가 emb 를 안 보내므로 on 이어도 그 경로는
+>   기존 동작 유지(바인딩 미발생). 파일(리허설)·ffmpeg 경로는 즉시 동작.
+> - 하위호환: 토글 off(기본) + 옛 녹화(schema 1·2) 재생 = v1.12 와 완전 동일.
+> - 회귀: `tests/system/test_global_id.py` (13종 — 핸드오버·동시활성 기각·TTL·여정·
+>   출구 debounce·순간속도 보호·녹화 왕복·리플레이 힌트·온오프 회귀).
 
 > **v1.12 개정 (2026-08-21 — CBS 영역 형상·그룹 집계 / SEI 문별 폭·기준)**
 > 요지: 4대 지표의 "사람이 넣는 값"을 실제 현장 형상에 맞춘다. CBS는 병목을
