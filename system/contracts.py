@@ -36,6 +36,9 @@ class TrackedObject:
     bbox_xyxy: tuple[float, float, float, float]
     conf: float
     ts: float
+    # --- 글로벌 ID (v1.13, 선택) ---
+    emb: Any | None = None             # 트랙 EMA 외형 특징(np, 정규화 전) — 글로벌 매칭용
+    gid_hint: str | None = None        # 리플레이: 녹화된 확정 global_id (결정성 유지)
 
 
 # --------------------------------------------------------- MapState (B→C, SSE)
@@ -173,6 +176,37 @@ class ExitMetric(BaseModel):
     q_design: float | None = None               # 계산에 쓰인 q [인/분/m]
 
 
+class JourneySegment(BaseModel):
+    """PersonJourney 의 카메라 구간 1개 — 같은 카메라 헐 안에서 연속 관측된 조각."""
+    cam_id: str
+    t0: float
+    t1: float
+    dist_m: float | None = None            # 구간 내 이동거리 (축척 없으면 None)
+    n_points: int = 0
+
+
+class PersonJourney(BaseModel):
+    """글로벌 ID 1명의 이동 기록 (v1.13 — 글로벌 ID 모드 전용).
+
+    "어떤 id 가 경보 후 어디서 시작해 몇 시에 어느 출구로 나갔고, 총 얼마를
+    이동했는가"를 담는다. 카메라 구간 사이 갭은 직선 브리지 거리로 잇는다
+    (시간 동기 + 동일 맵 좌표계 전제 — 갭 평균속도도 유효한 추정).
+    id 유실 시 여정이 조각날 수 있어 coverage(관측 시간 비율)를 함께 남긴다."""
+    gid: str
+    start_ts: float
+    end_ts: float
+    start_xy: tuple[float, float]
+    end_xy: tuple[float, float]
+    start_zone: str | None = None          # 시작점이 속한 구역
+    exit_id: str | None = None             # 최초 out 통과 출구 (없으면 미퇴장)
+    exit_ts: float | None = None
+    total_dist_m: float | None = None      # 구간 합 + 갭 브리지 합
+    duration_sec: float = 0.0
+    avg_speed_mps: float | None = None
+    coverage_ratio: float = 1.0            # 관측 시간 / 전체 시간 (조각화 가시화)
+    segments: list[JourneySegment] = []
+
+
 class EvaluationResult(BaseModel):
     """세션 결과 — GET /api/session/result (요구사항 §4)."""
     session_id: str
@@ -190,6 +224,8 @@ class EvaluationResult(BaseModel):
     sei: float | None = None                   # None = insufficient_data
     epfi_avg: float | None = None
     cbs_total: float = 0.0
+    global_id: bool = False                    # 글로벌 ID 모드로 측정된 세션 (v1.13)
+    journeys: list[PersonJourney] = []         # 글로벌 ID별 이동 기록 (모드 on 전용)
     quality: dict[str, Any] = {}
     generated_at: float = 0.0
 

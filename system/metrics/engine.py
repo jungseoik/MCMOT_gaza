@@ -30,13 +30,17 @@ from system.contracts import (
     BottleneckState,
     EvaluationResult,
     ExitState,
+    JourneySegment,
     MapObject,
     MapState,
+    PersonJourney,
     SessionLive,
     TimelinePoint,
     TrackedObject,
     ZoneState,
 )
+from system.identity import GlobalIdService
+from system.identity import get_settings as _gid_settings
 from system.metrics.session import EvaluationSession
 from system.spatial import (
     CameraProjector,
@@ -75,21 +79,32 @@ class _ExitCounter:
     counted_in: set = field(default_factory=set)   # 이미 in 집계된 gid
     counted_out: set = field(default_factory=set)  # 이미 out 집계된 gid
 
-    def observe_zone(self, gid: str, pt, bbox) -> None:
-        """화면 영역 게이트용 — bbox 를 함께 넘긴다. 집계·debounce 는 동일."""
-        ev = self.line.observe(gid, pt, bbox)
-        if ev == "out" and gid not in self.counted_out:
-            self.counted_out.add(gid)
-            self.out_count += 1
+    # 키 2단 (v1.13): line_key = 카메라 로컬 키 — 선분 부호 기억은 트랙 수명과
+    # 일치해야 하므로 항상 f"{cam}:{local}". count_key = debounce·집계 키 —
+    # 글로벌 ID 모드에선 gN(같은 사람 재통과 억제), 아니면 line_key 와 동일.
+    # 반환: 이번 관측으로 **새로 집계된** 방향("in"/"out") — 여정의 출구 이벤트용.
 
-    def observe(self, gid: str, pt: tuple[float, float]) -> None:
-        ev = self.line.observe(gid, pt)
-        if ev == "in" and gid not in self.counted_in:
-            self.counted_in.add(gid)
-            self.in_count += 1
-        elif ev == "out" and gid not in self.counted_out:
-            self.counted_out.add(gid)
+    def observe_zone(self, line_key: str, count_key: str, pt, bbox) -> str | None:
+        """화면 영역 게이트용 — bbox 를 함께 넘긴다. 집계·debounce 는 동일."""
+        ev = self.line.observe(line_key, pt, bbox)
+        if ev == "out" and count_key not in self.counted_out:
+            self.counted_out.add(count_key)
             self.out_count += 1
+            return "out"
+        return None
+
+    def observe(self, line_key: str, count_key: str,
+                pt: tuple[float, float]) -> str | None:
+        ev = self.line.observe(line_key, pt)
+        if ev == "in" and count_key not in self.counted_in:
+            self.counted_in.add(count_key)
+            self.in_count += 1
+            return "in"
+        if ev == "out" and count_key not in self.counted_out:
+            self.counted_out.add(count_key)
+            self.out_count += 1
+            return "out"
+        return None
 
 
 class MetricsEngine:
@@ -122,6 +137,12 @@ class MetricsEngine:
         self._last_timeline: list[TimelinePoint] = []
         self._last_person_series: dict = {}
         self._debug_foot: dict = {}  # gid -> {foot_uv, map_xy} — debug용 임시
+        # 글로벌 ID (v1.13) — 토글 on 일 때만 서비스가 만들어지고, off 면 전부 None/빈 값
+        self._gid: GlobalIdService | None = None
+        self._gid_used = False                 # 이번 세션이 글로벌 id 로 측정 중인가
+        self._replay_gid = False               # 리플레이 gid_hint 를 본 적 있는가
+        self._journeys: dict[str, list[dict]] = {}     # gid -> 카메라 구간 장부
+        self._exit_events: dict[str, tuple[str, float]] = {}  # gid -> (exit_id, ts) 최초 out
         self.reload(site, cameras)
 
     # ------------------------------------------------------------ 설정 반영
@@ -207,15 +228,11 @@ class MetricsEngine:
             ts = float(ts)
             if self._latest_ts is None or ts > self._latest_ts:
                 self._latest_ts = ts
-            if self._recorder is not None and tracks:  # 세션 녹화 (계약 v1.10) —
-                try:                                    # min_conf 필터 이전 raw 저장
-                    self._recorder.record(cam_id, ts, tracks)
-                except Exception:                       # 녹화 실패가 라이브를 죽이지 않게
-                    logger.exception("세션 녹화 실패 — 녹화 중단, 라이브 계속")
-                    self._recorder = None
             sess = self._session                 # 평가 세션 (없으면 None)
             proj = self._projectors.get(cam_id)
             if proj is None:                     # mapping 미설정 → 처리 제외
+                # 녹화는 raw 계약 유지 — 미매핑 카메라 프레임도 기록 (gid 없음)
+                self._record(cam_id, ts, tracks, None)
                 if sess is not None and tracks:
                     sess.note_dropped(len(tracks))   # quality: 투영 제외
                 return
@@ -227,10 +244,22 @@ class MetricsEngine:
             cam_override = self._cam_min_conf.get(cam_id)
             min_conf = (cam_override if cam_override is not None
                         else self._site.thresholds.min_conf)
+            # ---- 글로벌 ID (v1.13) — 토글 on(서비스) 또는 리플레이 힌트가 있을 때만
+            # 동작. off 면 svc=None 이고 gid_eff 는 언제나 로컬 합성키(현행과 동일).
+            gset = _gid_settings()
+            svc = self._gid_service(gset) if gset["enabled"] else None
+            rec_gids: list[str | None] = []      # 녹화용 확정 gid — tracks 와 1:1 정렬
             for tr in tracks:
+                okey = f"{cam_id}:{tr.local_track_id}"  # 카메라 로컬 키 — 운동학·선분 기억
+                gid_eff = okey                          # debounce·표시·인원 지표 키
+                if tr.gid_hint:                  # 리플레이 — 녹화된 확정 id (결정성)
+                    gid_eff = tr.gid_hint
+                    self._replay_gid = True
+                elif svc is not None:
+                    gid_eff = svc.lookup(cam_id, tr.local_track_id) or okey
                 if tr.conf < min_conf:           # 저신뢰 관측 — 오탐 연명 트랙 차단
-                    continue                     # (BYTE 저신뢰 연관 유령 객체 방지)
-                gid_pre = f"{cam_id}:{tr.local_track_id}"
+                    rec_gids.append(None)        # (BYTE 저신뢰 연관 유령 객체 방지)
+                    continue
                 # 화면 통과선 — **투영 전에** 관측한다. 문 앞은 대응점 헐 밖이라
                 # 아래 ROI 게이트에서 버려지는데, 카운트는 거기서도 살아야 한다.
                 for _eid in self._cam_exits.get(cam_id, ()):
@@ -239,11 +268,13 @@ class MetricsEngine:
                         continue
                     if isinstance(_ec.line, ZoneGate):
                         # 문 앞은 발끝이 잘려 튄다 — bbox 도 함께 넘겨 겹침으로 판정
-                        _ec.observe_zone(gid_pre, tr.foot_uv, tr.bbox_xyxy)
+                        ev = _ec.observe_zone(okey, gid_eff, tr.foot_uv, tr.bbox_xyxy)
                     else:
-                        _ec.observe(gid_pre, tr.foot_uv)
+                        ev = _ec.observe(okey, gid_eff, tr.foot_uv)
+                    if ev == "out" and sess is not None:
+                        self._exit_events.setdefault(gid_eff, (_eid, float(ts)))
                 p = proj.project(tr.foot_uv)
-                self._debug_foot[gid_pre] = {
+                self._debug_foot[okey] = {
                     "foot_u": round(tr.foot_uv[0], 1), "foot_v": round(tr.foot_uv[1], 1),
                     "map_x": round(p.x, 1) if p else None, "map_y": round(p.y, 1) if p else None,
                 }
@@ -251,38 +282,131 @@ class MetricsEngine:
                     # 단, **출입구 통과 판정**만은 헐 밖 관측도 쓴다(exit_extrap_m).
                     # 문은 대개 헐 경계 밖에 있어 일반 규칙대로면 영영 안 세진다.
                     # 외삽 오차를 감안해 출입구 선 근처 관측만, 맵 안(in_bounds)만.
-                    self._observe_exits_extrap(cam_id, gid_pre, proj, tr.foot_uv)
-                    self._drop(gid_pre, forget_lines=not self._extrap_on())
+                    self._observe_exits_extrap(cam_id, okey, gid_eff, ts, proj, tr.foot_uv)
+                    self._drop(okey, forget_lines=not self._extrap_on())
+                    if svc is not None:          # 헐 밖에서도 '지금 활성' 유지 (동시활성 기각용)
+                        svc.touch(cam_id, tr.local_track_id, ts)
                     if sess is not None:
                         sess.note_dropped()
+                    rec_gids.append(gid_eff if gid_eff != okey else None)
                     continue
-                gid = f"{cam_id}:{tr.local_track_id}"
-                st = self._objects.get(gid)
-                if st is None:
-                    st = self._objects[gid] = _ObjState(
-                        cam_id=cam_id, local_id=int(tr.local_track_id), gid=gid,
+                if svc is not None:              # 헐 안 관측만 특징으로 글로벌 id 확정/갱신
+                    g = svc.resolve(cam_id, tr.local_track_id, tr.emb, ts)
+                    if g is not None:
+                        gid_eff = g
+                st = self._objects.get(okey)     # 운동학 상태는 항상 카메라 로컬 키 —
+                if st is None:                   # 이력이 카메라를 넘어 섞이지 않는다(v_th 보호)
+                    st = self._objects[okey] = _ObjState(
+                        cam_id=cam_id, local_id=int(tr.local_track_id), gid=gid_eff,
                         first_ts=ts)
+                st.gid = gid_eff                 # 바인딩 승격(okey→gN) 반영 — 표시·debounce 키
                 st.conf = tr.conf
                 st.hist.append((ts, p.x, p.y))
                 while len(st.hist) > 1 and ts - st.hist[0][0] > self.window_sec:
                     st.hist.popleft()            # sliding window 유지
                 st.last_ts = ts
                 st.in_bounds = p.in_bounds
+                if sess is not None and gid_eff != okey:
+                    self._gid_used = True        # 이번 세션은 글로벌 id 로 측정 중
+                    self._journey_note(gid_eff, cam_id, ts, p.x, p.y)
                 cam_owned = self._cam_exit_ids()
                 for eid, ec in self._exits.items():   # 방향성 crossing 관측
                     if eid in cam_owned:              # 화면 통과선이 이미 셌다
                         continue
-                    ec.observe(gid, (p.x, p.y))
-                if sess is not None:             # EPFI 관측 누적
-                    sess.observe_point(gid, ts, p.x, p.y)
+                    ev = ec.observe(okey, gid_eff, (p.x, p.y))
+                    if ev == "out" and sess is not None:
+                        self._exit_events.setdefault(gid_eff, (eid, float(ts)))
+                if sess is not None:             # EPFI 관측 누적 (글로벌이면 사람 단위 병합)
+                    sess.observe_point(gid_eff, ts, p.x, p.y)
+                rec_gids.append(gid_eff if gid_eff != okey else None)
+            # 녹화 — raw 계약 유지하되 이 프레임에서 **확정된** gid 를 함께 남긴다
+            # (리플레이가 갤러리 없이 같은 id 를 재현, v1.13). 루프 뒤에 기록하는 이유:
+            # 바인딩이 같은 프레임 안에서 일어나므로 기록 시점의 gid 가 실제 사용값이다.
+            self._record(cam_id, ts, tracks, rec_gids)
             self._purge(self._latest_ts)
             if sess is not None:                 # 1초 샘플 (IDR·CBS·타임라인)
                 sess.maybe_sample(self._latest_ts)
 
+    # ------------------------------------------ 글로벌 ID (v1.13) 내부
+    def _gid_service(self, gset: dict) -> GlobalIdService:
+        """토글 on 일 때만 호출 — 서비스 지연 생성 + 파라미터 핫리로드."""
+        s = self._gid
+        if s is None:
+            s = self._gid = GlobalIdService(
+                ttl_sec=float(gset["ttl_sec"]), cos_th=float(gset["cos_th"]),
+                update_every=int(gset["update_every"]))
+        else:
+            s.ttl_sec = float(gset["ttl_sec"])
+            s.cos_th = float(gset["cos_th"])
+            s.update_every = int(gset["update_every"])
+        return s
+
+    def _record(self, cam_id: str, ts: float, tracks, gids) -> None:
+        """세션 녹화 (계약 v1.10) — min_conf 필터 이전 raw + 확정 gid(v1.13)."""
+        if self._recorder is None or not tracks:
+            return
+        try:
+            self._recorder.record(cam_id, ts, tracks, gids=gids)
+        except Exception:                       # 녹화 실패가 라이브를 죽이지 않게
+            logger.exception("세션 녹화 실패 — 녹화 중단, 라이브 계속")
+            self._recorder = None
+
+    def _journey_note(self, gid: str, cam_id: str, ts: float, x: float, y: float) -> None:
+        """여정 장부 — 같은 카메라 연속 관측은 구간 연장, 아니면 새 구간(갭은 조립 때 브리지)."""
+        segs = self._journeys.setdefault(gid, [])
+        s = segs[-1] if segs else None
+        if s is not None and s["cam"] == cam_id and ts - s["t1"] <= self.lost_timeout_sec:
+            s["dist_px"] += math.hypot(x - s["x1"], y - s["y1"])
+            s["t1"], s["x1"], s["y1"] = ts, x, y
+            s["n"] += 1
+        else:
+            segs.append({"cam": cam_id, "t0": ts, "t1": ts, "x0": x, "y0": y,
+                         "x1": x, "y1": y, "dist_px": 0.0, "n": 1})
+
+    def _build_journeys(self) -> list[PersonJourney]:
+        """세션 종료 시 여정 조립 — 구간 거리 합 + 구간 사이 직선 브리지.
+
+        갭 평균속도가 유효한 이유: 전 카메라 시간 동기 + 동일 맵 좌표계(사용자 확정
+        설계). id 유실로 여정이 조각나면 coverage 로 드러난다 — 숨기지 않는다."""
+        out: list[PersonJourney] = []
+        mpp = self._m_per_px
+        for gid, segs in self._journeys.items():
+            if not segs:
+                continue
+            first, last = segs[0], segs[-1]
+            dist_px = sum(s["dist_px"] for s in segs)
+            for a, b in zip(segs, segs[1:]):
+                dist_px += math.hypot(b["x0"] - a["x1"], b["y0"] - a["y1"])
+            dur = max(0.0, last["t1"] - first["t0"])
+            obs = sum(s["t1"] - s["t0"] for s in segs)
+            ex = self._exit_events.get(gid)
+            zone = next((z.id for z, _a in self._zones
+                         if point_in_polygon((first["x0"], first["y0"]), z.polygon)), None)
+            dist_m = dist_px * mpp if mpp else None
+            out.append(PersonJourney(
+                gid=gid, start_ts=first["t0"], end_ts=last["t1"],
+                start_xy=(round(first["x0"], 1), round(first["y0"], 1)),
+                end_xy=(round(last["x1"], 1), round(last["y1"], 1)),
+                start_zone=zone,
+                exit_id=(ex[0] if ex else None),
+                exit_ts=(ex[1] if ex else None),
+                total_dist_m=(round(dist_m, 1) if dist_m is not None else None),
+                duration_sec=round(dur, 1),
+                avg_speed_mps=(round(dist_m / dur, 2)
+                               if dist_m is not None and dur > 0 else None),
+                coverage_ratio=round(min(1.0, obs / dur), 3) if dur > 0 else 1.0,
+                segments=[JourneySegment(
+                    cam_id=s["cam"], t0=round(s["t0"], 2), t1=round(s["t1"], 2),
+                    dist_m=(round(s["dist_px"] * mpp, 1) if mpp else None),
+                    n_points=s["n"]) for s in segs]))
+        out.sort(key=lambda j: j.start_ts)
+        return out
+
     def _extrap_on(self) -> bool:
         return bool(self._m_per_px) and float(getattr(self._site.thresholds, "exit_extrap_m", 0.0) or 0.0) > 0
 
-    def _observe_exits_extrap(self, cam_id: str, gid: str, proj, foot_uv) -> None:
+    def _observe_exits_extrap(self, cam_id: str, line_key: str, count_key: str,
+                              ts: float, proj, foot_uv) -> None:
         """헐 밖 관측을 출입구 맵 통과선 판정에 쓴다 — **헐 경계에서 exit_extrap_m 안**일 때만.
 
         외삽 오차는 헐에서 멀어질수록 커진다(렌즈 왜곡·대응점 잡음 증폭). 그래서 기준은
@@ -308,7 +432,9 @@ class MetricsEngine:
         for eid, ec in self._exits.items():
             if eid in cam_owned or not hasattr(ec.line, "A"):
                 continue                          # 화면 게이트는 이미 투영 전에 관측했다
-            ec.observe(gid, (p.x, p.y))
+            ev = ec.observe(line_key, count_key, (p.x, p.y))
+            if ev == "out" and self._session is not None:
+                self._exit_events.setdefault(count_key, (eid, float(ts)))
 
     def _drop(self, gid: str, forget_lines: bool = True) -> None:
         """맵 투영에서 빠진 객체 정리.
@@ -402,6 +528,13 @@ class MetricsEngine:
             at_alarm = [(st.hist[-1][1], st.hist[-1][2])
                         for st in self._objects.values() if st.hist]
             self._reset_locked()
+            # 글로벌 ID (v1.13) — 세션마다 id 공간을 g1부터 새로 (리포트 가독성·독립성)
+            self._gid_used = False
+            self._replay_gid = False
+            self._journeys = {}
+            self._exit_events = {}
+            if self._gid is not None:
+                self._gid.reset()
             self._session = EvaluationSession(self, origins, float(t_alarm),
                                               occupants_px=at_alarm)
             return self._session.live(float(t_alarm))
@@ -430,6 +563,9 @@ class MetricsEngine:
             if self._session is None:
                 raise RuntimeError("진행 중인 평가 세션 없음")
             result = self._session.finalize(self._session_now())
+            if self._gid_used or self._replay_gid:   # 글로벌 ID 측정분 반영 (v1.13)
+                result = result.model_copy(update={
+                    "global_id": True, "journeys": self._build_journeys()})
             self._last_result = result
             self._last_timeline = list(self._session.timeline)
             self._last_person_series = self._session.person_series()

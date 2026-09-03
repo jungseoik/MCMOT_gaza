@@ -174,6 +174,15 @@ class AnalyzerThread(threading.Thread):
         # (TrackedObject.conf 계약 의미). 미매칭(coasting) 프레임은 0.0.
         det_xyxy, det_scores = self._frame_dets(pred, scale_r)
 
+        # 트랙별 EMA 외형 특징 — 글로벌 ID 매칭용 (v1.13). 트래커가 내부 매칭에
+        # 이미 유지하는 벡터의 참조라 추가 계산 0. use_reid off 면 더미(size 1)라 제외.
+        emb_by_tid: dict[int, np.ndarray] = {}
+        if self._gpu_embedder is not None:
+            for trk in tracker.trackers:
+                e = getattr(trk, "emb", None)
+                if e is not None and getattr(e, "size", 0) >= 16:
+                    emb_by_tid[trk.id + 1] = e   # update() 반환 id 는 trk.id+1
+
         tracks: list[TrackedObject] = []
         for t in np.asarray(targets).reshape(-1, targets.shape[1] if targets.size else 6):
             x1, y1, x2, y2, tid = t[0], t[1], t[2], t[3], int(t[4])
@@ -186,6 +195,7 @@ class AnalyzerThread(threading.Thread):
                 bbox_xyxy=(float(x1), float(y1), float(x2), float(y2)),
                 conf=conf,
                 ts=item.ts,
+                emb=emb_by_tid.get(tid),
             ))
 
         infer_ms = (time.perf_counter() - t0) * 1000.0

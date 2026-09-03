@@ -702,3 +702,24 @@ body.rehearsing .rhbanner{ display:block; }
 .repverdict-line{ font-size:12.5px; line-height:1.75; color:var(--text-2); }
 .repverdict-line.good::before{ content:"✔ "; color:#3FB950; font-weight:700; }
 .repverdict-line.warn::before{ content:"⚠ "; color:#F5A623; font-weight:700; }
+
+/* ---------------- 글로벌 ID 설정 (① 추론 모델 패널, v1.13) ---------------- */
+.gidbox{ margin-top:10px; padding-top:10px; border-top:1px dashed var(--stroke-3);
+  display:flex; flex-direction:column; gap:7px; }
+.gidtoggle{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2);
+  cursor:pointer; }
+.gidtoggle input{ accent-color:#3FB950; width:14px; height:14px; margin:0; cursor:pointer; }
+.gidtoggle b{ color:var(--text-1); }
+.gidopts{ display:flex; align-items:center; gap:12px; font-size:12px; color:var(--text-3);
+  padding-left:22px; }
+.gidopts input{ height:26px; background:var(--bg-3); color:var(--text-1);
+  border:1px solid var(--stroke-3); border-radius:var(--r-sm); padding:0 6px;
+  font-family:var(--font-num); font-size:12px; }
+#gidNote{ padding-left:22px; font-size:11.5px; }
+
+/* 결과 리포트 — 개인 이동 기록(여정) 표 */
+.jt-wrap{ overflow-x:auto; }
+.jt td:nth-child(1), .jt td:nth-child(2), .jt td:nth-child(3), .jt td:nth-child(8){
+  text-align:left; font-family:inherit; }
+.jt .jt-cams{ font-size:10.5px; color:var(--text-3); max-width:220px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

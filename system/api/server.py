@@ -1091,6 +1091,7 @@ def _attach_recorder(eng, floor_id: str, live) -> None:
         "site_version": site.version,
         "site_view": site.as_floor_view(floor_id).model_dump(),
         "cameras": [c.model_dump() for c in floor_cams],
+        "global_id": bool(_gid_settings_now()["enabled"]),   # 이 세션의 측정 모드 (v1.13)
     }
     rec = SessionRecorder(_session_db_path(live.session_id, floor_id), meta)
     eng.attach_recorder(rec)
@@ -1203,7 +1204,9 @@ def _drill_meta_save(sid: str, floors: list[str], alarm_ts: float, label: str | 
     드릴을 추정해서, 리허설처럼 카메라가 잠깐 존재하는 층의 드릴은 종료 후 이력에서 사라졌다."""
     (_drills_dir() / f"{sid}.json").write_text(json.dumps(
         {"session_id": sid, "floors": floors, "alarm_ts": alarm_ts,
-         "label": label, "rehearsal": rehearsal}, ensure_ascii=False, indent=2), encoding="utf-8")
+         "label": label, "rehearsal": rehearsal,
+         "global_id": bool(_gid_settings_now()["enabled"])},   # 측정 모드 (v1.13)
+        ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _drill_meta(sid: str) -> dict | None:
@@ -1229,6 +1232,7 @@ def _drill_rollup(session_id: str) -> dict:
     if m and isinstance(roll, dict):
         roll["label"] = m.get("label")
         roll["rehearsal"] = m.get("rehearsal")
+        roll["global_id"] = bool(m.get("global_id"))   # 측정 모드 배지용 (v1.13)
     return roll
 
 
@@ -1339,7 +1343,8 @@ def drills_list():
                     "cbs_total": b["cbs_total"], "sei": b["sei"],
                     "total_passed": roll["summary"]["total_passed"],
                     "has_record": has_record,
-                    "label": roll.get("label"), "rehearsal": roll.get("rehearsal")})
+                    "label": roll.get("label"), "rehearsal": roll.get("rehearsal"),
+                    "global_id": roll.get("global_id", False)})
     return out
 
 
@@ -1557,6 +1562,9 @@ def session_export(format: str = "json", floor: str = DEFAULT_FLOOR_ID):
         for pm in res.person_metrics:
             for k, v in pm.model_dump().items():
                 w.writerow(["person", pm.global_track_id, k, v])
+        for jn in res.journeys:                  # 글로벌 ID 여정 (v1.13)
+            for k, v in jn.model_dump().items():
+                w.writerow(["journey", jn.gid, k, v])
         for bm in res.bottleneck_metrics:
             for k, v in bm.model_dump().items():
                 w.writerow(["bottleneck", bm.bottleneck_id, k, v])
@@ -2129,6 +2137,37 @@ async def set_infer_profile(request: Request):
         raise HTTPException(500, f"프로파일은 저장됐으나 재기동 실패 — {e}")
     logger.info("추론 프로파일 전환: %s (%s)", prof.id, how)
     return {"ok": True, "profile": prof.id, "label": prof.label, "restarted": how}
+
+
+# ------------------------------------------------ 글로벌 ID 설정 (v1.13)
+def _gid_settings_now() -> dict:
+    from system.identity import get_settings
+    return get_settings()
+
+
+@app.get("/api/infer/global_id")
+def gid_get():
+    """카메라 간 동일인 연결(글로벌 ID) 설정 조회 — ① [추론 모델] 패널용."""
+    return _gid_settings_now()
+
+
+@app.post("/api/infer/global_id")
+async def gid_set(request: Request):
+    """글로벌 ID 설정 저장 — 세션 중엔 금지(추론 프로파일 전환과 같은 이유).
+
+    엔진이 설정을 2초 캐시로 읽으므로 재기동 없이 다음 프레임부터 반영된다.
+    off(기본)면 기존 gid(f"{cam}:{local}") 동작 그대로 — 코드 경로 자체가 안 탄다."""
+    from system.identity import save_settings
+    body = await request.json()
+    live = [fid for fid, eng in rt.engines.items() if eng.session_live() is not None]
+    if live:
+        raise HTTPException(409, f"평가 세션 진행 중({', '.join(live)}) — "
+                                 "세션을 종료한 뒤 글로벌 ID 설정을 바꾸세요")
+    try:
+        return save_settings({k: body.get(k) for k in
+                              ("enabled", "ttl_sec", "cos_th", "update_every")})
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, f"잘못된 값: {e}")
 
 
 # ================================================================ 프론트

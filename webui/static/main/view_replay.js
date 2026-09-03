@@ -99,6 +99,8 @@ Views.replay = (() => {
       const rec = d.has_record
         ? `<span class="badge ok">재계산가능</span>`
         : `<span class="badge" title="일부 층 녹화 없음 — 재계산·재생 불가">요약만</span>`;
+      const gidb = d.global_id
+        ? `<span class="badge" title="글로벌 ID(카메라 간 동일인 연결)로 측정된 훈련 — 결과에 개인 이동 기록 포함">🌐</span>` : "";
       // 라벨(🎬 패키지 — 시나리오)은 행 제목으로 — 배지에 넣으면 길어서 행이 두세 줄로 깨진다.
       // 패키지명은 title 로 내리고 시나리오 부분만 보인다("🎬 전체 (01~14 연속)").
       let title = tFull;
@@ -108,7 +110,7 @@ Views.replay = (() => {
       }
       const floors = (d.floors || []).map((f) => floorName(f)).join("·");
       return `<div class="camrow rpsess${d.session_id === selId ? " sel" : ""}" data-id="${d.session_id}">
-        <div class="r1"><span class="nm" title="${(d.label || "") + " · " + d.session_id}">${title}</span>${rec}</div>
+        <div class="r1"><span class="nm" title="${(d.label || "") + " · " + d.session_id}">${title}</span>${gidb}${rec}</div>
         <div class="r2"><span class="cid" title="${tFull}">${t}</span><span>${floors}</span>
           <span class="mtr">EPFI ${fmtVal(d.epfi_avg,0)} · CBS ${fmtVal(d.cbs_total,1)} · 통과 ${d.total_passed || 0}</span></div></div>`;
     }).join("");

@@ -706,6 +706,41 @@ Views.map = (() => {
     }
   }
 
+  // ------------------------------------------------------------ 글로벌 ID (v1.13)
+  // 카메라 간 동일인 연결 토글 — off(기본)=현행 카메라별 ID 그대로.
+  // 세션 시작 시점 스냅샷으로 적용되며, 세션 중엔 서버가 409로 막는다.
+  async function loadGid(msg) {
+    let d;
+    try { d = await (await fetch("/api/infer/global_id")).json(); }
+    catch (e) { $("gidNote").textContent = "글로벌 ID 설정을 불러오지 못했습니다"; return; }
+    $("gidOn").checked = !!d.enabled;
+    $("gidTtl").value = d.ttl_sec;
+    $("gidCos").value = d.cos_th;
+    $("gidOpts").classList.toggle("hidden", !d.enabled);
+    $("gidNote").textContent = msg || (d.enabled
+      ? `켜짐 — 같은 사람은 어느 카메라든 같은 id(gN), 결과에 개인 이동 기록(여정) 포함`
+      : "꺼짐 — 카메라별 로컬 ID (기존 동작)");
+  }
+
+  async function saveGid(patch) {
+    try {
+      const r = await fetch("/api/infer/global_id", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const j = await r.json().catch(() => ({}));
+      loadGid(r.ok ? "✔ 적용됨 — 다음 세션부터 반영" : `실패 — ${j.detail || r.status}`);
+    } catch (e) { loadGid("실패 — " + e); }
+  }
+
+  function initGid() {
+    $("gidOn").onchange = () => saveGid({ enabled: $("gidOn").checked });
+    $("gidSave").onclick = () => saveGid({
+      ttl_sec: parseFloat($("gidTtl").value) || undefined,
+      cos_th: parseFloat($("gidCos").value) || undefined,
+    });
+  }
+
   // ------------------------------------------------------------ 도면(층) 관리
   function floorMsg(msg, warn) {
     const el = $("floorMsg");
@@ -862,7 +897,7 @@ Views.map = (() => {
         $(id).classList.toggle("hidden", k !== which));
       Object.entries(MS_BTN).forEach(([k, id]) =>
         $(id).classList.toggle("on", k === which));
-      if (which === "model") loadInfer();     // 열 때마다 현재 적용값 재확인
+      if (which === "model") { loadInfer(); loadGid(); }  // 열 때마다 현재 적용값 재확인
     };
     Object.keys(MS_TABS).forEach((k) => { $(MS_BTN[k]).onclick = () => msTab(k); });
     // 도면(층) 관리 — 셀렉터/추가/삭제/이름
@@ -965,6 +1000,8 @@ Views.map = (() => {
     if (g && g.cell_size_m) $("gridCellSize").value = g.cell_size_m;
     refresh();
     loadInfer();
+    initGid();
+    loadGid();
   }
 
   return { enter, leave: () => {}, refresh };

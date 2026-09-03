@@ -1185,6 +1185,7 @@ const Session = (() => {
     seg.push(`병목 혼잡 <b class="t-num">${fmt1(o.cbs || 0)}</b> ${pill(gradeOf(o.cbs || 0, "cbs"))}`);
     seg.push(`반응 개시 <b class="t-num">${o.zStarted}/${o.zTot}</b> 구역`);
     if (o.totOut != null) seg.push(`출구 통과 <b class="t-num">${o.totOut}</b>명`);
+    if (o.globalId) seg.push(`<span class="gpill g-good" title="카메라 간 동일인 연결(글로벌 ID)로 측정된 세션 — 개인 이동 기록 포함">🌐 글로벌 ID</span>`);
     return `<div class="repsum">${seg.join(" · ")}</div>`;
   }
 
@@ -1259,6 +1260,33 @@ const Session = (() => {
         }).join("");
   }
 
+  /** 개인 이동 기록(여정) 표 — 🌐 글로벌 ID 모드 전용. items = [{j: PersonJourney, floor}] */
+  function journeysTable(items, fname) {
+    const fn = fname || ((f) => f);
+    const rows = (items || []).filter((it) => it && it.j);
+    if (!rows.length) return "";
+    rows.sort((a, b) => (a.j.exit_ts == null) - (b.j.exit_ts == null) || a.j.start_ts - b.j.start_ts);
+    const body = rows.map(({ j, floor }) => {
+      const cams = (j.segments || []).map((s) => s.cam_id.replace(/^rh_/, "")).join("→");
+      const cov = Math.round((j.coverage_ratio || 0) * 100);
+      return `<tr>
+        <td><b>${j.gid}</b>${floor ? ` <i class="mtag">${fn(floor)}</i>` : ""}</td>
+        <td>${hhmmss(j.start_ts)}${j.start_zone ? ` (${j.start_zone})` : ""}</td>
+        <td>${j.exit_id ? `${j.exit_id} · ${hhmmss(j.exit_ts)}` : "—"}</td>
+        <td class="t-num">${j.total_dist_m != null ? fmt1(j.total_dist_m) + "m" : "—"}</td>
+        <td class="t-num">${fmt1(j.duration_sec)}s</td>
+        <td class="t-num">${j.avg_speed_mps != null ? fmt1(j.avg_speed_mps) : "—"}</td>
+        <td class="t-num" title="관측 시간 비율 — 낮으면 중간에 id 연결이 끊겼다는 뜻">${cov}%</td>
+        <td class="jt-cams">${cams}</td>
+      </tr>`;
+    }).join("");
+    return `<div class="repsec-h">개인 이동 기록 — 🌐 글로벌 ID 기준 ${rows.length}명
+        <span class="mtag" title="같은 사람이 카메라를 옮겨도 하나의 id 로 이어붙인 기록. 출구 통과 = 그 id 의 최초 퇴장">여정</span></div>
+      <div class="jt-wrap"><table class="drill-tbl jt">
+        <thead><tr><th>ID</th><th>시작 (구역)</th><th>출구 통과</th><th>이동거리</th><th>소요</th><th>평균 m/s</th><th>커버리지</th><th>경유 카메라</th></tr></thead>
+        <tbody>${body}</tbody></table></div>`;
+  }
+
   const REP_NOTE = `<div class="repnote">※ 등급(우수·보통·미흡)은 이해를 돕기 위한 표시 기준
     (SEI·EPFI 80/60점, CBS 0.5/10)이며 공식 판정 기준이 아닙니다. SEI·EPFI는 0~100으로 높을수록,
     CBS는 0에 가까울수록 좋고, IDR은 구역별 개시 여부와 반응 지연(초)으로 읽습니다.</div>`;
@@ -1275,7 +1303,8 @@ const Session = (() => {
     const aos = (r.alarm_origins && r.alarm_origins.length) ? r.alarm_origins : [r.alarm_origin];
     $("resTitle").textContent = `평가 세션 결과 — ${r.session_id}`;
     const ov = { sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
-                 zStarted: started, zTot: zs.length, totOut };
+                 zStarted: started, zTot: zs.length, totOut,
+                 globalId: !!r.global_id };
     $("resBody").innerHTML =
       repSummary(ov)
       + repVerdict(ov)
@@ -1292,6 +1321,7 @@ const Session = (() => {
       + repCards({ sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
                    exits: es, persons: r.person_metrics || [], zones: zs, bns: bs })
       + exitBars(es)
+      + journeysTable((r.journeys || []).map((j) => ({ j, floor: null })))
       + REP_NOTE;
     $("resultModal").classList.remove("hidden");
   }
@@ -1306,13 +1336,15 @@ const Session = (() => {
     Object.entries(b.idr_by_floor || {}).forEach(([f, zs]) =>
       (zs || []).forEach((z) => zones.push({ m: z, floor: f })));
     // 층별 결과를 층 표기와 함께 평탄화 — 해석 문장("가장 막힌 곳은 10F b2")용
-    const exits = [], bns = [], persons = [];
+    const exits = [], bns = [], persons = [], journeys = [];
     (roll.per_floor || []).forEach((pf) => {
       const r = pf.result || {};
       (r.exit_metrics || []).forEach((m) => exits.push({ m, floor: pf.floor_id }));
       (r.bottleneck_metrics || []).forEach((m) => bns.push({ m, floor: pf.floor_id }));
       (r.person_metrics || []).forEach((m) => persons.push(m));
+      (r.journeys || []).forEach((j) => journeys.push({ j, floor: pf.floor_id }));
     });
+    const anyGid = (roll.per_floor || []).some((pf) => pf.result && pf.result.global_id);
     const zStarted = zones.filter((z) => z.m.status === "started").length;
     const startTxt = Object.entries(s.floor_start_ts || {})
       .map(([f, ts]) => `${fname(f)} ${ts != null ? hhmmss(ts) : "—"}`).join(" · ") || "—";
@@ -1331,7 +1363,8 @@ const Session = (() => {
     }).join("");
     $("resTitle").textContent = `건물 훈련 결과 리포트 — ${roll.session_id}`;
     const ov = { sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
-                 zStarted, zTot: zones.length, totOut: s.total_passed };
+                 zStarted, zTot: zones.length, totOut: s.total_passed,
+                 globalId: anyGid };
     $("resBody").innerHTML =
       repSummary(ov)
       + repVerdict(ov)
@@ -1348,6 +1381,7 @@ const Session = (() => {
       + repCards({ sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
                    exits, persons, zones, bns, fname })
       + exitBars(exits, fname)
+      + journeysTable(journeys, fname)
       + `<div class="drill-perfloor">
         <div class="drill-perfloor-h">층별 상세</div>
         <table class="drill-tbl">

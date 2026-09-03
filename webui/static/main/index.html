@@ -208,6 +208,19 @@
               <div id="inferCur" class="curmodel">확인 중…</div>
               <div id="inferList" class="ellist"></div>
               <div class="grow" id="inferNote">불러오는 중…</div>
+              <!-- 글로벌 ID (v1.13) — 카메라 간 동일인 연결. off(기본)=현행 카메라별 ID -->
+              <div class="gidbox">
+                <label class="gidtoggle"><input type="checkbox" id="gidOn" />
+                  <b>🌐 글로벌 ID</b> — 카메라 간 동일인 연결 (재실자 여정 추적)</label>
+                <div class="gidopts hidden" id="gidOpts">
+                  <label title="마지막 관측 후 이 시간 안에 재등장하면 같은 사람으로 매칭">기억
+                    <input id="gidTtl" type="number" min="10" step="10" style="width:64px" /> s</label>
+                  <label title="외형 특징 코사인 유사도 매칭 임계 — 높을수록 보수적(오병합↓·유실↑)">임계
+                    <input id="gidCos" type="number" min="0.05" max="0.99" step="0.05" style="width:56px" /></label>
+                  <button class="tag-btn" id="gidSave">적용</button>
+                </div>
+                <div class="grow" id="gidNote"></div>
+              </div>
             </div>
             <div class="hcard">
               <div class="htitle">전환 시 동작</div>

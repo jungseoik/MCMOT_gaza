@@ -33,7 +33,7 @@ from system.contracts import TrackedObject
 
 logger = logging.getLogger("system.metrics.recorder")
 
-SCHEMA_VERSION = "2"         # 2: tracks에 bbox 4열 추가 (v1.12)
+SCHEMA_VERSION = "3"         # 2: bbox 4열 (v1.12) · 3: gid 열 — 확정 global_id (v1.13)
 _COMMIT_EVERY = 200          # 이만큼 on_tracks 호출마다 commit (I/O 완충)
 _BUFFER_FLUSH = 500          # 버퍼 행이 이만큼 쌓이면 executemany
 
@@ -65,7 +65,8 @@ class SessionRecorder:
               x1       REAL,
               y1       REAL,
               x2       REAL,
-              y2       REAL
+              y2       REAL,
+              gid      TEXT
             );
             """
         )
@@ -79,18 +80,23 @@ class SessionRecorder:
         self._buf: list[tuple] = []
         self._closed = False
 
-    def record(self, cam_id: str, ts: float, tracks) -> None:
-        """on_tracks 1회분 raw 트랙 버퍼링 (엔진 락 안에서 호출)."""
+    def record(self, cam_id: str, ts: float, tracks,
+               gids: list[str | None] | None = None) -> None:
+        """on_tracks 1회분 raw 트랙 버퍼링 (엔진 락 안에서 호출).
+
+        gids: tracks 와 정렬된 확정 global_id (글로벌 ID 모드, v1.13) — 리플레이가
+        갤러리 상태를 재현하지 않고도 같은 id 를 쓰게 한다(결정성). None = 미확정."""
         if self._closed:
             return
         seq = self._call_seq
         self._call_seq += 1
-        for tr in tracks:
+        for i, tr in enumerate(tracks):
             u, v = tr.foot_uv
             x1, y1, x2, y2 = tr.bbox_xyxy
             self._buf.append((seq, float(ts), cam_id, int(tr.local_track_id),
                               float(u), float(v), float(tr.conf),
-                              float(x1), float(y1), float(x2), float(y2)))
+                              float(x1), float(y1), float(x2), float(y2),
+                              (gids[i] if gids else None)))
         if len(self._buf) >= _BUFFER_FLUSH:
             self._flush()
         if seq % _COMMIT_EVERY == 0:
@@ -101,7 +107,7 @@ class SessionRecorder:
             return
         self._con.executemany(
             "INSERT INTO tracks(call_seq, ts, cam_id, local_id, u, v, conf,"
-            " x1, y1, x2, y2) VALUES(?,?,?,?,?,?,?,?,?,?,?)", self._buf)
+            " x1, y1, x2, y2, gid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", self._buf)
         self._buf.clear()
 
     def close(self) -> None:
@@ -149,17 +155,18 @@ def iter_calls(db_path: str | Path) -> Iterator[tuple[str, float, list[TrackedOb
     쓰이므로 있으면 그대로 복원하고, 없는 옛 녹화(schema 1)는 더미로 채운다."""
     con = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
     try:
-        has_bbox = any(r[1] == "x1" for r in
-                       con.execute("PRAGMA table_info(tracks)"))
+        cols = {r[1] for r in con.execute("PRAGMA table_info(tracks)")}
+        has_bbox, has_gid = "x1" in cols, "gid" in cols
         cur = con.execute(
             "SELECT call_seq, ts, cam_id, local_id, u, v, conf, "
-            + ("x1, y1, x2, y2 " if has_bbox else "0, 0, 0, 0 ")
+            + ("x1, y1, x2, y2, " if has_bbox else "0, 0, 0, 0, ")
+            + ("gid " if has_gid else "NULL ")
             + "FROM tracks ORDER BY call_seq")
         cur_seq = None
         cam_id = None
         ts = 0.0
         batch: list[TrackedObject] = []
-        for seq, row_ts, cid, lid, u, v, conf, x1, y1, x2, y2 in cur:
+        for seq, row_ts, cid, lid, u, v, conf, x1, y1, x2, y2, gid in cur:
             if cur_seq is None:
                 cur_seq = seq
             if seq != cur_seq:
@@ -170,7 +177,7 @@ def iter_calls(db_path: str | Path) -> Iterator[tuple[str, float, list[TrackedOb
             batch.append(TrackedObject(
                 cam_id=cid, local_track_id=int(lid), foot_uv=(u, v),
                 bbox_xyxy=(x1 or 0.0, y1 or 0.0, x2 or 0.0, y2 or 0.0),
-                conf=conf, ts=row_ts))
+                conf=conf, ts=row_ts, gid_hint=(gid or None)))
         if batch:
             yield cam_id, ts, batch
     finally:
