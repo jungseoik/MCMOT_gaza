@@ -291,7 +291,9 @@ class MetricsEngine:
                     rec_gids.append(gid_eff if gid_eff != okey else None)
                     continue
                 if svc is not None:              # 헐 안 관측만 특징으로 글로벌 id 확정/갱신
-                    g = svc.resolve(cam_id, tr.local_track_id, tr.emb, ts)
+                    pos_m = ((p.x * self._m_per_px, p.y * self._m_per_px)
+                             if self._m_per_px else None)   # 속도 게이트용 (m)
+                    g = svc.resolve(cam_id, tr.local_track_id, tr.emb, ts, pos_m)
                     if g is not None:
                         gid_eff = g
                 st = self._objects.get(okey)     # 운동학 상태는 항상 카메라 로컬 키 —
@@ -335,12 +337,14 @@ class MetricsEngine:
             s = self._gid = GlobalIdService(
                 ttl_sec=float(gset["ttl_sec"]), cos_th=float(gset["cos_th"]),
                 update_every=int(gset["update_every"]),
-                min_new_obs=int(gset.get("min_new_obs", 3)))
+                min_new_obs=int(gset.get("min_new_obs", 3)),
+                max_speed_mps=float(gset.get("max_speed_mps", 3.0)))
         else:
             s.ttl_sec = float(gset["ttl_sec"])
             s.cos_th = float(gset["cos_th"])
             s.update_every = int(gset["update_every"])
             s.min_new_obs = int(gset.get("min_new_obs", 3))
+            s.max_speed_mps = float(gset.get("max_speed_mps", 3.0))
         return s
 
     def _record(self, cam_id: str, ts: float, tracks, gids) -> None:

@@ -36,12 +36,17 @@ STATE_FILE = Path("data/global_id.json")     # model_zoo.STATE_FILE 과 같은 �
 DEFAULTS = {
     "enabled": False,        # 기본 off = 현행 동작 그대로 (로컬 디폴트)
     "ttl_sec": 600.0,        # 갤러리 기억 시간 — 마지막 관측 후 이 안에 재등장하면 같은 id
-    # 코사인 매칭 임계 — CJ 리허설 실측(2026-09-03, scenario_02)으로 캘리브레이션:
-    # 0.45(원안)는 오병합으로 출구 통과가 5→3명으로 증발, 0.65 는 기준값(5명) 일치.
-    # 피난 훈련은 복장이 비슷해 보수적(높게)이 안전하다 — 오병합이 유실보다 나쁨.
-    "cos_th": 0.65,
+    # 코사인 매칭 임계 — CJ 리허설 실측 캘리브레이션 이력:
+    #   0.45(원안): 오병합으로 출구 통과 5→3명 증발 / 0.65: 안전하나 조각화(여정 31)
+    #   0.55 + 속도 게이트(2026-09-04): 통과 기준값 유지(5·6명), 핑퐁 오병합 0,
+    #   여정 31→22·28→18 — 게이트가 물리적 불가능 매칭을 막아 임계를 내릴 수 있었다.
+    "cos_th": 0.55,
     "update_every": 40,      # 바인딩된 트랙의 프로토타입 갱신 주기 (관측 횟수)
     "min_new_obs": 3,        # 새 정체성 생성에 필요한 헐 안 관측 수 (유령 id 방지)
+    # 속도 게이트 — 마지막 관측 위치→새 등장 위치의 암시 속도가 이보다 크면 그 후보
+    # 기각(물리적으로 같은 사람일 수 없음). 시간 동기+동일 맵 좌표계라 공짜로 가능.
+    # 외형이 닮은 두 사람이 번갈아 한 id 로 스왑되는 핑퐁 오병합(실측: 117m/23s)을 차단.
+    "max_speed_mps": 3.0,
 }
 # '지금 활성' 판정 창 — 동시 활성 기각용. "같은 순간 두 트랙"만 기각해야 하므로
 # 분석 프레임 간격(5fps=0.2s)보다 약간 큰 값. 크게 잡으면(예: 1s) 인접 헐 사이의
@@ -93,6 +98,7 @@ def save_settings(patch: dict) -> dict:
         d["cos_th"] = min(0.99, max(0.05, float(d["cos_th"])))
         d["update_every"] = max(1, int(d["update_every"]))
         d["min_new_obs"] = max(1, int(d["min_new_obs"]))
+        d["max_speed_mps"] = max(0.5, float(d["max_speed_mps"]))
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATE_FILE.write_text(json.dumps(d, ensure_ascii=False) + "\n", encoding="utf-8")
         _cache, _cache_at = d, time.monotonic()
@@ -116,6 +122,7 @@ class _Ident:
     protos: list                  # [np.ndarray] 정규화 벡터, 최대 _MAX_PROTOS
     last_ts: float
     key: tuple                    # 마지막(=현재) 바인딩 (cam, local)
+    last_pos: tuple | None = None  # 마지막 관측 맵 위치 (m) — 속도 게이트용
     n_obs: int = 1
 
     def score(self, v: np.ndarray) -> float:
@@ -139,6 +146,7 @@ class GlobalIdService:
     cos_th: float = 0.65
     update_every: int = 40
     min_new_obs: int = 3
+    max_speed_mps: float = 3.0
     _gallery: dict[str, _Ident] = field(default_factory=dict)
     _bind: dict[tuple[str, int], str] = field(default_factory=dict)
     _pend: dict[tuple[str, int], int] = field(default_factory=dict)   # 미매칭 관측 수
@@ -154,8 +162,10 @@ class GlobalIdService:
     def lookup(self, cam: str, local: int) -> str | None:
         return self._bind.get((cam, int(local)))
 
-    def resolve(self, cam: str, local: int, emb, ts: float) -> str | None:
+    def resolve(self, cam: str, local: int, emb, ts: float,
+                pos_m: tuple | None = None) -> str | None:
         """헐 안 관측 1회 — 바인딩돼 있으면 갱신, 아니면 매칭/신규.
+        pos_m: 맵 위치(미터) — 속도 게이트용(없으면 게이트 생략).
         None = emb 무효 또는 아직 관측 수 부족(다음 프레임 재시도)."""
         key = (cam, int(local))
         gid = self._bind.get(key)
@@ -164,6 +174,8 @@ class GlobalIdService:
             if ident is not None:
                 ident.last_ts = ts
                 ident.key = key
+                if pos_m is not None:
+                    ident.last_pos = pos_m
                 ident.n_obs += 1
                 if ident.n_obs % self.update_every == 0:
                     v = _norm(emb)
@@ -179,6 +191,14 @@ class GlobalIdService:
                 continue                         # TTL 만료 — 사실상 삭제
             if ts - ident.last_ts < _ACTIVE_SEC and ident.key != key:
                 continue                         # 동시 활성 기각 — 지금 딴 트랙으로 관측 중
+            if (pos_m is not None and ident.last_pos is not None
+                    and ts > ident.last_ts):
+                # 속도 게이트 — 물리적으로 이동 불가능한 재등장이면 타인
+                dt = ts - ident.last_ts
+                d = ((pos_m[0] - ident.last_pos[0]) ** 2
+                     + (pos_m[1] - ident.last_pos[1]) ** 2) ** 0.5
+                if d / dt > self.max_speed_mps:
+                    continue
             c = ident.score(v)
             if c > best_cos:
                 best_gid, best_cos = g, c
@@ -187,6 +207,8 @@ class GlobalIdService:
             ident = self._gallery[gid]
             ident.absorb(v)
             ident.last_ts, ident.key = ts, key
+            if pos_m is not None:
+                ident.last_pos = pos_m
             ident.n_obs += 1
         else:
             # 새 정체성 — min_new_obs 회 쌓일 때까지 보류 (유령 트랙 id 남발 방지)
@@ -196,14 +218,16 @@ class GlobalIdService:
                 return None
             gid = f"g{self._next}"
             self._next += 1
-            self._gallery[gid] = _Ident(protos=[v], last_ts=ts, key=key)
+            self._gallery[gid] = _Ident(protos=[v], last_ts=ts, key=key,
+                                        last_pos=pos_m)
         self._pend.pop(key, None)
         self._bind[key] = gid
         self._purge(ts)
         return gid
 
     def touch(self, cam: str, local: int, ts: float) -> None:
-        """emb 없는 프레임(헐 밖 등)에서도 '지금 활성' 상태 유지."""
+        """emb 없는 프레임(헐 밖 등)에서도 '지금 활성' 상태 유지.
+        위치는 갱신하지 않는다 — 헐 밖 투영은 오차가 커 게이트 기준으로 부적합."""
         key = (cam, int(local))
         gid = self._bind.get(key)
         ident = self._gallery.get(gid) if gid else None

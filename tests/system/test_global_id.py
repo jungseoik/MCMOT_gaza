@@ -130,6 +130,17 @@ class TestService:
         g = s.resolve("cam1", 1, emb(1), 100.0)
         assert s.resolve("cam1", 1, emb(2), 100.2) == g
 
+    def test_speed_gate_rejects_teleport(self):
+        """속도 게이트 — 물리적으로 불가능한 재등장(50m/2s=25m/s)은 닮아도 타인.
+        외형이 비슷한 두 사람이 번갈아 한 id 로 스왑되는 핑퐁 오병합 차단."""
+        s = GlobalIdService(cos_th=0.45, min_new_obs=1, max_speed_mps=3.0)
+        s.resolve("cam1", 1, emb(1), 100.0, pos_m=(0.0, 0.0))
+        assert s.resolve("cam2", 2, emb(1), 102.0, pos_m=(50.0, 0.0)) == "g2"
+        # 같은 거리라도 시간이 충분하면(50m/60s) 정상 매칭
+        s2 = GlobalIdService(cos_th=0.45, min_new_obs=1, max_speed_mps=3.0)
+        s2.resolve("cam1", 1, emb(1), 100.0, pos_m=(0.0, 0.0))
+        assert s2.resolve("cam2", 2, emb(1), 160.0, pos_m=(50.0, 0.0)) == "g1"
+
 
 # ------------------------------------------------------------ 엔진 통합
 
