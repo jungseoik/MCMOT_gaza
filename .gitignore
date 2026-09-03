@@ -213,3 +213,4 @@ wheels/
 /core
 results/rehearsal_viz/
 !.env.example
+results/rehearsal_sessions/
