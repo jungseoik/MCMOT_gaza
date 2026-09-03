@@ -5,7 +5,8 @@
 > off(기본)면 기존 gid(`f"{cam}:{local}"`) 동작 그대로(코드 경로 미실행), on 이면
 > 같은 사람은 어느 카메라든 같은 `gN`. 전제: **카메라 매핑 헐은 서로 겹치지 않는다.**
 > - 신설 `system/identity/`(GlobalIdService): BoostTrack 트랙 EMA 임베딩 재사용(추가
->   GPU 0) · 코사인 매칭(`cos_th` 기본 0.45) · TTL(기본 600s) · **동시 활성 기각**
+>   GPU 0) · 코사인 매칭(`cos_th` 기본 0.65 — CJ 리허설 실측 캘리브레이션: 0.45 는
+>   오병합으로 출구 통과 5→3명 증발, 0.65 는 off 기준값과 일치) · TTL(기본 600s) · **동시 활성 기각**
 >   (같은 순간(0.3s) 다른 카메라에서 활성인 후보 = 배타 헐 전제상 반드시 타인 → 기각).
 >   설정 `data/global_id.json` — `GET/POST /api/infer/global_id`(세션 중 변경 409).
 > - `contracts.py`: `TrackedObject.emb`·`gid_hint`(선택) ·
