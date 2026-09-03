@@ -9,9 +9,15 @@
 같은 순간 두 카메라에 보일 수 없다. 그래서
   - 특징 수집은 헐 안 관측만(엔진이 투영 성공한 프레임에서만 resolve 호출),
   - 병합은 '핸드오버'(A헐 이탈 → 나중에 B헐 등장)에만 일어나고,
-  - 매칭 후보가 **지금 다른 카메라에서 관측 중이면 무조건 기각**한다(동시 활성
-    기각 — 전제상 같은 사람일 수 없으므로 닮은 타인이다). 오병합(두 사람=한 id)은
-    출구 debounce 를 먹어 통과 인원이 증발하는, 유실보다 나쁜 실패라 보수적으로 간다.
+  - **동시 활성 기각**: 매칭 후보가 지금(_ACTIVE_SEC 안) **다른 트랙**으로 관측
+    중이면 무조건 기각 — 다른 카메라든 같은 카메라의 옆 사람이든, 한 사람이
+    동시에 두 트랙일 수는 없다. 오병합(두 사람=한 id)은 출구 debounce 를 먹어
+    통과 인원이 증발하는, 유실보다 나쁜 실패라 보수적으로 간다.
+
+id 남발 방지(2026-09-04): 새 정체성 생성은 **min_new_obs 회 관측 후**에만 —
+1~2프레임짜리 유령 트랙이 id·여정을 만들지 않는다(기존 정체성 매칭은 즉시).
+유지력 개선: 정체성마다 **프로토타입 최대 3개**(다른 시점의 외형)를 두고
+max-cos 로 매칭 — 임계값을 낮추지 않고 시점 변화를 흡수한다.
 
 특징 벡터는 BoostTrack 이 트랙마다 이미 유지하는 EMA 임베딩(CLIP-ReID 768d /
 FastReID 2048d)을 재사용한다 — 추가 GPU 비용 0, 여기선 코사인 행렬곱만 한다.
@@ -34,12 +40,15 @@ DEFAULTS = {
     # 0.45(원안)는 오병합으로 출구 통과가 5→3명으로 증발, 0.65 는 기준값(5명) 일치.
     # 피난 훈련은 복장이 비슷해 보수적(높게)이 안전하다 — 오병합이 유실보다 나쁨.
     "cos_th": 0.65,
-    "update_every": 40,      # 바인딩된 트랙의 프로토타입(EMA) 갱신 주기 (관측 횟수)
+    "update_every": 40,      # 바인딩된 트랙의 프로토타입 갱신 주기 (관측 횟수)
+    "min_new_obs": 3,        # 새 정체성 생성에 필요한 헐 안 관측 수 (유령 id 방지)
 }
-# '지금 활성' 판정 창 — 동시 활성 기각용. "같은 순간 두 카메라"만 기각해야 하므로
+# '지금 활성' 판정 창 — 동시 활성 기각용. "같은 순간 두 트랙"만 기각해야 하므로
 # 분석 프레임 간격(5fps=0.2s)보다 약간 큰 값. 크게 잡으면(예: 1s) 인접 헐 사이의
 # 정상 핸드오버(경계에서 경계로 1초 미만 이동)까지 기각해 조각화가 생긴다.
 _ACTIVE_SEC = 0.3
+_MAX_PROTOS = 3              # 정체성당 프로토타입(시점) 수
+_PROTO_NEW_TH = 0.8          # 기존 프로토와 이보다 덜 닮으면 새 시점으로 추가
 
 _lock = threading.Lock()
 _cache: dict | None = None
@@ -83,6 +92,7 @@ def save_settings(patch: dict) -> dict:
         d["ttl_sec"] = max(1.0, float(d["ttl_sec"]))
         d["cos_th"] = min(0.99, max(0.05, float(d["cos_th"])))
         d["update_every"] = max(1, int(d["update_every"]))
+        d["min_new_obs"] = max(1, int(d["min_new_obs"]))
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATE_FILE.write_text(json.dumps(d, ensure_ascii=False) + "\n", encoding="utf-8")
         _cache, _cache_at = d, time.monotonic()
@@ -102,46 +112,63 @@ def _norm(v) -> np.ndarray | None:
 
 @dataclass
 class _Ident:
-    """정체성 1개 — 프로토타입 벡터 + 최근 관측 상태."""
-    proto: np.ndarray
+    """정체성 1개 — 시점별 프로토타입(≤3) + 최근 관측 상태."""
+    protos: list                  # [np.ndarray] 정규화 벡터, 최대 _MAX_PROTOS
     last_ts: float
-    cam: str                      # 마지막(=현재) 관측 카메라
-    n_obs: int = 1                # resolve 호출 누계 (EMA 주기용)
+    key: tuple                    # 마지막(=현재) 바인딩 (cam, local)
+    n_obs: int = 1
+
+    def score(self, v: np.ndarray) -> float:
+        return max(float(p @ v) for p in self.protos)
+
+    def absorb(self, v: np.ndarray) -> None:
+        """새 관측 흡수 — 가장 닮은 프로토를 EMA, 충분히 다르면 새 시점으로 추가."""
+        best_i = max(range(len(self.protos)), key=lambda i: float(self.protos[i] @ v))
+        if float(self.protos[best_i] @ v) < _PROTO_NEW_TH and len(self.protos) < _MAX_PROTOS:
+            self.protos.append(v)
+        else:
+            p = _norm(0.8 * self.protos[best_i] + 0.2 * v)
+            if p is not None:
+                self.protos[best_i] = p
 
 
 @dataclass
 class GlobalIdService:
     """세션/층 단위 글로벌 ID 갤러리. MetricsEngine 락 안에서만 호출된다(스레드 안전 불요)."""
     ttl_sec: float = 600.0
-    cos_th: float = 0.45
+    cos_th: float = 0.65
     update_every: int = 40
+    min_new_obs: int = 3
     _gallery: dict[str, _Ident] = field(default_factory=dict)
     _bind: dict[tuple[str, int], str] = field(default_factory=dict)
+    _pend: dict[tuple[str, int], int] = field(default_factory=dict)   # 미매칭 관측 수
     _next: int = 1
 
     def reset(self) -> None:
         """세션 시작 시 호출 — id 공간을 g1부터 새로 (리포트 가독성·세션 독립성)."""
         self._gallery.clear()
         self._bind.clear()
+        self._pend.clear()
         self._next = 1
 
     def lookup(self, cam: str, local: int) -> str | None:
-        return self._bind.get((cam, local))
+        return self._bind.get((cam, int(local)))
 
     def resolve(self, cam: str, local: int, emb, ts: float) -> str | None:
-        """헐 안 관측 1회 — 바인딩돼 있으면 갱신, 아니면 매칭/신규. None = emb 무효."""
+        """헐 안 관측 1회 — 바인딩돼 있으면 갱신, 아니면 매칭/신규.
+        None = emb 무효 또는 아직 관측 수 부족(다음 프레임 재시도)."""
         key = (cam, int(local))
         gid = self._bind.get(key)
         if gid is not None:
             ident = self._gallery.get(gid)
             if ident is not None:
                 ident.last_ts = ts
-                ident.cam = cam
+                ident.key = key
                 ident.n_obs += 1
                 if ident.n_obs % self.update_every == 0:
                     v = _norm(emb)
-                    if v is not None:            # 프로토타입 EMA 갱신 (드리프트 추종)
-                        ident.proto = _norm(0.9 * ident.proto + 0.1 * v)
+                    if v is not None:            # 프로토타입 갱신 (시점 드리프트 추종)
+                        ident.absorb(v)
             return gid
         v = _norm(emb)
         if v is None:
@@ -150,32 +177,39 @@ class GlobalIdService:
         for g, ident in self._gallery.items():
             if ts - ident.last_ts > self.ttl_sec:
                 continue                         # TTL 만료 — 사실상 삭제
-            if ts - ident.last_ts < _ACTIVE_SEC and ident.cam != cam:
-                continue                         # 동시 활성 기각 (배타 헐 전제)
-            c = float(ident.proto @ v)
+            if ts - ident.last_ts < _ACTIVE_SEC and ident.key != key:
+                continue                         # 동시 활성 기각 — 지금 딴 트랙으로 관측 중
+            c = ident.score(v)
             if c > best_cos:
                 best_gid, best_cos = g, c
         if best_gid is not None and best_cos >= self.cos_th:
-            gid = best_gid                       # 재등장 — 같은 사람
+            gid = best_gid                       # 재등장 — 같은 사람 (기존 매칭은 즉시)
             ident = self._gallery[gid]
-            ident.proto = _norm(0.7 * ident.proto + 0.3 * v)
-            ident.last_ts, ident.cam = ts, cam
+            ident.absorb(v)
+            ident.last_ts, ident.key = ts, key
             ident.n_obs += 1
         else:
-            gid = f"g{self._next}"               # 새 사람
+            # 새 정체성 — min_new_obs 회 쌓일 때까지 보류 (유령 트랙 id 남발 방지)
+            n = self._pend.get(key, 0) + 1
+            if n < self.min_new_obs:
+                self._pend[key] = n
+                return None
+            gid = f"g{self._next}"
             self._next += 1
-            self._gallery[gid] = _Ident(proto=v, last_ts=ts, cam=cam)
+            self._gallery[gid] = _Ident(protos=[v], last_ts=ts, key=key)
+        self._pend.pop(key, None)
         self._bind[key] = gid
         self._purge(ts)
         return gid
 
     def touch(self, cam: str, local: int, ts: float) -> None:
         """emb 없는 프레임(헐 밖 등)에서도 '지금 활성' 상태 유지."""
-        gid = self._bind.get((cam, int(local)))
+        key = (cam, int(local))
+        gid = self._bind.get(key)
         ident = self._gallery.get(gid) if gid else None
         if ident is not None:
             ident.last_ts = ts
-            ident.cam = cam
+            ident.key = key
 
     def _purge(self, now: float) -> None:
         if len(self._gallery) < 512:

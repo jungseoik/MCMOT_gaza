@@ -334,11 +334,13 @@ class MetricsEngine:
         if s is None:
             s = self._gid = GlobalIdService(
                 ttl_sec=float(gset["ttl_sec"]), cos_th=float(gset["cos_th"]),
-                update_every=int(gset["update_every"]))
+                update_every=int(gset["update_every"]),
+                min_new_obs=int(gset.get("min_new_obs", 3)))
         else:
             s.ttl_sec = float(gset["ttl_sec"])
             s.cos_th = float(gset["cos_th"])
             s.update_every = int(gset["update_every"])
+            s.min_new_obs = int(gset.get("min_new_obs", 3))
         return s
 
     def _record(self, cam_id: str, ts: float, tracks, gids) -> None:

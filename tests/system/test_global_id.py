@@ -86,23 +86,36 @@ def test_settings_roundtrip(tmp_path, monkeypatch):
 class TestService:
     def test_handover_same_person(self):
         """A헐 이탈 → 잠시 뒤 B헐 등장, 같은 특징 → 같은 id (핸드오버)."""
-        s = GlobalIdService(cos_th=0.45)
-        assert s.resolve("cam1", 1, emb(1), 100.0) == "g1"
-        assert s.resolve("cam2", 7, emb(1), 102.0) == "g1"
+        s = GlobalIdService(cos_th=0.45, min_new_obs=3)
+        assert s.resolve("cam1", 1, emb(1), 100.0) is None   # 관측 1·2회 — 생성 보류
+        assert s.resolve("cam1", 1, emb(1), 100.2) is None
+        assert s.resolve("cam1", 1, emb(1), 100.4) == "g1"   # 3회째 생성
+        assert s.resolve("cam2", 7, emb(1), 102.0) == "g1"   # 기존 정체성 매칭은 즉시
+
+    def test_ghost_track_gets_no_id(self):
+        """1~2프레임 유령 트랙 — id·여정을 만들지 않는다 (id 남발 방지)."""
+        s = GlobalIdService(min_new_obs=3)
+        assert s.resolve("cam1", 5, emb(3), 100.0) is None
+        assert s.resolve("cam1", 5, emb(3), 100.2) is None
+        assert s.lookup("cam1", 5) is None
 
     def test_reject_when_active_elsewhere(self):
-        """동시 활성 기각 — 배타 헐이라 같은 순간 두 카메라 = 반드시 타인."""
-        s = GlobalIdService(cos_th=0.45)
+        """동시 활성 기각 — 한 사람이 같은 순간 두 트랙일 수 없다(배타 헐).
+        다른 카메라뿐 아니라 같은 카메라의 옆 사람(동시 트랙)도 기각된다."""
+        s = GlobalIdService(cos_th=0.45, min_new_obs=1)
         s.resolve("cam1", 1, emb(1), 100.0)
-        assert s.resolve("cam2", 9, emb(1), 100.2) == "g2"
+        s.resolve("cam1", 1, emb(1), 100.2)                  # 계속 관측 중(활성)
+        assert s.resolve("cam2", 9, emb(1), 100.3) == "g2"   # 타 카메라 동시 → 기각
+        s.resolve("cam1", 1, emb(1), 100.4)
+        assert s.resolve("cam1", 2, emb(1), 100.5) == "g3"   # 같은 카메라 옆 트랙도 기각
 
     def test_ttl_expiry_new_id(self):
-        s = GlobalIdService(ttl_sec=10.0, cos_th=0.45)
+        s = GlobalIdService(ttl_sec=10.0, cos_th=0.45, min_new_obs=1)
         s.resolve("cam1", 1, emb(1), 100.0)
         assert s.resolve("cam2", 2, emb(1), 200.0) == "g2"   # 기억 시간 지남
 
     def test_dissimilar_new_id(self):
-        s = GlobalIdService(cos_th=0.45)
+        s = GlobalIdService(cos_th=0.45, min_new_obs=1)
         s.resolve("cam1", 1, emb(1), 100.0)
         assert s.resolve("cam2", 2, emb(2), 105.0) == "g2"   # 특징 다름
 
@@ -113,7 +126,7 @@ class TestService:
 
     def test_binding_sticky(self):
         """한 번 묶인 (cam,local) 은 특징이 흔들려도 같은 id 유지."""
-        s = GlobalIdService(cos_th=0.45)
+        s = GlobalIdService(cos_th=0.45, min_new_obs=1)
         g = s.resolve("cam1", 1, emb(1), 100.0)
         assert s.resolve("cam1", 1, emb(2), 100.2) == g
 
@@ -174,8 +187,8 @@ class TestEngineGlobal:
         assert j.start_zone == "z1"                          # 어디서 시작했나
         assert j.exit_id == "e1" and j.exit_ts is not None   # 어느 출구로 나갔나
         assert [s.cam_id for s in j.segments] == ["cam1", "cam2"]
-        # 거리 = cam1 3.8m + 갭 브리지 0.4m + cam2 4.3m = 8.5m
-        assert j.total_dist_m == pytest.approx(8.5, abs=0.3)
+        # 거리 = cam1 3.4m(바인딩이 3관측째 x=140 부터) + 갭 브리지 0.4m + cam2 4.3m
+        assert j.total_dist_m == pytest.approx(8.1, abs=0.3)
         assert 0.0 < j.coverage_ratio < 1.0                  # 갭이 커버리지에 드러남
         assert j.avg_speed_mps is not None and j.avg_speed_mps > 0
         # 출구 debounce 는 글로벌 키 — 같은 사람은 1명만
@@ -187,10 +200,12 @@ class TestEngineGlobal:
         eng = _eng()
         eng.start_session(origin_xy=(500.0, 500.0), t_alarm=100.0)
         e = emb(6)
-        eng.on_tracks("cam1", 100.0, [tr("cam1", 3, 480.0, 500.0, 100.0, e=e)])
-        # 0.5초 뒤 cam2 에서 등장 (갭 40px=0.4m → 브리지 평균 0.8m/s 는 정상이나,
-        # 이력이 섞였다면 window 양끝이 카메라를 넘어 스파이크로 보였을 것)
-        eng.on_tracks("cam2", 100.5, [tr("cam2", 11, 520.0, 500.0, 100.5, e=e)])
+        for i, x in enumerate((440.0, 460.0, 480.0)):        # 3관측 — g1 생성
+            eng.on_tracks("cam1", 100.0 + 0.2 * i,
+                          [tr("cam1", 3, x, 500.0, 100.0 + 0.2 * i, e=e)])
+        # 0.5초 뒤 cam2 에서 등장 — 기존 정체성 매칭은 1프레임에 즉시.
+        # (이력이 섞였다면 window 양끝이 카메라를 넘어 속도 스파이크로 보였을 것)
+        eng.on_tracks("cam2", 100.9, [tr("cam2", 11, 520.0, 500.0, 100.9, e=e)])
         ms = eng.snapshot()
         cam2_obj = next(o for o in ms.objects if o.cam_id == "cam2")
         assert cam2_obj.gid == "g1"

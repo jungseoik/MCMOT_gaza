@@ -50,7 +50,11 @@ Views.live = (() => {
       // T_n-1 ← T_n, T_n ← 새 수신
       prevObjects = {...currObjects};
       currObjects = {};
-      (newState.objects || []).forEach((o) => { currObjects[o.gid] = {x: o.x, y: o.y}; });
+      // 보간 키는 카메라 로컬 키 — gid 는 글로벌 ID 모드에서 승격(cam:id→gN)되며
+      // 바뀔 수 있어, gid 로 키를 잡으면 그 순간 보간이 끊겨 점이 튀거나 깜빡인다.
+      (newState.objects || []).forEach((o) => {
+        currObjects[`${o.cam_id}:${o.id}`] = { x: o.x, y: o.y };
+      });
 
       state = newState;
       setConn(`LIVE · ${renderFps()}fps 보간`, "ok");
@@ -175,7 +179,7 @@ Views.live = (() => {
     const alpha = Math.min(1, interpDuration > 0
       ? (performance.now() - interpStart) / interpDuration : 1);
     state.objects.forEach((o) => {
-      const prev = prevObjects[o.gid];
+      const prev = prevObjects[`${o.cam_id}:${o.id}`];
       const rx = prev ? prev.x + (o.x - prev.x) * alpha : o.x;
       const ry = prev ? prev.y + (o.y - prev.y) * alpha : o.y;
       const x = TX(rx), y = TY(ry);

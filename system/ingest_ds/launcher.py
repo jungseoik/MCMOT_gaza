@@ -222,6 +222,10 @@ class WorkerContainer:
             "--batch-size", str(batch_size),
             *(extra_args or []),
         ]
+        # 같은 이름의 잔존 컨테이너 정리 — --rm 이어도 데몬 재시작·강제종료 후
+        # 이름이 남아 "name already in use" 로 서버 부팅이 죽는 사례가 있었다
+        # (2026-09-04 실측). 없는 이름이면 조용히 실패하므로 무조건 시도해도 안전.
+        self._docker("rm", "-f", self.name, check=False)
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"[{self.name}] docker run 실패: {r.stderr.strip()}")
