@@ -106,7 +106,9 @@ def save_settings(patch: dict) -> dict:
 
 
 def _norm(v) -> np.ndarray | None:
-    """임베딩 검증·정규화 — 더미(use_embedding off 의 ones((1,)))는 None."""
+    """임베딩 검증·정규화 — None(DS 경로 등 emb 미제공)·더미(ones((1,)))는 None."""
+    if v is None:
+        return None                              # np.asarray(None)은 TypeError — 크래시 방지
     a = np.asarray(v, dtype=np.float32).reshape(-1)
     if a.size < 16:
         return None
