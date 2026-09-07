@@ -49,6 +49,7 @@ cython_debug/
 # Cython debug symbols
 data/backups/
 data/infer_profile.json
+data/global_id.json
 data/output/
 # Data & output
 data/sites/
@@ -214,3 +215,5 @@ wheels/
 results/rehearsal_viz/
 !.env.example
 results/rehearsal_sessions/
+tracking*.zip
+data/seed_versions/auto-*/
