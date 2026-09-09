@@ -36,6 +36,12 @@ Views.cams = (() => {
     return (t && t.min_conf != null) ? t.min_conf : 0.35;  // 스키마 기본과 통일
   }
 
+  // 사이트 전역 최소 박스 높이(카메라 px). 0 = 끔. 카메라가 오버라이드 안 하면 이 값 상속.
+  function siteMinBoxH() {
+    const t = App.site && App.site.thresholds;
+    return (t && t.min_box_h != null) ? t.min_box_h : 0;   // 스키마 기본과 통일
+  }
+
   // H 행렬 적용 (9원소 row-major, 카메라→맵)
   function applyH(H9, x, y) {
     const w = H9[6]*x + H9[7]*y + H9[8];
@@ -177,6 +183,9 @@ Views.cams = (() => {
       div.className = "camrow" + (c.cam_id === sel ? " sel" : "");
       const overridden = c.min_conf != null;
       const effVal = overridden ? c.min_conf : def;   // 입력창에 실효값을 채워둠(A안)
+      const defH = siteMinBoxH();                     // 최소 박스 높이 — conf 와 같은 상속 규칙
+      const ovH = c.min_box_h != null;
+      const effH = ovH ? c.min_box_h : defH;
       // 층은 그룹 소제목에 이미 있으므로 행마다 배지로 또 달지 않는다.
       // 이름이 먼저다 — 예전엔 배지 4개가 폭을 다 먹어 이름이 "1..."로 눌렸다.
       // 층·활성 배지는 아랫줄로 내리고, 활성은 체크박스와 중복이라 배지를 뺐다.
@@ -198,6 +207,12 @@ Views.cams = (() => {
           <input type="number" class="cfin" min="0" max="1" step="0.05" value="${effVal}" placeholder="기본 ${def}" />
           <button class="tag-btn cfap" title="이 카메라에 적용">적용</button>
           <span class="cfst">${overridden ? "오버라이드" : "기본값 상속"}</span>
+        </div>
+        <div class="r3">
+          <span class="cflab" title="이 높이(카메라 px)보다 낮은 박스는 표출·지표에서 버린다. 정지 가구 오탐(책상 다리+캐스터 등) 제거용 — 신뢰도로 자르면 실제 관측까지 깎이지만 높이는 안 겹친다. 0 = 끔. 값을 지우고 적용하면 기본값(${defH}) 상속.">최소 박스 높이</span>
+          <input type="number" class="bhin" min="0" step="10" value="${effH}" placeholder="기본 ${defH}" />
+          <button class="tag-btn bhap" title="이 카메라에 적용">적용</button>
+          <span class="cfst">${ovH ? "오버라이드" : "기본값 상속"}${defH || ovH ? "" : " · 끔"}</span>
         </div>`}`;
       // 행 선택 (입력/버튼 클릭은 제외)
       div.onclick = (e) => {
@@ -232,6 +247,16 @@ Views.cams = (() => {
       const cfin = div.querySelector(".cfin");
       if (cfin) cfin.onkeydown = (e) => {
         if (e.key === "Enter") { e.preventDefault(); applyMinConf(c.cam_id, e.target); }
+      };
+      // 최소 박스 높이 인라인 적용 — conf 와 같은 규칙(비우면 상속).
+      const bhap = div.querySelector(".bhap");
+      if (bhap) bhap.onclick = (e) => {
+        e.stopPropagation();
+        applyMinBoxH(c.cam_id, div.querySelector(".bhin"));
+      };
+      const bhin = div.querySelector(".bhin");
+      if (bhin) bhin.onkeydown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); applyMinBoxH(c.cam_id, e.target); }
       };
       box.appendChild(div);
     });
@@ -289,6 +314,28 @@ Views.cams = (() => {
       renderList();
     } catch (err) {
       alert("검출 신뢰도 저장 실패: " + err.message);
+      inputEl.disabled = false;
+    }
+  }
+
+  // 카메라 행 인라인 최소 박스 높이 적용 (버튼/Enter로만 저장).
+  async function applyMinBoxH(camId, inputEl) {
+    const raw = inputEl.value.trim();
+    let val = null;                                    // 비움 = 사이트값 상속
+    if (raw !== "") {
+      val = Number(raw);
+      if (!isFinite(val) || val < 0) {
+        alert("최소 박스 높이는 0 이상 px 이거나 비워야 합니다 (비우면 기본값 상속, 0이면 끔).");
+        return;
+      }
+    }
+    inputEl.disabled = true;
+    try {
+      await API.updateCamera(camId, { min_box_h: val });
+      await App.reloadCameras();
+      renderList();
+    } catch (err) {
+      alert("최소 박스 높이 저장 실패: " + err.message);
       inputEl.disabled = false;
     }
   }

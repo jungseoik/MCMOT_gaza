@@ -237,6 +237,12 @@ class Thresholds(BaseModel):
                            # 이탈거리 d 는 중심선까지의 부호 없는 최단거리라 좌/우 구분이 없다.
                            # "허용 통로 폭"으로 읽으면 좌우 합 2×d_allow (예: 1.0 → 폭 2m).
     min_conf: float = 0.35  # 표출·지표 최소 검출 신뢰도 — 저신뢰 오탐(예: 의자)이
+    min_box_h: float = Field(default=0.0, ge=0)  # 표출·지표 최소 박스 **높이**(카메라 px).
+                           # 0 = 끔. 정지 가구 오탐(책상 다리+캐스터 등)은 신뢰도가 애매해
+                           # min_conf 로 자르면 실제 관측까지 깎이는데, 높이는 겹치지 않는다
+                           # (AI hub 3F 실측: 오탐 44~50px vs 실제 최소 126px, 4대 전부).
+                           # 원근이 카메라마다 달라 카메라별 오버라이드가 정본
+                           # (CameraConfig.min_box_h) — 여기 값은 그 상속 기본.
     q_design: float = Field(default=60.0, gt=0)  # SEI: 단위 유효폭당 설계 통과기준 [인/분/m]
     exit_extrap_m: float = Field(default=2.0, ge=0)  # 출입구 통과 판정에 헐 밖 관측을 쓰는 반경(m).
                                            # 문은 대개 헐 경계 밖이라 일반 규칙(헐 밖 폐기)이면
@@ -399,3 +405,9 @@ class CameraConfig(BaseModel):
                                            # 신뢰도 오버라이드. None이면 사이트
                                            # Thresholds.min_conf 상속, 값 지정 시
                                            # 그 카메라만 오버라이드 (하위호환 기본 None).
+    min_box_h: float | None = Field(default=None, ge=0)  # 카메라별 최소 박스 높이(px)
+                                           # 오버라이드. None이면 사이트
+                                           # Thresholds.min_box_h 상속, 0 이면 끔.
+                                           # **px 는 원근을 타므로 카메라별이 정본** —
+                                           # 사람이 크게 찍히는 실내(120)와 먼 복도(0~60)가
+                                           # 다르다. 값 정하는 법은 ② 안내문 참조.

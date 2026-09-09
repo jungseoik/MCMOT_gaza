@@ -197,6 +197,13 @@
                   <label>min_conf <input id="thC" type="number" step="0.05" min="0" max="1" /></label>
                   <div class="th-pdesc">최소 검출 신뢰도 — 이 값 미만 객체는 추적·지표 모두 제외 (정지 오탐 차단)</div>
                 </div>
+                <div class="th-param">
+                  <label>min_box_h <input id="thBh" type="number" step="10" min="0" /> px</label>
+                  <div class="th-pdesc">최소 박스 높이 — 이보다 낮은 박스는 표출·지표에서 제외. <b>0 = 끔.</b>
+                    책상 다리·의자 같은 정지 가구 오탐은 신뢰도가 애매해 min_conf로 자르면 실제 관측까지
+                    깎이지만, 높이는 사람과 겹치지 않는다. <b>원근을 타므로 카메라마다 다르다</b> —
+                    여기 값은 기본이고, ② 카메라별 [최소 박스 높이]로 덮어쓴다</div>
+                </div>
               </div>
             </div>
           </div>

@@ -166,6 +166,8 @@ class MetricsEngine:
             # 매 프레임 dict lookup, fallback은 on_tracks에서 site.thresholds로.
             # reload마다 갱신되므로 site.thresholds.min_conf 변경도 즉시 반영.
             self._cam_min_conf = {cam.cam_id: cam.min_conf for cam in cameras}
+            # 카메라별 min_box_h 오버라이드 — min_conf 와 같은 상속 규칙.
+            self._cam_min_box_h = {cam.cam_id: cam.min_box_h for cam in cameras}
 
             # 구역/병목 — polygon + 면적(m²)은 설정 시점에 1회 계산
             self._zones = [
@@ -244,6 +246,9 @@ class MetricsEngine:
             cam_override = self._cam_min_conf.get(cam_id)
             min_conf = (cam_override if cam_override is not None
                         else self._site.thresholds.min_conf)
+            box_override = self._cam_min_box_h.get(cam_id)
+            min_box_h = (box_override if box_override is not None
+                         else self._site.thresholds.min_box_h)
             # ---- 글로벌 ID (v1.13) — 토글 on(서비스) 또는 리플레이 힌트가 있을 때만
             # 동작. off 면 svc=None 이고 gid_eff 는 언제나 로컬 합성키(현행과 동일).
             gset = _gid_settings()
@@ -259,6 +264,12 @@ class MetricsEngine:
                     gid_eff = svc.lookup(cam_id, tr.local_track_id) or okey
                 if tr.conf < min_conf:           # 저신뢰 관측 — 오탐 연명 트랙 차단
                     rec_gids.append(None)        # (BYTE 저신뢰 연관 유령 객체 방지)
+                    continue
+                # 너무 작은 박스 — 정지 가구 오탐(책상 다리+캐스터 등). 신뢰도가
+                # 0.6 언저리라 min_conf 로 자르면 실제 관측까지 깎이는데, 높이는
+                # 실제 사람과 겹치지 않는다(실측 44~50px vs 최소 126px).
+                if min_box_h > 0 and (tr.bbox_xyxy[3] - tr.bbox_xyxy[1]) < min_box_h:
+                    rec_gids.append(None)
                     continue
                 # 화면 통과선 — **투영 전에** 관측한다. 문 앞은 대응점 헐 밖이라
                 # 아래 ROI 게이트에서 버려지는데, 카운트는 거기서도 살아야 한다.
