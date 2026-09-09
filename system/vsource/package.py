@@ -127,19 +127,33 @@ def scenario_cam_ids(pkg: dict, scen_id: str) -> set[str]:
     return set()
 
 
+SNAPSHOT_SAMPLES = 4          # segments 없는 시나리오에서 균등 샘플할 장면 수
+
+
 def snapshot_times(pkg: dict, scen_id: str, cam: str) -> list[float]:
-    """이 시나리오 영상에서 카메라 `cam` 이 **실제로 찍힌** 구간의 대표 시각(초) 목록.
+    """이 시나리오 영상에서 카메라 `cam` 의 매핑 스냅샷 후보 시각(초) 목록.
 
     전체 연속 시나리오(scenario_15_full)는 카메라가 없는 구간이 검정이라 0번 프레임으로
     매핑을 못 한다(엣지). 매니페스트 `segments` 가 있으면 그 카메라가 등장하는 구간마다
-    시작+1s 를 돌려주고, 없으면 [0.0].
+    시작+1s 를 돌려준다.
+
+    segments 가 없는 개별 시나리오(검정 구간 없음)도 후보를 **여러 개** 준다 — 0초
+    프레임에 사람이 없거나 바닥이 가려 대응점을 못 찍는 경우가 있어, ② 의
+    [🔄 다른 장면] 으로 장면을 골라야 한다. 영상 길이를 균등 분할해 SNAPSHOT_SAMPLES 개.
     """
     for s in pkg.get("scenarios", []):
         if s.get("id") != scen_id:
             continue
         segs = s.get("segments") or []
         ts = [float(g["start_sec"]) + 1.0 for g in segs if cam in (g.get("cams") or [])]
-        return ts or [0.0]
+        if ts:
+            return ts
+        dur = next((float(st.get("duration_sec") or 0)
+                    for st in s.get("streams", []) if st.get("cam") == cam), 0.0)
+        if dur <= 2.0:                      # 너무 짧으면 나눌 게 없다
+            return [0.0]
+        # 0 · 1/4 · 2/4 · 3/4 지점 (끝은 페이드·빈 화면이 잦아 뺀다)
+        return [round(dur * i / SNAPSHOT_SAMPLES, 1) for i in range(SNAPSHOT_SAMPLES)]
     return [0.0]
 
 
@@ -190,6 +204,11 @@ def virtual_cameras(pkg: dict, rtsp_host: str = RTSP_HOST_DEFAULT) -> list[Camer
                 floor_id=floor_id_of(c.get("floor"), pkg),
                 mapping=c.get("mapping") or None,
                 valid_roi=c.get("valid_roi") or None,
+                # 오탐 게이트도 패키지 정본 — rh_* 는 ② 인라인 편집이 409 로 막혀
+                # 있어서(설정은 rehearsal.json 소관) 여기서 안 넘기면 조정할 길이 없다.
+                # 미지정이면 None → 사이트 Thresholds 상속 (기존 동작).
+                min_conf=c.get("min_conf"),
+                min_box_h=c.get("min_box_h"),
             ))
         except Exception:
             logger.exception("[vsource] 패키지 카메라 무시: %s/%s", pkg.get("id"), cam)

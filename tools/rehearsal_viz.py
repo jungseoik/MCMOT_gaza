@@ -79,6 +79,11 @@ def _draw_floor_elements(canvas: np.ndarray, fl: dict, s: float) -> None:
         a, b = e["line"]
         cv2.line(canvas, P(a), P(b), (255, 80, 80), 3, cv2.LINE_AA)
         cv2.putText(canvas, e["id"], P(a), FONT, 0.5, (255, 80, 80), 1, cv2.LINE_AA)
+        if e.get("inside"):        # 안쪽 = 건물 안. 여기서 밖으로 넘어가면 "나감(out)"
+            ia = P(e["inside"])
+            mid = ((P(a)[0] + P(b)[0]) // 2, (P(a)[1] + P(b)[1]) // 2)
+            cv2.arrowedLine(canvas, ia, mid, (255, 80, 80), 1, cv2.LINE_AA, tipLength=0.25)
+            cv2.putText(canvas, "in", (ia[0] + 4, ia[1] + 4), FONT, 0.4, (255, 80, 80), 1, cv2.LINE_AA)
     for r in fl.get("routes", []):
         pts = np.array([P(p) for p in r["points"]], np.int32)
         cv2.polylines(canvas, [pts], False, (200, 200, 90), 1, cv2.LINE_AA)
@@ -115,6 +120,46 @@ def main() -> int:
     site_floor = json.loads((Path(a.site_dir) / "site.json").read_text(encoding="utf-8"))
     exits = [e for f in site_floor["floors"] if f["id"] == floor_id for e in f.get("exits", [])]
 
+    # ---- 출입구 통과 카운터 (라이브와 같은 판정) ----
+    # 엔진(system/metrics/engine.py)이 쓰는 DirectionalLine 을 그대로 재사용한다 —
+    # 데드밴드·선분 제한·방향(inside) 규칙이 어긋나면 영상과 지표가 안 맞는다.
+    from system.spatial.geometry import DirectionalLine, ZoneGate   # noqa: E402
+    mpp = fl["map"].get("m_per_px")
+    th = site_floor.get("thresholds") or {}
+    extrap_px = (float(th.get("exit_extrap_m", 2.0)) / mpp) if mpp else 0.0
+    margin_px = (0.1 / mpp) if mpp else 2.0        # 엔진 기본 margin_m=0.1
+    gates = []
+    for e in exits:
+        cc = e.get("count_cam")
+        # 엔진과 같은 분기(engine.py `_rebuild_exits`): count_cam + 화면기하가 있으면
+        # **그 카메라 화면 좌표에서만** 센다. 카운터는 출입구당 하나뿐이라
+        # 맵과 화면이 동시에 세는 일은 없다 — 여기서도 둘 중 하나만 만든다.
+        in_cam = bool(cc) and (bool(e.get("cam_line") and e.get("cam_inside"))
+                               or bool(e.get("cam_zone") and len(e["cam_zone"]) >= 3))
+        g = {"id": e["id"], "name": e.get("name") or e["id"],
+             "out": 0, "in": 0, "seen_out": set(), "seen_in": set(),
+             "cam": None, "kind": None, "gate": None}
+        if in_cam:
+            # count_cam 은 런타임 id(rh_cam09) — 매니페스트 cam 명(cam09)으로 되돌린다
+            g["cam"] = cc[len(vpkg.CAM_PREFIX):] if cc.startswith(vpkg.CAM_PREFIX) else cc
+            if e.get("cam_zone") and len(e["cam_zone"]) >= 3:      # 영역이 선보다 우선
+                g["kind"] = "cam_zone"
+                g["gate"] = ZoneGate(e["cam_zone"], dwell=int(e.get("cam_zone_dwell", 2)))
+            else:
+                g["kind"] = "cam_line"
+                g["gate"] = DirectionalLine(e["cam_line"], e["cam_inside"],
+                                            margin_px=margin_px * 0.5)   # 화면 px 는 스케일이 작다
+        elif e.get("line") and e.get("inside"):
+            g["kind"] = "map_line"
+            g["gate"] = DirectionalLine(e["line"], e["inside"], margin_px=margin_px)
+        else:
+            continue
+        gates.append(g)
+    for g in gates:
+        print(f"[viz] 출입구 {g['id']}({g['name']}) — {g['kind']}"
+              + (f" @ {g['cam']}" if g["cam"] else "")
+              + (f" · 헐 밖 외삽 {extrap_px:.0f}px" if g["kind"] == "map_line" and extrap_px else ""))
+
     # ---- 카메라별 상태 ----
     from src.inference_gpu import BoostTrackGPUInference
     from tracker.boost_track import BoostTrack
@@ -124,6 +169,14 @@ def main() -> int:
     model = BoostTrackGPUInference(profile=a.profile)
     print(f"[viz] 프로파일: {a.profile}"
           + (f" → {getattr(model, 'profile_id', getattr(model, 'profile', ''))}" if a.profile == "auto" else ""))
+    # 트래커 전역 설정을 **라이브 AnalyzerThread 와 동일하게** 맞춘다.
+    # 안 맞추면 default_settings 의 use_ecc=True 가 살아서 (a) 고정 CCTV 인데
+    # 카메라 모션 보정이 돌고 (b) findTransformECC 가 수렴 실패로 죽는다(실측).
+    # 라이브는 analyzer.py:88 에서 use_ecc=False 로 끈다 — 같은 값을 쓴다.
+    from default_settings import GeneralSettings          # noqa: E402
+    GeneralSettings.values["use_ecc"] = False             # 고정 CCTV — ECC 비활성
+    GeneralSettings.values["dataset"] = "mot20"
+    GeneralSettings.values["test_dataset"] = True
     cams = []
     for i, st in enumerate(streams):
         cap = cv2.VideoCapture(str(root / st["file"]))
@@ -137,7 +190,10 @@ def main() -> int:
                      if e.get("count_cam") == vpkg.cam_id_of(st["cam"]) and (e.get("cam_line") or e.get("cam_zone"))]
         cams.append({"cam": st["cam"], "cap": cap, "stride": max(1, int(round(src_fps / a.fps))),
                      "src_fps": src_fps, "H": H, "roi": roi, "has_roi": bool(c.get("valid_roi")),
-                     "tracker": BoostTrack(), "color": CAM_COLORS[i % len(CAM_COLORS)],
+                     # 라이브와 동형 — 카메라별 독립 ID 공간 + max_age = 분석fps × 2s
+                     "tracker": BoostTrack(per_instance_ids=True,
+                                           max_age=max(1, int(round(a.fps * 2)))),
+                     "color": CAM_COLORS[i % len(CAM_COLORS)],
                      "n_in": 0, "n_out": 0, "cam_lines": cam_lines,
                      "w": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), "h": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))})
 
@@ -145,7 +201,9 @@ def main() -> int:
     cw = a.cell
     ch = int(round(cw * 9 / 16))
     ncell = len(cams) + 1                         # + 정보 셀
-    cols = 2
+    # 열 수는 채널 수에 맞춘다 — 12채널을 2열로 쌓으면 7행(세로 1,890px)이 돼
+    # 맵이 그만큼 늘어나고 셀은 우표만 해진다. 대략 정사각에 가깝게.
+    cols = 2 if ncell <= 6 else (3 if ncell <= 12 else 4)
     rows = (ncell + cols - 1) // cols
     left_w, left_h = cw * cols, ch * rows
     ms = left_h / map_img.shape[0]
@@ -160,6 +218,7 @@ def main() -> int:
     _draw_floor_elements(map_base, fl, ms)
     trails: dict[str, deque] = defaultdict(lambda: deque(maxlen=int(2 * a.fps)))
     last_seen: dict[str, int] = {}
+    exit_events: list[tuple] = []          # (t초, exit_id, gid, "in"/"out")
     print(f"[viz] 출력 {W}x{Hh} @ {a.fps:.0f}fps → {out_path}")
 
     k = 0
@@ -187,12 +246,19 @@ def main() -> int:
             vis = frame.copy()
             # 유효영역(헐/ROI)
             cv2.polylines(vis, [c["roi"].astype(np.int32)], True, (255, 220, 0), 2, cv2.LINE_AA)
-            for eid, line, zone in c["cam_lines"]:  # 화면 통과선
-                if line:
+            for eid, line, zone in c["cam_lines"]:  # 화면 통과선·영역 (이 카메라가 집계 담당)
+                g_ = next((g for g in gates if g["id"] == eid), None)
+                lab = f"exit {eid}" + (f"  OUT {g_['out']}" if g_ else "")
+                if zone:                            # 영역이 선보다 우선 (엔진과 동일)
+                    zp = np.array(zone, np.int32)
+                    ov = vis.copy()
+                    cv2.fillPoly(ov, [zp], (0, 140, 255))
+                    cv2.addWeighted(ov, 0.22, vis, 0.78, 0, vis)   # 반투명 — 사람이 가려지면 안 된다
+                    cv2.polylines(vis, [zp], True, (0, 140, 255), 3, cv2.LINE_AA)
+                    cv2.putText(vis, lab, tuple(zp[0]), FONT, 0.8, (0, 140, 255), 2, cv2.LINE_AA)
+                elif line:
                     cv2.line(vis, tuple(map(int, line[0])), tuple(map(int, line[1])), (0, 140, 255), 3, cv2.LINE_AA)
-                    cv2.putText(vis, f"exit {eid}", tuple(map(int, line[0])), FONT, 0.8, (0, 140, 255), 2, cv2.LINE_AA)
-                if zone:
-                    cv2.polylines(vis, [np.array(zone, np.int32)], True, (0, 140, 255), 2, cv2.LINE_AA)
+                    cv2.putText(vis, lab, tuple(map(int, line[0])), FONT, 0.8, (0, 140, 255), 2, cv2.LINE_AA)
             for t in targets:
                 x1, y1, x2, y2, tid = int(t[0]), int(t[1]), int(t[2]), int(t[3]), int(t[4])
                 col = _color_id(tid)
@@ -203,6 +269,29 @@ def main() -> int:
                 p = cv2.perspectiveTransform(np.array([[[fu, fv]]], np.float64), c["H"])[0, 0]
                 mx, my = int(round(p[0] * ms)), int(round(p[1] * ms))
                 gid = f"{c['cam']}:{tid}"
+                # ---- 출입구 통과 ----
+                # 화면 게이트(cam_zone/cam_line)는 **투영 전에**, 담당 카메라에서만.
+                # 문 앞은 대응점 헐 밖이라 아래 ROI 게이트에서 버려지는데 카운트는
+                # 거기서도 살아야 한다 (engine.py 와 같은 순서).
+                # 맵 선(map_line)은 투영 후 판정하되, 헐 밖도 exit_extrap_m 안이면
+                # 쓴다 — 문은 대개 헐 경계 밖이다 (ADR 09 §18).
+                hull_d = cv2.pointPolygonTest(c["roi"].astype(np.float32), (fu, fv), True)
+                for g in gates:
+                    if g["kind"] == "map_line":
+                        if not (inside or (extrap_px and -hull_d <= extrap_px)):
+                            continue
+                        ev = g["gate"].observe(gid, (float(p[0]), float(p[1])))
+                    else:
+                        if g["cam"] != c["cam"]:
+                            continue
+                        ev = (g["gate"].observe(gid, (fu, fv), (x1, y1, x2, y2))
+                              if g["kind"] == "cam_zone" else g["gate"].observe(gid, (fu, fv)))
+                    if ev == "out" and gid not in g["seen_out"]:
+                        g["seen_out"].add(gid); g["out"] += 1
+                        exit_events.append((k / a.fps, g["id"], gid, "out"))
+                    elif ev == "in" and gid not in g["seen_in"]:
+                        g["seen_in"].add(gid); g["in"] += 1
+                        exit_events.append((k / a.fps, g["id"], gid, "in"))
                 if inside:
                     c["n_in"] += 1
                     cv2.circle(vis, (int(fu), int(fv)), 7, (60, 220, 60), -1, cv2.LINE_AA)
@@ -233,14 +322,24 @@ def main() -> int:
         # 정보 셀
         info = np.full((ch, cw, 3), 28, np.uint8)
         lines = [f"t = {k / a.fps:5.1f}s   analyze {a.fps:.0f}fps   floor {floor_id}",
-                 f"alive IDs {alive}   trail 2s", ""]
+                 f"alive IDs {alive}   trail 2s"]
+        # 출입구가 이 셀의 결론이다 — 카메라별 통계보다 위에 둔다(아래가 잘려도 남게).
+        if gates:
+            lines += ["", f"EXITS  total OUT {sum(g['out'] for g in gates)}   (same rule as live)"]
+            for g in gates:
+                lines.append(f"  {g['id']:8s} OUT {g['out']:3d}   IN {g['in']:3d}")
+        lines.append("")
         for c in cams:
             tot = c["n_in"] + c["n_out"]
             pct = (100.0 * c["n_out"] / tot) if tot else 0.0
             lines.append(f"{c['cam']:6s} in {c['n_in']:4d}  out {c['n_out']:4d}  dropped {pct:4.0f}%")
         lines += ["", "green dot = projected (kept)", "red X = outside hull -> DROPPED live"]
+        # 채널이 12대면 줄이 25개까지 간다 — 셀 높이에 맞춰 줄간격·글자를 줄인다
+        # (고정 22px 면 아래가 잘려 legend·출구표가 안 보인다).
+        lh = max(11, min(22, (ch - 12) // max(1, len(lines))))
+        fs = max(0.32, min(0.5, lh / 44.0))
         for i, s in enumerate(lines):
-            cv2.putText(info, s, (10, 24 + i * 22), FONT, 0.5, (220, 220, 220), 1, cv2.LINE_AA)
+            cv2.putText(info, s, (10, lh + i * lh), FONT, fs, (220, 220, 220), 1, cv2.LINE_AA)
         panels.append(info)
         while len(panels) < ncell:
             panels.append(np.zeros((ch, cw, 3), np.uint8))
@@ -251,8 +350,20 @@ def main() -> int:
                 row.append(np.zeros((ch, cw, 3), np.uint8))
             grid_rows.append(np.hstack(row))
         left = np.vstack(grid_rows)
+        # 출구 라벨 옆 실시간 누계 — 어느 문으로 몇 명이 나갔는지가 훈련의 핵심 그림
+        for g in gates:
+            e = next(x for x in exits if x["id"] == g["id"])
+            if not e.get("line"):
+                continue
+            lp = (int(round(e["line"][0][0] * ms)), int(round(e["line"][0][1] * ms)))
+            # 화면 게이트로 세는 문은 어느 카메라가 세는지 함께 — 맵 선은 장식이 된다
+            tag = f"@{g['cam']}" if g["cam"] else ""
+            cv2.putText(map_c, f"{g['id']} OUT {g['out']} {tag}", (lp[0] + 6, lp[1] - 8),
+                        FONT, 0.6, (255, 80, 80), 2, cv2.LINE_AA)
         cv2.rectangle(map_c, (0, 0), (map_w, 26), (30, 30, 30), -1)
-        cv2.putText(map_c, f"2D MAP {floor_id}  t={k / a.fps:.1f}s  alive {alive}", (8, 18), FONT, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(map_c, f"2D MAP {floor_id}  t={k / a.fps:.1f}s  alive {alive}"
+                    + (f"  |  EXIT OUT {sum(g['out'] for g in gates)}" if gates else ""),
+                    (8, 18), FONT, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
         writer.write(np.hstack([left, map_c]))
         k += 1
         if k % 25 == 0:
@@ -266,6 +377,12 @@ def main() -> int:
     if r.returncode == 0:
         Path(tmp).replace(out_path)
     print(f"[viz] 완료 {k}프레임({k / a.fps:.0f}s) → {out_path}")
+    if gates:
+        print(f"   출입구 통과 — 총 OUT {sum(g['out'] for g in gates)} · IN {sum(g['in'] for g in gates)}")
+        for g in gates:
+            print(f"     {g['id']}({g['name']}): out {g['out']} · in {g['in']}")
+        for t, eid, gid, ev in exit_events:
+            print(f"       t={t:5.1f}s  {eid}  {gid}  {ev}")
     for c in cams:
         tot = c["n_in"] + c["n_out"]
         print(f"   {c['cam']}: 관측 {tot} · 헐 안 {c['n_in']} · 헐 밖(라이브 폐기) {c['n_out']} ({(100 * c['n_out'] / tot) if tot else 0:.0f}%)"
