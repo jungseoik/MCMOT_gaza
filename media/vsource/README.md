@@ -48,6 +48,6 @@ media/vsource/
 | 폴더 | 내용 | 출처 |
 |---|---|---|
 | `cj/rehearsal/` | **CJ제일제당센터 리허설 영상** — 시나리오 14개(`scenario_01`~`14`), 각 4~5캠(cam1~14 조합). 1080p·30fps·h264 baseline·23~33초. `grid_preview/` 14개 별도 | **정본** HF `backseollgi/MCMOT/media/vsource/cj/rehearsal/` (`fetch_assets.sh --rehearsal`) · 원본(High 프로파일) 출처 HF dataset `PIA-SPACE/C-lab/03_scenarios.7z.001` |
-| `aihub/rehearsal/` | **AI Hub 리허설 영상** — 예정 | — |
+| `aihub/rehearsal/` | **AI지원센터(AI hub) 리허설 영상** — 시나리오 9개(`scenario_01`~`09`), 각 5~12캠(액션캠 18대, cam01~18 도면 위치 번호). 1080p·30fps·h264 baseline·32~70초. `grid_preview/` 9개 별도 | **정본** HF `backseollgi/MCMOT/media/vsource/aihub/rehearsal/` (`fetch_assets.sh --rehearsal`) · 원본(High 프로파일) 출처 HF dataset `PIA-SPACE/C-lab-AIHub/03_scenarios` |
 
 상세는 각 폴더의 `README.md` 참조.
