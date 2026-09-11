@@ -723,3 +723,15 @@ body.rehearsing .rhbanner{ display:block; }
   text-align:left; font-family:inherit; }
 .jt .jt-cams{ font-size:10.5px; color:var(--text-3); max-width:220px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ④ 리플레이 — IDR 구역별 표 (임계값 재계산 전/후 비교) */
+.rpidrtbl{ display:flex; flex-direction:column; gap:2px; }
+.rpidr-hd, .rpidr-row{ display:grid; grid-template-columns:1fr 84px 72px 44px; gap:4px;
+  align-items:center; padding:3px 6px; font-size:10.5px; }
+.rpidr-hd{ color:var(--txt-3); border-bottom:1px solid var(--stroke-1); }
+.rpidr-row{ background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-sm); }
+.rpidr-row.det{ border-color:rgba(63,185,80,.45); }
+.rpidr-row .rpz{ overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.rpidr-row .t-num{ text-align:right; font-family:var(--font-num); }
+.rpd{ font-size:9px; margin-left:3px; }
+.rpd.up{ color:#3FB950; } .rpd.dn{ color:#e5484d; }

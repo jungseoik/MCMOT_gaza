@@ -35,7 +35,11 @@ Views.replay = (() => {
   const renderFps = () => Math.min(30, Math.max(1, parseInt($("rpFps").value) || 20));
 
   const TH_KEYS = [["rpV","v_th"],["rpA","a_th"],["rpR","r_th"],["rpDt","dt_hold"],
-                   ["rpD","d_allow"],["rpQd","q_design"],["rpMc","min_conf"]];
+                   ["rpD","d_allow"],["rpQd","q_design"],["rpMc","min_conf"],
+                   ["rpMbh","min_box_h"]];
+
+  // 재계산 전 원본 구역지표 — 전/후 비교용 (zone_id -> {idr, delay, ratio})
+  let idrBase = null;
 
   // ------------------------------------------------------------ 세션 목록
   async function loadList() {
@@ -200,18 +204,68 @@ Views.replay = (() => {
     $("rpEpfi").textContent = fmtVal(b.epfi_avg, 1);
     $("rpCbs").textContent = fmtVal(b.cbs_total, 1);
     let zSt = 0, zTot = 0;
-    Object.values(b.idr_by_floor || {}).forEach((zs) =>
-      (zs || []).forEach((z) => { zTot++; if (z.status === "started") zSt++; }));
-    $("rpIdr").textContent = `${zSt}/${zTot}`;
+    const allZ = [];
+    Object.entries(b.idr_by_floor || {}).forEach(([fid, zs]) =>
+      (zs || []).forEach((z) => {
+        zTot++; if (z.status === "started") zSt++;
+        allZ.push({ ...z, floor_id: fid });
+      }));
+    // 카드는 **평균 IDR(m/s)** — 지금까지 개시 구역 수만 보여 값 변화를 못 봤다
+    const vs = allZ.map((z) => z.idr).filter((v) => v != null);
+    $("rpIdr").textContent = vs.length
+      ? (vs.reduce((s, v) => s + v, 0) / vs.length).toFixed(2) : "—";
+    $("rpIdrProg").textContent = `${zSt}/${zTot}`;
+    renderIdrTbl(allZ, dr.alarm_ts, tag);
     $("rpBase").innerHTML = (dr.per_floor || []).map((pf) => {
       const r = pf.result || {};
       return `<div class="rpbase-row"><b>${floorName(pf.floor_id)}</b> · SEI ${fmtVal(r.sei,0)} · EPFI ${fmtVal(r.epfi_avg,0)} · CBS ${fmtVal(r.cbs_total,1)}</div>`;
     }).join("");
   }
 
+  /** IDR 구역별 표 — 값(m/s)·개시지연·참여비율. 재계산이면 원본 대비 변화를 함께 보여준다.
+   *  임계값 조정(v_th·a_th·r_th·dt_hold)은 전부 IDR 판정용인데, 지금까지 이 화면엔
+   *  개시 구역 수만 있어 "값이 어떻게 바뀌었나"를 볼 수 없었다. */
+  function renderIdrTbl(zs, alarmTs, tag) {
+    const wrap = $("rpIdrTbl");
+    if (!wrap) return;
+    const isRecalc = tag === "재계산값";
+    if (!isRecalc) idrBase = Object.fromEntries(zs.map((z) => [z.zone_id, z]));
+    $("rpIdrTag").textContent = isRecalc ? "원본 대비 변화" : "원본 저장값";
+    if (!zs.length) { wrap.innerHTML = `<div class="mnote">구역 없음 — ① 맵 설정에서 추가</div>`; return; }
+    const f2 = (v) => v == null ? "—" : v.toFixed(2);
+    const f1 = (v) => v == null ? "—" : v.toFixed(1);
+    const delta = (now, was, d) => {
+      if (!isRecalc || was == null && now == null) return "";
+      if (was == null && now != null) return `<span class="rpd up">신규</span>`;
+      if (was != null && now == null) return `<span class="rpd dn">소실</span>`;
+      const diff = now - was;
+      if (Math.abs(diff) < 1e-9) return "";
+      return `<span class="rpd ${diff > 0 ? "up" : "dn"}">${diff > 0 ? "▲" : "▼"}${Math.abs(diff).toFixed(d)}</span>`;
+    };
+    wrap.innerHTML = `<div class="rpidr-hd"><span>구역</span><span>IDR m/s</span><span>개시</span><span>참여</span></div>`
+      + zs.map((z) => {
+      const b = (idrBase && idrBase[z.zone_id]) || {};
+      const det = z.status === "started";
+      const rel = (z.evacuation_start_at != null && alarmTs != null)
+        ? z.evacuation_start_at - alarmTs : z.response_delay_sec;
+      const relB = (b.evacuation_start_at != null && alarmTs != null)
+        ? b.evacuation_start_at - alarmTs : b.response_delay_sec;
+      return `<div class="rpidr-row ${det ? "det" : ""}" title="${z.floor_id} · ${z.zone_id}${
+          z.graph_distance != null ? ` · 경보원까지 ${z.graph_distance.toFixed(1)}m` : ""}">
+        <span class="rpz">${z.zone_id}</span>
+        <span class="t-num">${f2(z.idr)}${delta(z.idr, b.idr, 2)}</span>
+        <span class="t-num">${rel == null ? "—" : f1(rel) + "s"}${delta(rel, relB, 1)}</span>
+        <span class="t-num">${z.participant_ratio != null ? Math.round(z.participant_ratio * 100) + "%" : "—"}</span>
+      </div>`;
+    }).join("");
+  }
+
   function clearMetrics() {
     ["rpSei","rpEpfi","rpCbs","rpIdr"].forEach((id) => { $(id).textContent = "—"; });
     $("rpBase").innerHTML = "";
+    if ($("rpIdrTbl")) $("rpIdrTbl").innerHTML = "";
+    if ($("rpIdrProg")) $("rpIdrProg").textContent = "—";
+    idrBase = null;
     $("rpTag").textContent = mode === "drill" ? "건물값" : "현재값";
     $("rpBnTag").textContent = "";
     if (bnPanel) bnPanel.clear("이력을 선택하면 병목별 CBS가 표시됩니다");
@@ -433,7 +487,11 @@ Views.replay = (() => {
     $("rpCbs").textContent = (res.cbs_total || 0).toFixed(1);
     const zm = res.zone_metrics || [];
     const started = zm.filter((z) => z.status === "started").length;
-    $("rpIdr").textContent = `${started}/${zm.length}`;
+    const vs = zm.map((z) => z.idr).filter((v) => v != null);
+    $("rpIdr").textContent = vs.length
+      ? (vs.reduce((s, v) => s + v, 0) / vs.length).toFixed(2) : "—";
+    $("rpIdrProg").textContent = `${started}/${zm.length}`;
+    renderIdrTbl(zm.map((z) => ({ ...z, floor_id: res.floor_id || "" })), res.alarm_ts, tag);
     if (baseRow) {
       $("rpBase").innerHTML = `<span class="rpbase">원본 저장값 — SEI ${fmtVal(baseRow.sei,0)} · `
         + `EPFI ${fmtVal(baseRow.epfi_avg,0)} · CBS ${fmtVal(baseRow.cbs_total,1)}</span>`;
@@ -447,6 +505,8 @@ Views.replay = (() => {
     $("rpEpfi").textContent = s.epfi_avg == null ? "—" : Math.round(s.epfi_avg);
     $("rpCbs").textContent = (s.cbs_total || 0).toFixed(1);
     $("rpIdr").textContent = "—";
+    if ($("rpIdrProg")) $("rpIdrProg").textContent = "—";
+    if ($("rpIdrTbl")) $("rpIdrTbl").innerHTML = `<div class="mnote">녹화 이전 세션 — 구역별 IDR 없음</div>`;
     $("rpBase").innerHTML = "";
     $("rpBnTag").textContent = "";
     if (bnPanel) bnPanel.clear("녹화 이전 세션 — 병목별 CBS 없음");
