@@ -1689,6 +1689,13 @@ def vsource_scenarios():
         if ps and ps[0] in pkgs:
             s["package_id"], s["package_name"] = ps[0], pkgs[ps[0]]["name"]
             s["source"] = vpkg.source(vpkg.get(ps[0]) or {})
+            # 촬영 결손 — 영상이 없는 도면 카메라. 지표가 구조적으로 안 나오는
+            # 원인이라 목록에서 바로 보여야 한다(매니페스트 scenarios[].data_gaps).
+            raw = next((x for x in (vpkg.get(ps[0]) or {}).get("scenarios", [])
+                        if x.get("id") == ps[1]), None)
+            if raw:
+                s["data_gaps"] = list(raw.get("data_gaps") or [])
+                s["scenario_note"] = raw.get("note") or ""
     return {"scenarios": scenarios,
             "packages": list(pkgs.values()),
             "active_package": rt._rh_pkg_id,

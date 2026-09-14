@@ -129,6 +129,11 @@ var VSource = (() => {
       + (p ? `<div class="fact wide"><span>패키지</span><b title="${p.root}">📦 ${p.name} · 카메라 ${p.cameras_mapped}/${p.cameras_total} 매핑</b></div>` : "");
     // 경고는 **종류별 한 줄**로 — 채널마다 같은 문장을 5번 반복하면 읽을 수 없다.
     const lines = [];
+    // 촬영 결손은 설정으로 고칠 수 없다 — 영상이 없다. 가장 먼저 보여준다.
+    if ((s.data_gaps || []).length) {
+      lines.push(`<span class="err">✕ 촬영 결손 — ${s.data_gaps.join("·")} 영상 없음`
+        + `${s.scenario_note ? ` <i>${s.scenario_note}</i>` : ""}</span>`);
+    }
     if (!s.ok) lines.push(`<span class="err">✕ ${s.problems.join(" / ")}</span>`);
     if (p && (p.prep_fails || []).length) lines.push(`<span class="err">✕ 사전검증 실패 ${p.prep_fails.length}건 — ${p.prep_fails[0]}</span>`);
     if (p) for (const f of p.floors) {
@@ -139,6 +144,8 @@ var VSource = (() => {
     const unmapped = n - mapped - noCam;
     if (unmapped > 0) lines.push(`<span class="warn">⚠ 매핑 없는 채널 ${unmapped} — 대기 송출을 켜고 채널을 클릭해 매핑하세요</span>`);
     if (!lines.length && n) lines.push(`<span class="ok">✓ 바로 송출·표출 가능</span>`);
+    else if ((s.data_gaps || []).length && n && s.ok)
+      lines.push(`<span class="warn">⚠ 송출은 되지만 결손 구간의 지표는 산출되지 않는다</span>`);
     if (wn) wn.innerHTML = lines.join("<br>");
   }
 

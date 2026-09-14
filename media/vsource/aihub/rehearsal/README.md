@@ -6,6 +6,10 @@ AI지원센터에서 **액션캠 18대**로 2026-09-04 촬영한 **피난 시나
 [ADR 09](../../../../docs/architecture/09-리허설-패키지-구조.md), 매니페스트는 `rehearsal.json`.
 그리드 미리보기(`grid_scenario_NN.mp4`)는 **송출 금지** — `grid_preview/` 에 분리 보관.
 
+> ⚠ **시나리오 09 는 `cam09`·`cam11` 이 배터리 소진으로 미촬영**이다. cam09 가 출구1(`exit-0`)의
+> `count_cam` 이라 출구 통과 카운트가 구조적으로 0 이 나온다 — **지표 검증 대상에서 제외**한다.
+> 시나리오별 실측은 [docs/출구-통과-측정결과.md](docs/출구-통과-측정결과.md).
+
 - **보관(정본)**: HF `backseollgi/MCMOT/media/vsource/aihub/rehearsal/` — 레포 경로 미러,
   `bash tools/fetch_assets.sh --rehearsal`
 - 원본 출처: HuggingFace dataset **`PIA-SPACE/C-lab-AIHub`** → `03_scenarios/`

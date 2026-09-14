@@ -101,6 +101,10 @@ def scenario_def(pkg: dict, scen_id: str) -> dict | None:
                 "id": f"{SCENARIO_PREFIX}{pkg['id']}:{scen_id}",
                 "name": f"{pkg.get('name', pkg['id'])} — {s.get('name', scen_id)}",
                 "note": pkg.get("note", ""),
+                # 촬영 결손(배터리 소진 등으로 영상이 없는 도면 카메라).
+                # 지표가 구조적으로 안 나오는 원인이라 UI 에 그대로 띄운다.
+                "data_gaps": list(s.get("data_gaps") or []),
+                "scenario_note": s.get("note", ""),
                 "cycle_sec": s.get("cycle_sec") or 0,
                 "streams": [{"path": stream_path(pkg, st["cam"]),
                              "file": str(root / st["file"])}
