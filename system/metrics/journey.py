@@ -226,8 +226,8 @@ def _exit_times(db_path: Path, persons: list, meta: dict) -> None:
     owner = {}                                    # (cam, local) -> person_id
     for pp in persons:
         for s in pp["segments"]:
-            cam, lid = s["key"].rsplit(":", 1)
-            owner[(cam, int(lid))] = pp["person_id"]
+            cam, lid = s["key"].split("#", 1)[0].rsplit(":", 1)
+            owner.setdefault((cam, int(lid)), pp["person_id"])
 
     H = {}
     for c in meta.get("cameras", []):
@@ -360,8 +360,22 @@ def _in_roi(roi, u: float, v: float) -> bool:
                                 (float(u), float(v)), False) >= 0
 
 
-def _tracklets(db_path: Path, min_obs: int = MIN_OBS) -> tuple[list[dict], dict]:
-    """트랙렛 집계 — (cam_id, local_id) 별 시각·맵위치(m)·임베딩."""
+def _tracklets(db_path: Path, min_obs: int = MIN_OBS,
+               splits: "dict[str, list[float]] | None" = None,
+               embs_override: "dict | None" = None) -> tuple[list[dict], dict]:
+    """트랙렛 집계 — (cam_id, local_id) 별 시각·맵위치(m)·임베딩.
+
+    splits: {"cam:local": [끊을 시각, ...]} — 트랙렛 **안쪽**에서 박스가 다른
+    사람에게 옮겨간 지점. 그 시각을 경계로 하위 트랙렛(key 에 #1, #2 …)으로
+    나눈다. 녹화 임베딩은 트래커의 EMA(α=0.9)라 뒤바뀜이 뭉개져 여기서는
+    찾을 수 없다 — 분할점은 저장된 crop 을 ReID 로 다시 임베딩해서 구한다
+    (tools/tracklet_purity.py).
+
+    embs_override: {(cam, local): [(ts, vec), ...]} — 녹화 EMA 대신 쓸 임베딩.
+    EMA 는 트랙 내부의 뒤바뀜을 뭉개므로, 쪼개기만 하고 특징을 그대로 두면
+    나뉜 조각이 **다시 같은 사람으로 묶인다**(실측: cam09:15 두 조각이 눈으로
+    명백히 다른 사람인데 둘 다 p5 로). 분할과 특징 교체는 같이 가야 한다.
+    """
     meta = recorder.load_meta(db_path)
     mpp = float(((meta.get("site_view") or {}).get("map") or {}).get("m_per_px") or 0) or None
     H, ROI = {}, {}
@@ -372,7 +386,7 @@ def _tracklets(db_path: Path, min_obs: int = MIN_OBS) -> tuple[list[dict], dict]
         r = _roi_of(c)
         if r is not None:
             ROI[c["cam_id"]] = r
-    embs = recorder.load_track_embs(db_path)
+    embs = embs_override if embs_override is not None else recorder.load_track_embs(db_path)
 
     con = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
     try:
@@ -400,26 +414,43 @@ def _tracklets(db_path: Path, min_obs: int = MIN_OBS) -> tuple[list[dict], dict]
         E = embs.get((cam, lid)) or []
         if not E:
             continue                                 # 임베딩 없으면 묶을 근거가 없다
-        P = np.stack([v for _, v in E])              # (k, dim) 정규화 완료
-        h = H.get(cam)
-        def xy(u, v):
-            if h is None or mpp is None:
-                return None
-            p = h @ np.array([u, v, 1.0])
-            if abs(p[2]) < 1e-9:
-                return None
-            return (float(p[0] / p[2]) * mpp, float(p[1] / p[2]) * mpp)
-        # 궤적(맵 m) — 사람 단위 이동거리·속도·가속도 산출용. 투영 실패는 버린다.
-        path = [(ts, q) for ts, u, v in obs if (q := xy(u, v)) is not None]
-        out.append({
-            "key": f"{cam}:{lid}", "cam": cam, "local_id": lid,
-            "t0": obs[0][0], "t1": obs[-1][0], "n": len(obs),
-            "p0": xy(obs[0][1], obs[0][2]), "p1": xy(obs[-1][1], obs[-1][2]),
-            "path": path,
-            "protos": P,
-        })
+        base = f"{cam}:{lid}"
+        cuts = sorted((splits or {}).get(base) or [])
+        for part, (lo, hi) in enumerate(_ranges(cuts), 1):
+            po = [o for o in obs if lo <= o[0] < hi]
+            pe = [e for e in E if lo <= e[0] < hi]
+            if len(po) < min_obs or not pe:
+                continue
+            _emit(out, base if not cuts else f"{base}#{part}", cam, lid, po,
+                  np.stack([v for _, v in pe]), h=H.get(cam), mpp=mpp)
     out.sort(key=lambda d: (d["t0"], d["cam"]))
     return out, meta
+
+
+def _ranges(cuts: list) -> list:
+    """분할 시각 목록 → [(시작, 끝), ...] 반열린 구간. 빈 목록이면 전체 1개."""
+    edges = [-math.inf, *cuts, math.inf]
+    return [(edges[i], edges[i + 1]) for i in range(len(edges) - 1)]
+
+
+def _emit(out: list, key: str, cam: str, lid: int, obs: list, P, h, mpp) -> None:
+    """트랙렛 1개(또는 그 하위 조각)를 결과 목록에 담는다."""
+    def xy(u, v):
+        if h is None or mpp is None:
+            return None
+        p = h @ np.array([u, v, 1.0])
+        if abs(p[2]) < 1e-9:
+            return None
+        return (float(p[0] / p[2]) * mpp, float(p[1] / p[2]) * mpp)
+    # 궤적(맵 m) — 사람 단위 이동거리·속도·가속도 산출용. 투영 실패는 버린다.
+    path = [(ts, q) for ts, u, v in obs if (q := xy(u, v)) is not None]
+    out.append({
+        "key": key, "cam": cam, "local_id": lid,
+        "t0": obs[0][0], "t1": obs[-1][0], "n": len(obs),
+        "p0": xy(obs[0][1], obs[0][2]), "p1": xy(obs[-1][1], obs[-1][2]),
+        "path": path,
+        "protos": P,
+    })
 
 
 def _cannot_link(a: dict, b: dict, pr: "Params | None" = None) -> bool:
@@ -476,7 +507,8 @@ def _project2d(P: np.ndarray) -> np.ndarray:
 
 
 def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
-                viz: bool = False, **kw) -> dict:
+                viz: bool = False, splits: "dict | None" = None,
+                embs_override: "dict | None" = None, **kw) -> dict:
     """트랙렛 → 사람 클러스터. UI/API 가 그대로 쓰는 dict 를 돌려준다.
 
     params 로 한 번에 주거나 키워드로 낱개 지정(cos_th=…, rerank=…)해도 된다.
@@ -484,7 +516,8 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
     pr = params if isinstance(params, Params) else Params.from_dict(
         {**(params or {}), **{k: v for k, v in kw.items() if v is not None}})
     db_path = Path(db_path)
-    tls, meta = _tracklets(db_path, min_obs=pr.min_obs)
+    tls, meta = _tracklets(db_path, min_obs=pr.min_obs, splits=splits,
+                           embs_override=embs_override)
     if not tls:
         return {"ok": False, "reason": "임베딩이 없는 녹화(schema ≤3)이거나 트랙렛 없음",
                 "tracklets": 0, "persons": []}
