@@ -44,7 +44,7 @@ DEFAULT_PROFILE = "yolox_fastreid"
 
 @dataclass(frozen=True)
 class DetectorSpec:
-    kind: str                       # "yolox" | "yolo26" | "rfdetr"
+    kind: str                       # "yolox" | "yolo26" | "rfdetr" | "rtdetrv4"
     engine: str                     # 파일명 (디렉토리는 호스트/DS로 결정)
     ds_engine: str = ""             # 배치(DS) 엔진 파일명 — 비면 engine 사용
     input_size: tuple[int, int] = (896, 1600)   # 전처리 letterbox 크기 (H, W)
@@ -122,6 +122,28 @@ PROFILES: dict[str, Profile] = {
         note="PIASPACE 사람전용 파인튜닝 YOLO26-L v6.3 + CLIP-ReID ViT-B/16. "
              "검출 지연이 YOLOX 대비 크게 낮다(실측 6.2ms vs 28.9ms @720p).",
     ),
+    "rtdetrv4_clipreid": Profile(
+        id="rtdetrv4_clipreid",
+        label="실험 (RT-DETRv4-S CrowdHuman + CLIP-ReID)",
+        detector=DetectorSpec(
+            kind="rtdetrv4",
+            engine="rtdetrv4s_person_fp16.engine",
+            ds_engine="rtdetrv4s_person_fp16.engine",
+            input_size=(640, 640),
+            # 후처리(sigmoid·topk·cxcywh→xyxy)가 **모델 안**에 있다 — 여기 conf 는
+            # 그 결과에 거는 필터일 뿐이다(YOLO26 과 같은 자리의 값).
+            conf_thresh=0.4,
+            onnx="rtdetrv4s_person.onnx",
+        ),
+        reid=ReIDSpec(kind="clipreid", engine="clipreid_person_fp16_b256.engine",
+                      crop=(128, 256), dim=768, onnx="clipreid_person.onnx"),
+        tracker=TrackerSpec(det_thresh=0.6),
+        note="RT-DETRv4-S + C-RADIOv4 distillation, CrowdHuman visible-person "
+             "파인튜닝(2클래스 person/head — person 만 사용). 같은 CrowdHuman 표에서 "
+             "mAP 84.10% 로 YOLO26-S(81.63%)·RF-DETR-S(80.06%) 상회. C-RADIO 교사는 "
+             "학습 전용이라 추론 비용은 순정 RT-DETRv4-S(640, T4 3.66ms, 10M) 와 같다. "
+             "엔진 빌드: tools/setup_rtdetrv4.sh",
+    ),
 }
 
 
@@ -193,6 +215,9 @@ def build_detector(p: Profile, ds: bool = False):
     if p.detector.kind == "rfdetr":
         from src.rfdetr_trt import RFDETRTRTDetector
         return RFDETRTRTDetector(path, conf_thresh=p.detector.conf_thresh)
+    if p.detector.kind == "rtdetrv4":
+        from src.rtdetrv4_trt import RTDETRv4TRTDetector
+        return RTDETRv4TRTDetector(path, conf_thresh=p.detector.conf_thresh)
     raise ValueError(f"미지원 검출기 종류: {p.detector.kind}")
 
 

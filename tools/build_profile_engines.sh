@@ -30,6 +30,12 @@ build() {   # build <실행앞단> <출력디렉토리>
   $RUN tools/build_trt_engine.py --onnx "$ONNX_DIR/clipreid_person.onnx" \
     --engine "$OUT/clipreid_person_fp16_b256.engine" --input images \
     --min 1x3x256x128 --opt 32x3x256x128 --max 256x3x256x128 --fp16
+  # RT-DETRv4 는 입력이 2개(images·orig_target_sizes)라 전용 빌더를 쓴다.
+  # ONNX 가 없으면(= 프로파일 미사용) 조용히 건너뛴다.
+  if [ -f "$ONNX_DIR/rtdetrv4s_person.onnx" ]; then
+    $RUN tools/build_rtdetrv4_engine.py --onnx "$ONNX_DIR/rtdetrv4s_person.onnx" \
+      --engine "$OUT/rtdetrv4s_person_fp16.engine" --fp16
+  fi
 }
 
 echo "== 호스트 엔진 (external/weights/trt) =="
