@@ -728,7 +728,7 @@ body.rehearsing .rhbanner{ display:block; }
 .rpidrtbl{ display:flex; flex-direction:column; gap:2px; }
 .rpidr-hd, .rpidr-row{ display:grid; grid-template-columns:1fr 84px 72px 44px; gap:4px;
   align-items:center; padding:3px 6px; font-size:10.5px; }
-.rpidr-hd{ color:var(--txt-3); border-bottom:1px solid var(--stroke-1); }
+.rpidr-hd{ color:var(--text-3); border-bottom:1px solid var(--stroke-1); }
 .rpidr-row{ background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-sm); }
 .rpidr-row.det{ border-color:rgba(63,185,80,.45); }
 .rpidr-row .rpz{ overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
@@ -738,25 +738,35 @@ body.rehearsing .rhbanner{ display:block; }
 
 /* ④ 리플레이 — 객체별 지표 표 (재계산된 person_metrics) */
 .rpobjtbl{ display:flex; flex-direction:column; gap:2px; max-height:260px; overflow-y:auto; }
-.rpobj-hd, .rpobj-row{ display:grid; grid-template-columns:1fr 46px 52px 46px 76px; gap:4px;
-  align-items:center; padding:3px 6px; font-size:10.5px; }
-.rpobj-hd{ color:var(--txt-3); border-bottom:1px solid var(--stroke-1); }
+.rpobj-hd, .rpobj-row{ display:grid; grid-template-columns:1fr 34px 34px 34px 40px; gap:5px;
+  align-items:center; padding:4px 8px; font-size:10.5px; }
+.rpobj-hd{ color:var(--text-3); font-size:10px; border-bottom:1px solid var(--stroke-1); }
+/* 재구성 전/후 토글 — 제목줄이 아니라 그 아래 한 줄을 통째로 쓴다 */
+.rpobjbar{ display:flex; align-items:center; gap:4px; margin:4px 0 5px; }
+.rpobjbar .seg{ flex:1; }
+.rpobjbar .seg .tag-btn{ flex:1; }
 .rpobj-row{ background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-sm); cursor:pointer; }
 .rpobj-row:hover{ background:var(--bg-4); }
 .rpobj-row.sel{ border-color:var(--pia-cyan); background:rgba(48,220,251,.08); }
 .rpobj-row .oid{ overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-family:var(--font-num); }
 .rpobj-row .t-num{ text-align:right; font-family:var(--font-num); }
-.rpobj-row .ort{ overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--txt-3); }
+.rpobj-row .ort{ overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--text-3); }
 .rpobj-row.frag{ opacity:.5; }
-.rpobj-row.frag i{ font-size:9px; color:var(--txt-3); font-style:normal; }
-.rpseg{ padding:2px 6px 4px 18px; font-size:9.5px; color:var(--txt-3);
+.rpobj-row.frag i{ font-size:9px; color:var(--text-3); font-style:normal; }
+.rpobjseg{ padding:2px 6px 4px 18px; font-size:9.5px; color:var(--text-3);
   font-family:var(--font-num); display:flex; flex-direction:column; gap:1px; }
-.rpseg i{ font-style:normal; opacity:.7; margin-left:4px; }
+.rpobjseg i{ font-style:normal; opacity:.7; margin-left:4px; }
 
 /* 리포트 — 여정 재구성 시각화 */
 .jyviz{ display:flex; gap:14px; flex-wrap:wrap; margin:10px 0 6px; }
 .jyv{ background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-sm); padding:8px; }
-.jyv-h{ font-size:11px; color:var(--txt-2); margin-bottom:6px; }
-.jyv-h i{ font-style:normal; color:var(--txt-3); font-size:10px; margin-left:6px; }
+.jyv-h{ font-size:11px; color:var(--text-2); margin-bottom:6px; }
+.jyv-h i{ font-style:normal; color:var(--text-3); font-size:10px; margin-left:6px; }
 .jyv canvas{ display:block; background:var(--bg-1); border-radius:4px; }
 .jydot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+
+/* 리포트 탭 — [종합](기존 리포트) / [ID 재구성](ReID 후처리 진단) */
+.reptabs{ display:flex; gap:6px; margin-bottom:14px;
+  border-bottom:1px solid var(--stroke-1); padding-bottom:10px; }
+.reptabs .tag-btn i{ font-style:normal; opacity:.75; margin-left:4px; font-size:10px; }
+.reppane.hidden{ display:none; }

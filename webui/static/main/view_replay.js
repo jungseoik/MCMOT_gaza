@@ -242,6 +242,7 @@ Views.replay = (() => {
     if (!wrap) return;
     objRows = pms || [];
     $("rpObjCnt").textContent = objRows.length;
+    objBtnLabels();
     if (!objRows.length) {
       wrap.innerHTML = `<div class="mnote">객체 지표 없음</div>`;
       return;
@@ -287,13 +288,14 @@ Views.replay = (() => {
     }
     const ps = journey.persons || [];
     $("rpObjCnt").textContent = journey.n_persons;
+    objBtnLabels();
     $("rpJyNote").textContent =
       `트랙렛 ${journey.tracklets} → 사람 ${journey.n_persons} + 파편 ${journey.n_fragments}`
       + ` · 문턱 ${journey.cos_th}${journey.rerank ? " · k-reciprocal" : ""}`;
     wrap.innerHTML = ps.map((p) => {
       const dur = (p.t1 - p.t0).toFixed(1);
       const open = !!prOpen[p.person_id];
-      const segs = open ? `<div class="rpseg">` + p.segments.map((s) =>
+      const segs = open ? `<div class="rpobjseg">` + p.segments.map((s) =>
         `<div>${s.key} <i>${(s.t1 - s.t0).toFixed(1)}s · ${s.n}관측</i></div>`).join("") + `</div>` : "";
       return `<div class="rpobj-row${p.fragment ? " frag" : ""}${p.person_id === objSel ? " sel" : ""}"
            data-pid="${p.person_id}" title="${p.cams.join(", ")}">
@@ -301,7 +303,7 @@ Views.replay = (() => {
           <span class="t-num">${p.n_tracklets}</span>
           <span class="t-num">${p.obs}</span>
           <span class="t-num">${dur}</span>
-          <span class="ort">캠 ${p.cams.length}</span>
+          <span class="t-num">${p.cams.length}</span>
         </div>${segs}`;
     }).join("");
     wrap.querySelectorAll(".rpobj-row").forEach((el) => {
@@ -326,6 +328,16 @@ Views.replay = (() => {
     } finally {
       jyBusy = false; renderPersonTbl();
     }
+  }
+
+  /** 버튼 자체에 개수를 실어 전환하지 않고도 "75조각 → 14명" 이 보이게 한다. */
+  function objBtnLabels() {
+    // 열 의미가 모드마다 다르다 — 헤더를 고정해두면 '조각' 수가 EPFI 로 읽힌다
+    $("rpObjHd").innerHTML = objMode === "pr"
+      ? `<span>사람</span><span>조각</span><span>관측</span><span>지속s</span><span>카메라</span>`
+      : `<span>ID</span><span>EPFI</span><span>이탈m</span><span>지속s</span><span>경로</span>`;
+    $("rpObjModeTl").textContent = `트랙렛 ${objRows.length || "—"}`;
+    $("rpObjModePr").textContent = `사람 ${journey && journey.ok ? journey.n_persons : "—"}`;
   }
 
   function setObjMode(m) {

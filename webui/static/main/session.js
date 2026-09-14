@@ -1350,9 +1350,9 @@ const Session = (() => {
     if (v && v.xy && v.xy.length) {
       body += `<div class="jyviz">
         <div class="jyv"><div class="jyv-h">임베딩 2D 투영 <i>점=트랙렛 · 색=사람</i></div>
-          <canvas id="jyScatter" width="360" height="300"></canvas></div>
+          <canvas id="jyScatter" width="440" height="340"></canvas></div>
         <div class="jyv"><div class="jyv-h">유사도 행렬 <i>클러스터 순 · 대각 블록이 뚜렷할수록 잘 묶임</i></div>
-          <canvas id="jyMatrix" width="300" height="300"></canvas></div>
+          <canvas id="jyMatrix" width="340" height="340"></canvas></div>
       </div>`;
     }
     body += `<table class="reptbl"><thead><tr><th>사람</th><th>조각</th><th>관측</th>`
@@ -1365,6 +1365,32 @@ const Session = (() => {
           + `<td>${p.cams.map((c) => c.replace("rh_", "")).join(" ")}</td></tr>`).join("")
       + `</tbody></table>`;
     return body;
+  }
+
+  /** 리포트 탭 — 이미 채워진 resBody 를 [종합] 패널로 감싸고, 여정 재구성이 있으면
+   *  [ID 재구성] 패널을 형제로 붙인다. 기존 리포트 마크업은 건드리지 않는다. */
+  function mountRepTabs(jy) {
+    const body = $("resBody");
+    const hasJy = !!(jy && jy.ok);
+    const main = body.innerHTML;
+    body.innerHTML =
+      `<div class="reptabs">`
+      + `<button class="tag-btn on" data-rt="sum">종합</button>`
+      + (hasJy ? `<button class="tag-btn" data-rt="jy">ID 재구성`
+                 + ` <i class="mtag">${jy.tracklets}→${jy.n_persons}</i></button>` : "")
+      + `</div>`
+      + `<div class="reppane" data-rp="sum">${main}</div>`
+      + (hasJy ? `<div class="reppane hidden" data-rp="jy">${journeySection(jy)}</div>` : "");
+    let drawn = false;
+    body.querySelectorAll(".reptabs .tag-btn").forEach((b) => {
+      b.onclick = () => {
+        const k = b.dataset.rt;
+        body.querySelectorAll(".reptabs .tag-btn").forEach((x) => x.classList.toggle("on", x === b));
+        body.querySelectorAll(".reppane").forEach((x) => x.classList.toggle("hidden", x.dataset.rp !== k));
+        // canvas 는 폭이 잡힌 뒤 한 번만 그린다
+        if (k === "jy" && !drawn) { drawn = true; try { drawJourneyViz(jy); } catch (e) {} }
+      };
+    });
   }
 
   /** 산점도·행렬은 DOM 삽입 후에 그린다(canvas 라 innerHTML 로는 안 됨). */
@@ -1461,7 +1487,6 @@ const Session = (() => {
                    exits, persons, zones, bns, fname })
       + exitBars(exits, fname)
       + journeysTable(journeys, fname)
-      + journeySection(roll.journey)          // 여정 재구성 (있을 때만)
       + `<div class="drill-perfloor">
         <div class="drill-perfloor-h">층별 상세</div>
         <table class="drill-tbl">
@@ -1470,8 +1495,9 @@ const Session = (() => {
         </table>
       </div>`
       + REP_NOTE;
-    // canvas 는 innerHTML 삽입 뒤에 그려야 한다 (innerHTML 로는 그림이 안 남는다)
-    try { drawJourneyViz(roll.journey); } catch (e) { /* 시각화 실패가 리포트를 막지 않게 */ }
+    // 여정 재구성은 성격이 달라(후처리 진단) 종합 리포트에 이어 붙이면 읽기가
+    // 어렵다 — 탭으로 분리하고 기본은 [종합](기존 리포트 그대로).
+    mountRepTabs(roll.journey);
     $("resultModal").classList.remove("hidden");
   }
 

@@ -579,16 +579,19 @@
             <div id="rpIdrTbl" class="rpidrtbl"></div>
           </div>
           <div class="group">
-            <div class="gtitle">객체별 지표 <span class="cnt" id="rpObjCnt">0</span>
+            <div class="gtitle">객체 <span class="cnt" id="rpObjCnt">0</span>
               <span class="sp"></span>
+              <button class="tag-btn xs" id="rpObjSort" title="정렬 기준 전환">EPFI↑</button>
+            </div>
+            <!-- 재구성 전/후 토글 — 제목줄에 같이 두면 글자가 겹친다(사이드바 294px) -->
+            <div class="rpobjbar">
               <span class="seg">
                 <button class="tag-btn xs on" id="rpObjModeTl" title="재구성 전 — 카메라별 트랙 조각">트랙렛</button>
                 <button class="tag-btn xs" id="rpObjModePr" title="재구성 후 — ReID 로 묶은 사람">사람</button>
               </span>
-              <button class="tag-btn xs" id="rpObjSort" title="정렬 기준 전환">EPFI↑</button>
             </div>
-            <div class="grow" id="rpJyNote"></div>
-            <div class="rpobj-hd"><span>ID</span><span>EPFI</span><span>이탈m</span><span>지속s</span><span>경로</span></div>
+            <div class="mnote" id="rpJyNote"></div>
+            <div class="rpobj-hd" id="rpObjHd"></div>
             <div id="rpObjTbl" class="rpobjtbl"></div>
           </div>
           <div class="group">
