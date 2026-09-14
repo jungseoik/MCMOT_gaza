@@ -11,6 +11,13 @@ SQLite에 append 기록하고, 리플레이/재계산 시 그대로 되읽는다
   잘리는 것을 bbox 겹침으로 보정한다. bbox를 더미로 재생하면 그 보정이 죽어
   통과 인원이 실제의 1/3까지 빠지고 SEI가 틀어진다(16F 실측: 라이브 19명 →
   리플레이 6명). bbox 없는 옛 녹화(schema 1)는 더미로 재생된다(하위호환).
+- `track_embs` 테이블에 **트랙렛별 ReID 임베딩 대표 샘플**(기본 8개, v1.14).
+  세션이 끝난 뒤 트랙 조각을 사람 단위로 다시 묶는 오프라인 재구성(여정)에 쓴다.
+  실시간 추적은 max_age(기본 fps×2s) 를 넘겨 안 보이면 트랙을 버리므로, 가렸다
+  나온 사람은 새 번호를 받는다(실측: 실제 10명이 트랙 125개). 끝난 뒤에는 전부
+  기록에 남아 있어 임베딩만 있으면 다시 이을 수 있다 — 그 근거 데이터다.
+  임베딩은 트래커가 이미 계산해 쓰는 값이라 **추가 GPU 연산이 없다**. 전량이
+  아니라 트랙당 시간 균등 N개만 남긴다(full 502s 세션 기준 44MB → 15MB).
 - `meta` 테이블에 세션 시작 시점 스냅샷 (그 층의 공간요소 SiteConfig 뷰·카메라·
   경보원·alarm_ts·축척). 재생은 이 스냅샷으로 엔진을 그대로 복원한다.
 
@@ -29,11 +36,15 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
+import numpy as np
+
 from system.contracts import TrackedObject
 
 logger = logging.getLogger("system.metrics.recorder")
 
-SCHEMA_VERSION = "3"         # 2: bbox 4열 (v1.12) · 3: gid 열 — 확정 global_id (v1.13)
+SCHEMA_VERSION = "4"         # 2: bbox 4열 (v1.12) · 3: gid 열 (v1.13)
+                             # 4: track_embs 테이블 — 트랙렛 ReID 임베딩 (v1.14)
+EMB_PER_TRACK = 8            # 트랙당 남길 대표 임베딩 수 (시간 균등 — 시점 변화 포착)
 _COMMIT_EVERY = 200          # 이만큼 on_tracks 호출마다 commit (I/O 완충)
 _BUFFER_FLUSH = 500          # 버퍼 행이 이만큼 쌓이면 executemany
 
@@ -68,6 +79,13 @@ class SessionRecorder:
               y2       REAL,
               gid      TEXT
             );
+            CREATE TABLE track_embs (
+              cam_id   TEXT    NOT NULL,
+              local_id INTEGER NOT NULL,
+              ts       REAL    NOT NULL,
+              dim      INTEGER NOT NULL,
+              emb      BLOB    NOT NULL      -- float16 정규화 벡터
+            );
             """
         )
         meta = {**meta, "schema_version": SCHEMA_VERSION}
@@ -78,6 +96,9 @@ class SessionRecorder:
         self._con.commit()
         self._call_seq = 0
         self._buf: list[tuple] = []
+        # 트랙렛별 대표 임베딩 (cam, local) -> [(ts, float16 vec), ...] — 메모리 상주.
+        # 트랙 1,200개 × 8개 × 768d × 2B ≈ 15MB 로 세션 내내 들고 있어도 된다.
+        self._embs: dict[tuple, list] = {}
         self._closed = False
 
     def record(self, cam_id: str, ts: float, tracks,
@@ -97,12 +118,52 @@ class SessionRecorder:
                               float(u), float(v), float(tr.conf),
                               float(x1), float(y1), float(x2), float(y2),
                               (gids[i] if gids else None)))
+            self._note_emb(cam_id, int(tr.local_track_id), float(ts), tr.emb)
         if len(self._buf) >= _BUFFER_FLUSH:
             self._flush()
         if seq % _COMMIT_EVERY == 0:
             self._con.commit()
 
+    def _note_emb(self, cam_id: str, local_id: int, ts: float, emb) -> None:
+        """트랙렛별 임베딩을 **시간 균등**으로 EMB_PER_TRACK 개만 유지.
+
+        앞부분만 담으면 그 사람의 초기 시점(각도·조명)만 남아 재구성 때
+        뒤쪽 구간과 안 붙는다. 가득 차면 간격이 가장 촘촘한 한 개를 버려
+        전 구간에 고르게 퍼지게 한다(의존성 없이 O(N)).
+        """
+        if emb is None:
+            return
+        try:
+            v = np.asarray(emb, dtype=np.float32).reshape(-1)
+        except Exception:
+            return
+        if v.size < 16:                      # DS 경로 등 더미(ones((1,)))는 버린다
+            return
+        n = float(np.linalg.norm(v))
+        if n < 1e-6:
+            return
+        v = (v / n).astype(np.float16)
+        key = (cam_id, local_id)
+        slot = self._embs.setdefault(key, [])
+        slot.append((ts, v))
+        if len(slot) <= EMB_PER_TRACK:
+            return
+        # 이웃 간 시간 간격이 가장 작은 지점을 하나 제거 → 균등 유지
+        gaps = [(slot[i + 1][0] - slot[i - 1][0], i) for i in range(1, len(slot) - 1)]
+        _, drop = min(gaps)                  # 양끝(첫·마지막)은 항상 보존
+        slot.pop(drop)
+
     def _flush(self) -> None:
+        if self._embs:
+            rows = [(cam, lid, ts, int(v.size), v.tobytes())
+                    for (cam, lid), slot in self._embs.items() for ts, v in slot]
+            # 트랙별 최신 상태로 통째 교체 — 중복 없이 마지막 선택본만 남는다
+            self._con.executemany(
+                "DELETE FROM track_embs WHERE cam_id=? AND local_id=?",
+                list(self._embs.keys()))
+            self._con.executemany(
+                "INSERT INTO track_embs(cam_id, local_id, ts, dim, emb)"
+                " VALUES(?,?,?,?,?)", rows)
         if not self._buf:
             return
         self._con.executemany(
@@ -123,6 +184,12 @@ class SessionRecorder:
                 [("call_count", json.dumps(self._call_seq)),
                  ("track_row_count", json.dumps(n_tracks))])
             self._con.execute("CREATE INDEX idx_tracks_seq ON tracks(call_seq)")
+            self._con.execute(
+                "CREATE INDEX idx_embs_track ON track_embs(cam_id, local_id)")
+            n_embs = self._con.execute("SELECT COUNT(*) FROM track_embs").fetchone()[0]
+            self._con.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                ("emb_row_count", json.dumps(n_embs)))
             self._con.commit()
             self._con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             self._con.close()
@@ -145,6 +212,30 @@ def load_meta(db_path: str | Path) -> dict:
     finally:
         con.close()
     return {k: json.loads(v) for k, v in rows}
+
+
+def load_track_embs(db_path: str | Path) -> dict[tuple[str, int], list[tuple[float, "np.ndarray"]]]:
+    """트랙렛별 대표 임베딩 — {(cam_id, local_id): [(ts, 정규화 float32 벡터), ...]}.
+
+    여정 재구성(오프라인 클러스터링)의 입력. 임베딩이 없는 옛 녹화(schema ≤3)는
+    빈 dict 를 돌려준다 — 호출부가 "재구성 불가"로 안내하면 된다.
+    """
+    con = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
+    try:
+        names = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if "track_embs" not in names:
+            return {}
+        out: dict[tuple[str, int], list] = {}
+        for cam, lid, ts, dim, blob in con.execute(
+                "SELECT cam_id, local_id, ts, dim, emb FROM track_embs ORDER BY cam_id, local_id, ts"):
+            v = np.frombuffer(blob, dtype=np.float16).astype(np.float32)
+            if v.size != dim:
+                continue
+            out.setdefault((cam, int(lid)), []).append((float(ts), v))
+        return out
+    finally:
+        con.close()
 
 
 def iter_calls(db_path: str | Path) -> Iterator[tuple[str, float, list[TrackedObject]]]:

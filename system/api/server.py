@@ -1379,6 +1379,44 @@ def drill_export(session_id: str, format: str = "json"):
         "Content-Disposition": f'attachment; filename="drill_{session_id}.csv"'})
 
 
+@app.post("/api/drill/{session_id}/journey")
+async def drill_journey(session_id: str, request: Request):
+    """여정 재구성 — 끝난 세션의 트랙 조각을 ReID 로 사람 단위로 다시 묶는다.
+
+    실시간 추적은 카메라 안에서만 ID 를 잇고 max_age 를 넘기면 트랙을 버려,
+    한 사람이 여러 조각으로 갈린다(실측: 실제 10명 → 트랙렛 109개). 세션이
+    끝난 뒤에는 전 구간이 기록에 남아 있어 양방향·전역으로 다시 묶을 수 있다.
+
+    body(모두 선택): {cos_th(병합 문턱), rerank(k-reciprocal, 기본 true),
+      viz(산점도·유사도행렬 동봉, 기본 true), floor(층 — 드릴은 층별 db)}
+    """
+    import anyio
+    from system.metrics import journey as _journey
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    rec = _drill_meta(session_id)
+    floors = (rec or {}).get("floors") or [rt.resolve_floor(body.get("floor") or "")]
+    want = body.get("floor")
+    out = {}
+    for fid in ([want] if want else floors):
+        db = _session_db_path(session_id, fid)
+        if not db.is_file():
+            out[fid] = {"ok": False, "reason": "녹화 없음"}
+            continue
+        try:
+            out[fid] = await anyio.to_thread.run_sync(
+                lambda p=db: _journey.reconstruct(
+                    p, cos_th=float(body.get("cos_th") or _journey.DEFAULT_COS_TH),
+                    rerank=bool(body.get("rerank", True)),
+                    viz=bool(body.get("viz", True))))
+        except Exception as e:                     # 재구성 실패가 리플레이를 막지 않게
+            logger.exception("여정 재구성 실패: %s/%s", session_id, fid)
+            out[fid] = {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+    return {"session_id": session_id, "by_floor": out}
+
+
 @app.post("/api/drill/{session_id}/replay")
 async def drill_replay(session_id: str, request: Request):
     """건물 드릴 재계산 — 참여 각 층의 녹화 db를 같은 오버라이드로 리플레이하고

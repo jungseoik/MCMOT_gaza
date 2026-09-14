@@ -40,6 +40,13 @@ Views.replay = (() => {
 
   // 재계산 전 원본 구역지표 — 전/후 비교용 (zone_id -> {idr, delay, ratio})
   let idrBase = null;
+  let objSortKey = "epfi";   // epfi | dev | dur
+  let objRows = [];          // 현재 표시 중인 person_metrics (트랙렛 단위)
+  let objSel = null;         // 선택된 객체 id (맵 하이라이트용)
+  let objMode = "tl";        // tl=트랙렛(재구성 전) · pr=사람(재구성 후)
+  let journey = null;        // 여정 재구성 결과 (층별 중 현재 층)
+  let jyBusy = false;
+  let prOpen = {};           // 사람 행 펼침 상태
 
   // ------------------------------------------------------------ 세션 목록
   async function loadList() {
@@ -216,10 +223,119 @@ Views.replay = (() => {
       ? (vs.reduce((s, v) => s + v, 0) / vs.length).toFixed(2) : "—";
     $("rpIdrProg").textContent = `${zSt}/${zTot}`;
     renderIdrTbl(allZ, dr.alarm_ts, tag);
+    // 객체별 지표는 층 단위 — 드릴이면 지금 보고 있는 층 것을 쓴다
+    const pf = (dr.per_floor || []).find((x) => x.floor_id === curDrillFloor)
+            || (dr.per_floor || [])[0];
+    renderObjTbl((pf && pf.result && pf.result.person_metrics) || []);
     $("rpBase").innerHTML = (dr.per_floor || []).map((pf) => {
       const r = pf.result || {};
       return `<div class="rpbase-row"><b>${floorName(pf.floor_id)}</b> · SEI ${fmtVal(r.sei,0)} · EPFI ${fmtVal(r.epfi_avg,0)} · CBS ${fmtVal(r.cbs_total,1)}</div>`;
     }).join("");
+  }
+
+  /** 객체별 지표 표 — 재계산된 person_metrics(EPFI·이탈거리·배정경로·지속).
+   *  API 는 원래 이 값을 내려주는데 화면에 그리는 코드가 없었다. ③ 운영뷰에는
+   *  같은 성격의 objList 가 있다. 여정 재구성이 붙으면 "재구성 전 N조각 →
+   *  재구성 후 M명" 을 비교해 보여주는 자리가 된다. */
+  function renderObjTbl(pms) {
+    const wrap = $("rpObjTbl");
+    if (!wrap) return;
+    objRows = pms || [];
+    $("rpObjCnt").textContent = objRows.length;
+    if (!objRows.length) {
+      wrap.innerHTML = `<div class="mnote">객체 지표 없음</div>`;
+      return;
+    }
+    const key = { epfi: (o) => o.epfi == null ? -1 : o.epfi,
+                  dev:  (o) => o.mean_deviation_m == null ? -1 : o.mean_deviation_m,
+                  dur:  (o) => o.duration_sec == null ? -1 : o.duration_sec }[objSortKey];
+    // EPFI 는 낮을수록 나쁨 → 오름차순(문제 객체 먼저), 나머지는 큰 값 먼저
+    const rows = [...objRows].sort((a, b) =>
+      objSortKey === "epfi" ? key(a) - key(b) : key(b) - key(a));
+    const f = (v, d) => v == null ? "—" : v.toFixed(d);
+    wrap.innerHTML = rows.map((o) => {
+      const id = o.global_track_id || "—";
+      const bad = o.epfi != null && o.epfi < 60;
+      return `<div class="rpobj-row${id === objSel ? " sel" : ""}" data-oid="${id}"
+           title="${id} · 경로 ${o.assigned_route_id || "—"} · 최대이탈 ${f(o.max_deviation_m, 2)}m">
+        <span class="oid">${id}</span>
+        <span class="t-num"${bad ? ' style="color:#e5484d"' : ""}>${f(o.epfi, 0)}</span>
+        <span class="t-num">${f(o.mean_deviation_m, 1)}</span>
+        <span class="t-num">${f(o.duration_sec, 1)}</span>
+        <span class="ort">${(o.assigned_route_id || "—").replace("auto-evac-", "ae")}</span>
+      </div>`;
+    }).join("");
+    wrap.querySelectorAll(".rpobj-row").forEach((el) => {
+      el.onclick = () => {
+        objSel = objSel === el.dataset.oid ? null : el.dataset.oid;
+        renderObjTbl(objRows);
+        if (mc) mc.render();
+      };
+    });
+  }
+
+  /** 사람(재구성 후) 표 — 조각을 접어두고 펼치면 구성 트랙렛이 나온다.
+   *  파편(관측이 적은 오탐·스침)은 흐리게 맨 뒤로 — 사람 수 집계에서도 빠진다. */
+  function renderPersonTbl() {
+    const wrap = $("rpObjTbl");
+    if (!wrap) return;
+    if (!journey || !journey.ok) {
+      $("rpObjCnt").textContent = "—";
+      wrap.innerHTML = `<div class="mnote">${jyBusy ? "재구성 중…"
+        : (journey && journey.reason) || "[사람] 을 누르면 ReID 로 조각을 묶습니다"}</div>`;
+      return;
+    }
+    const ps = journey.persons || [];
+    $("rpObjCnt").textContent = journey.n_persons;
+    $("rpJyNote").textContent =
+      `트랙렛 ${journey.tracklets} → 사람 ${journey.n_persons} + 파편 ${journey.n_fragments}`
+      + ` · 문턱 ${journey.cos_th}${journey.rerank ? " · k-reciprocal" : ""}`;
+    wrap.innerHTML = ps.map((p) => {
+      const dur = (p.t1 - p.t0).toFixed(1);
+      const open = !!prOpen[p.person_id];
+      const segs = open ? `<div class="rpseg">` + p.segments.map((s) =>
+        `<div>${s.key} <i>${(s.t1 - s.t0).toFixed(1)}s · ${s.n}관측</i></div>`).join("") + `</div>` : "";
+      return `<div class="rpobj-row${p.fragment ? " frag" : ""}${p.person_id === objSel ? " sel" : ""}"
+           data-pid="${p.person_id}" title="${p.cams.join(", ")}">
+          <span class="oid">${open ? "▾" : "▸"} ${p.person_id}${p.fragment ? " <i>파편</i>" : ""}</span>
+          <span class="t-num">${p.n_tracklets}</span>
+          <span class="t-num">${p.obs}</span>
+          <span class="t-num">${dur}</span>
+          <span class="ort">캠 ${p.cams.length}</span>
+        </div>${segs}`;
+    }).join("");
+    wrap.querySelectorAll(".rpobj-row").forEach((el) => {
+      el.onclick = () => {
+        const pid = el.dataset.pid;
+        prOpen[pid] = !prOpen[pid];
+        objSel = pid;
+        renderPersonTbl();
+        if (mc) mc.render();
+      };
+    });
+  }
+
+  async function loadJourney() {
+    if (!selId || jyBusy) return;
+    jyBusy = true; journey = null; renderPersonTbl();
+    try {
+      const r = await API.drillJourney(selId, { floor: curDrillFloor, viz: true });
+      journey = (r.by_floor || {})[curDrillFloor] || Object.values(r.by_floor || {})[0] || null;
+    } catch (e) {
+      journey = { ok: false, reason: "재구성 실패: " + e.message };
+    } finally {
+      jyBusy = false; renderPersonTbl();
+    }
+  }
+
+  function setObjMode(m) {
+    objMode = m;
+    $("rpObjModeTl").classList.toggle("on", m === "tl");
+    $("rpObjModePr").classList.toggle("on", m === "pr");
+    $("rpObjSort").classList.toggle("hidden", m !== "tl");
+    if (m === "tl") { $("rpJyNote").textContent = ""; renderObjTbl(objRows); }
+    else if (!journey) loadJourney();
+    else renderPersonTbl();
   }
 
   /** IDR 구역별 표 — 값(m/s)·개시지연·참여비율. 재계산이면 원본 대비 변화를 함께 보여준다.
@@ -265,6 +381,10 @@ Views.replay = (() => {
     $("rpBase").innerHTML = "";
     if ($("rpIdrTbl")) $("rpIdrTbl").innerHTML = "";
     if ($("rpIdrProg")) $("rpIdrProg").textContent = "—";
+    if ($("rpObjTbl")) $("rpObjTbl").innerHTML = "";
+    if ($("rpObjCnt")) $("rpObjCnt").textContent = "0";
+    objRows = []; objSel = null; journey = null; prOpen = {};
+    if ($("rpJyNote")) $("rpJyNote").textContent = "";
     idrBase = null;
     $("rpTag").textContent = mode === "drill" ? "건물값" : "현재값";
     $("rpBnTag").textContent = "";
@@ -492,6 +612,7 @@ Views.replay = (() => {
       ? (vs.reduce((s, v) => s + v, 0) / vs.length).toFixed(2) : "—";
     $("rpIdrProg").textContent = `${started}/${zm.length}`;
     renderIdrTbl(zm.map((z) => ({ ...z, floor_id: res.floor_id || "" })), res.alarm_ts, tag);
+    renderObjTbl(res.person_metrics || []);
     if (baseRow) {
       $("rpBase").innerHTML = `<span class="rpbase">원본 저장값 — SEI ${fmtVal(baseRow.sei,0)} · `
         + `EPFI ${fmtVal(baseRow.epfi_avg,0)} · CBS ${fmtVal(baseRow.cbs_total,1)}</span>`;
@@ -507,6 +628,7 @@ Views.replay = (() => {
     $("rpIdr").textContent = "—";
     if ($("rpIdrProg")) $("rpIdrProg").textContent = "—";
     if ($("rpIdrTbl")) $("rpIdrTbl").innerHTML = `<div class="mnote">녹화 이전 세션 — 구역별 IDR 없음</div>`;
+    if ($("rpObjTbl")) $("rpObjTbl").innerHTML = `<div class="mnote">녹화 이전 세션 — 객체별 지표 없음</div>`;
     $("rpBase").innerHTML = "";
     $("rpBnTag").textContent = "";
     if (bnPanel) bnPanel.clear("녹화 이전 세션 — 병목별 CBS 없음");
@@ -578,6 +700,14 @@ Views.replay = (() => {
     $("rpSpeed").onchange = (e) => { speed = parseFloat(e.target.value) || 1; };
     $("rpApply").onclick = recompute;
     $("rpReset").onclick = () => { fillThresholds(site && site.thresholds); $("rpMsg").textContent = "원래값으로 되돌림 — [재계산]을 눌러 반영"; };
+    $("rpObjModeTl").onclick = () => setObjMode("tl");
+    $("rpObjModePr").onclick = () => setObjMode("pr");
+    $("rpObjSort").onclick = () => {                    // EPFI↑ → 이탈↓ → 지속↓ 순환
+      const nxt = { epfi: "dev", dev: "dur", dur: "epfi" };
+      objSortKey = nxt[objSortKey];
+      $("rpObjSort").textContent = { epfi: "EPFI↑", dev: "이탈↓", dur: "지속↓" }[objSortKey];
+      renderObjTbl(objRows);
+    };
     $("rpModeSess").onclick = () => setMode("sess");
     $("rpModeDrill").onclick = () => setMode("drill");
     $("rpFloorSel").onchange = (e) => {
@@ -587,8 +717,16 @@ Views.replay = (() => {
         ? data.frames[0].ts + cursor : null;
       loadDrillFloor(e.target.value, absNow);
     };
-    $("rpReport").onclick = () => {
-      if (drill && window.Session && Session.openDrillReport) Session.openDrillReport(drill);
+    $("rpReport").onclick = async () => {
+      if (!(drill && window.Session && Session.openDrillReport)) return;
+      // 재구성을 아직 안 했으면 리포트를 열면서 한 번 계산해 함께 싣는다
+      if (!journey && !jyBusy) {
+        $("rpMsg").textContent = "여정 재구성 중…";
+        await loadJourney();
+        $("rpMsg").textContent = journey && journey.ok
+          ? `재구성 완료 — 트랙렛 ${journey.tracklets} → 사람 ${journey.n_persons}` : "";
+      }
+      Session.openDrillReport({ ...drill, journey });
     };
   }
 

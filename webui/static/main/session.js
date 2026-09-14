@@ -1327,6 +1327,85 @@ const Session = (() => {
   }
 
   /** 건물 드릴 롤업 리포트 (ADR 06 §3) — 종합 요약 + 지표 해석 카드 + 층별 상세. */
+  /** 여정 재구성 섹션 — 리포트 전용(사이드바는 좁아 그림이 안 들어간다).
+   *  왜 이렇게 묶였는지를 보여준다:
+   *   ① 산점도  임베딩 2D 투영(PCA→t-SNE), 사람별 색 — 덩어리가 갈렸는지
+   *   ② 유사도 행렬  클러스터 순 정렬 — **대각 블록**이 뚜렷하면 잘 묶인 것이고,
+   *      블록 밖 밝은 점은 "합쳤어야 했는데 못 합친 쌍"이라 바로 눈에 띈다.
+   */
+  function journeySection(jy) {
+    if (!jy || !jy.ok) return "";
+    const v = jy.viz;
+    const pids = [...new Set((v && v.person_of) || [])].filter(Boolean);
+    const col = (pid) => {
+      const i = Math.max(0, pids.indexOf(pid));
+      return `hsl(${(i * 47) % 360},70%,58%)`;
+    };
+    let body = `<div class="repsec-h">여정 재구성 <i class="mtag">ReID 후처리</i></div>`
+      + `<div class="repgrid">`
+      + repRow("재구성", `트랙렛 <b>${jy.tracklets}</b>개 → 사람 <b>${jy.n_persons}</b>명 + 파편 ${jy.n_fragments}개`)
+      + repRow("병합 문턱", `${jy.cos_th}${jy.rerank ? " · k-reciprocal 재랭킹(CVPR 2017)" : ""}`)
+      + repRow("파편 기준", `관측 ${jy.fragment_obs_th} 미만 — 오탐·스침으로 분리`)
+      + `</div>`;
+    if (v && v.xy && v.xy.length) {
+      body += `<div class="jyviz">
+        <div class="jyv"><div class="jyv-h">임베딩 2D 투영 <i>점=트랙렛 · 색=사람</i></div>
+          <canvas id="jyScatter" width="360" height="300"></canvas></div>
+        <div class="jyv"><div class="jyv-h">유사도 행렬 <i>클러스터 순 · 대각 블록이 뚜렷할수록 잘 묶임</i></div>
+          <canvas id="jyMatrix" width="300" height="300"></canvas></div>
+      </div>`;
+    }
+    body += `<table class="reptbl"><thead><tr><th>사람</th><th>조각</th><th>관측</th>`
+      + `<th>지속</th><th>카메라</th></tr></thead><tbody>`
+      + (jy.persons || []).map((p) => `<tr${p.fragment ? ' style="opacity:.5"' : ""}>`
+          + `<td><span class="jydot" style="background:${col(p.person_id)}"></span>${p.person_id}`
+          + `${p.fragment ? " <i>파편</i>" : ""}</td>`
+          + `<td class="t-num">${p.n_tracklets}</td><td class="t-num">${p.obs}</td>`
+          + `<td class="t-num">${(p.t1 - p.t0).toFixed(1)}s</td>`
+          + `<td>${p.cams.map((c) => c.replace("rh_", "")).join(" ")}</td></tr>`).join("")
+      + `</tbody></table>`;
+    return body;
+  }
+
+  /** 산점도·행렬은 DOM 삽입 후에 그린다(canvas 라 innerHTML 로는 안 됨). */
+  function drawJourneyViz(jy) {
+    const v = jy && jy.ok && jy.viz;
+    if (!v) return;
+    const pids = [...new Set(v.person_of || [])].filter(Boolean);
+    const col = (pid) => `hsl(${(Math.max(0, pids.indexOf(pid)) * 47) % 360},70%,58%)`;
+    const sc = document.getElementById("jyScatter");
+    if (sc && v.xy.length) {
+      const g = sc.getContext("2d");
+      g.clearRect(0, 0, sc.width, sc.height);
+      const xs = v.xy.map((p) => p[0]), ys = v.xy.map((p) => p[1]);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs);
+      const y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const pad = 14;
+      const TX = (x) => pad + (x - x0) / ((x1 - x0) || 1) * (sc.width - pad * 2);
+      const TY = (y) => pad + (y - y0) / ((y1 - y0) || 1) * (sc.height - pad * 2);
+      v.xy.forEach((pt, i) => {
+        g.fillStyle = col(v.person_of[i]);
+        g.beginPath(); g.arc(TX(pt[0]), TY(pt[1]), 4, 0, 7); g.fill();
+        g.strokeStyle = "rgba(0,0,0,.45)"; g.lineWidth = 1; g.stroke();
+      });
+    }
+    const mx = document.getElementById("jyMatrix");
+    if (mx && v.sim && v.sim.length) {
+      const g = mx.getContext("2d");
+      const n = v.sim.length, cell = mx.width / n;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          const s = Math.max(0, Math.min(1, v.sim[i][j]));
+          // 같은 사람끼리는 색으로, 그 외는 회색조 — 블록 구조가 눈에 들어오게
+          g.fillStyle = (v.person_of[i] && v.person_of[i] === v.person_of[j])
+            ? `hsla(${(Math.max(0, pids.indexOf(v.person_of[i])) * 47) % 360},70%,58%,${0.25 + 0.75 * s})`
+            : `rgba(220,220,220,${s * s})`;
+          g.fillRect(j * cell, i * cell, Math.ceil(cell), Math.ceil(cell));
+        }
+      }
+    }
+  }
+
   function showDrillModal(roll) {
     if (!roll) return;
     const b = roll.building || {}, s = roll.summary || {};
@@ -1382,6 +1461,7 @@ const Session = (() => {
                    exits, persons, zones, bns, fname })
       + exitBars(exits, fname)
       + journeysTable(journeys, fname)
+      + journeySection(roll.journey)          // 여정 재구성 (있을 때만)
       + `<div class="drill-perfloor">
         <div class="drill-perfloor-h">층별 상세</div>
         <table class="drill-tbl">
@@ -1390,6 +1470,8 @@ const Session = (() => {
         </table>
       </div>`
       + REP_NOTE;
+    // canvas 는 innerHTML 삽입 뒤에 그려야 한다 (innerHTML 로는 그림이 안 남는다)
+    try { drawJourneyViz(roll.journey); } catch (e) { /* 시각화 실패가 리포트를 막지 않게 */ }
     $("resultModal").classList.remove("hidden");
   }
 

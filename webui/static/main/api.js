@@ -87,6 +87,8 @@ const API = {
   getDrills: () => API._j("/api/drills"),
   // 건물 드릴 재계산(Phase 3) — 전 층 .db를 같은 오버라이드로 리플레이 → 재산출 롤업.
   drillReplay: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/replay`, body || {}),
+  // 여정 재구성 — 끝난 세션의 트랙 조각을 ReID 로 사람 단위로 다시 묶는다
+  drillJourney: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/journey`, body || {}),
   drillExportUrl: (id, format) =>
     `/api/drill/${encodeURIComponent(id)}/export?format=${format || "json"}`,
   getSession: (floor) => API._j("/api/session?" + API._fq(floor)),

@@ -735,3 +735,28 @@ body.rehearsing .rhbanner{ display:block; }
 .rpidr-row .t-num{ text-align:right; font-family:var(--font-num); }
 .rpd{ font-size:9px; margin-left:3px; }
 .rpd.up{ color:#3FB950; } .rpd.dn{ color:#e5484d; }
+
+/* ④ 리플레이 — 객체별 지표 표 (재계산된 person_metrics) */
+.rpobjtbl{ display:flex; flex-direction:column; gap:2px; max-height:260px; overflow-y:auto; }
+.rpobj-hd, .rpobj-row{ display:grid; grid-template-columns:1fr 46px 52px 46px 76px; gap:4px;
+  align-items:center; padding:3px 6px; font-size:10.5px; }
+.rpobj-hd{ color:var(--txt-3); border-bottom:1px solid var(--stroke-1); }
+.rpobj-row{ background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-sm); cursor:pointer; }
+.rpobj-row:hover{ background:var(--bg-4); }
+.rpobj-row.sel{ border-color:var(--pia-cyan); background:rgba(48,220,251,.08); }
+.rpobj-row .oid{ overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-family:var(--font-num); }
+.rpobj-row .t-num{ text-align:right; font-family:var(--font-num); }
+.rpobj-row .ort{ overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--txt-3); }
+.rpobj-row.frag{ opacity:.5; }
+.rpobj-row.frag i{ font-size:9px; color:var(--txt-3); font-style:normal; }
+.rpseg{ padding:2px 6px 4px 18px; font-size:9.5px; color:var(--txt-3);
+  font-family:var(--font-num); display:flex; flex-direction:column; gap:1px; }
+.rpseg i{ font-style:normal; opacity:.7; margin-left:4px; }
+
+/* 리포트 — 여정 재구성 시각화 */
+.jyviz{ display:flex; gap:14px; flex-wrap:wrap; margin:10px 0 6px; }
+.jyv{ background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-sm); padding:8px; }
+.jyv-h{ font-size:11px; color:var(--txt-2); margin-bottom:6px; }
+.jyv-h i{ font-style:normal; color:var(--txt-3); font-size:10px; margin-left:6px; }
+.jyv canvas{ display:block; background:var(--bg-1); border-radius:4px; }
+.jydot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
