@@ -113,7 +113,7 @@ const Session = (() => {
     };
     $("pmSess").onclick = () => switchPanel("sess");
     $("pmRt").onclick = () => switchPanel("rt");
-    $("resClose").onclick = () => $("resultModal").classList.add("hidden");
+    $("resClose").onclick = () => { jyZoomHide(); $("resultModal").classList.add("hidden"); };
     $("resultModal").onclick = (e) => {
       if (e.target === $("resultModal")) $("resultModal").classList.add("hidden");
     };
@@ -1335,7 +1335,13 @@ const Session = (() => {
    */
   /** 리포트 탭 — 이미 채워진 resBody 를 [종합] 패널로 감싸고, [ID 재구성] 패널을
    *  형제로 붙인다. 기존 리포트 마크업은 건드리지 않는다. */
+  function jyZoomHide() {
+    const z = document.getElementById("jyZoom");
+    if (z) z.classList.add("hidden");
+  }
+
   function mountRepTabs(sid, floor) {
+    jyZoomHide();
     const body = $("resBody");
     const main = body.innerHTML;
     JY_SID = sid; JY_FLOOR = floor || "";
@@ -1554,7 +1560,44 @@ const Session = (() => {
     return out;
   }
 
+  /** 썸네일 확대 — 카드/격자는 overflow 컨테이너라 CSS transform 으로 키우면
+   *  위아래가 잘린다. body 에 붙인 고정위치 패널에 큰 그림을 띄워 어떤 컨테이너의
+   *  경계에도 걸리지 않게 한다. 화면 밖으로 나가면 반대편으로 뒤집는다. */
+  function jyZoomEl() {
+    let z = document.getElementById("jyZoom");
+    if (!z) {
+      z = document.createElement("div");
+      z.id = "jyZoom"; z.className = "jyzoom hidden";
+      z.innerHTML = `<img alt=""><div class="jyzoom-c"></div>`;
+      document.body.appendChild(z);
+    }
+    return z;
+  }
+
+  function jyBindZoom(pane) {
+    const z = jyZoomEl(), img = z.querySelector("img"), cap = z.querySelector(".jyzoom-c");
+    const W = 196, H = 392, GAP = 14;
+    pane.addEventListener("mouseover", (e) => {
+      const el = e.target.closest(".jythumb");
+      if (!el) return;
+      img.src = el.src;
+      const fig = el.closest(".jyfig");
+      cap.textContent = (fig && fig.getAttribute("title")) || "";
+      const r = el.getBoundingClientRect();
+      // 오른쪽에 자리가 없으면 왼쪽, 세로는 화면 안으로 밀어 넣는다
+      const left = (r.right + GAP + W <= innerWidth) ? r.right + GAP
+                 : Math.max(8, r.left - GAP - W);
+      const top = Math.max(8, Math.min(innerHeight - H - 30, r.top + r.height / 2 - H / 2));
+      z.style.left = left + "px"; z.style.top = top + "px";
+      z.classList.remove("hidden");
+    });
+    pane.addEventListener("mouseout", (e) => {
+      if (e.target.closest(".jythumb")) z.classList.add("hidden");
+    });
+  }
+
   function jyBind(pane) {
+    if (!pane.dataset.zoomBound) { jyBindZoom(pane); pane.dataset.zoomBound = "1"; }
     const on = (id, fn) => { const n = pane.querySelector("#" + id); if (n) n.onclick = fn; };
     on("jyCfgBtn", () => pane.querySelector("#jyCfg").classList.toggle("hidden"));
     on("jyModeTl", () => { JY_MODE = "tl"; jyPaint(); });

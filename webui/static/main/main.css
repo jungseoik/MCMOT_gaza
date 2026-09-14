@@ -778,9 +778,17 @@ body.rehearsing .rhbanner{ display:block; }
 .jyfig > .jythumb{ display:inline-block; }
 .jyfig figcaption{ font-family:var(--font-num); font-size:9px; color:var(--text-3);
   line-height:1.3; white-space:nowrap; }
-/* 확대 — 표 흐름을 밀지 않도록 변형만, 위로 띄운다 */
-.jythumb:hover{ transform:scale(2.4); transform-origin:left center;
-  border-color:var(--pia-cyan); position:relative; z-index:20; }
+/* 확대는 body 에 붙인 고정위치 패널(#jyZoom)로 — 카드/격자가 overflow 컨테이너라
+   transform 으로 키우면 위아래가 잘린다. */
+.jythumb:hover{ border-color:var(--pia-cyan); }
+.jyzoom{ position:fixed; z-index:2000; pointer-events:none;
+  background:var(--bg-modal); border:1px solid var(--pia-cyan); border-radius:6px;
+  padding:6px; box-shadow:0 10px 34px rgba(0,0,0,.6); }
+.jyzoom.hidden{ display:none; }
+.jyzoom img{ width:196px; height:392px; object-fit:contain;
+  background:#000; border-radius:4px; display:block; }
+.jyzoom-c{ font-family:var(--font-num); font-size:10px; color:var(--text-3);
+  text-align:center; margin-top:5px; }
 
 /* 사람 카드 */
 .jycards{ display:flex; flex-direction:column; gap:8px; }

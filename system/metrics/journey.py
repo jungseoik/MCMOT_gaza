@@ -59,6 +59,12 @@ MIN_OBS = 2                # 이만큼 미만 관측 트랙렛은 노이즈로 �
 # 나머지 8개는 4~30 관측(0.6~9초)짜리 오탐·스침이었다. 분포가 뚜렷하게 갈린다.
 FRAGMENT_OBS = 50
 LINK_TOL = 0.0             # 군집 간 허용 금지쌍 비율 (0 = 순수 complete-link)
+# 같은 카메라 시간겹침을 '다른 사람' 으로 보기까지의 최소 겹침. 트래커가 트랙을
+# 갈아끼우는 순간(인계)에는 옛 트랙의 꼬리와 새 트랙의 머리가 1~2프레임 공존한다.
+# 그걸 겹침으로 세면 **한 사람이 영원히 둘로 갈린다**. 실측(AI hub 3F s01, 5fps):
+# 같은 카메라 겹침 149쌍 중 ≤0.5s 가 11쌍뿐이고 나머지는 대부분 3s 초과 —
+# 짧은 겹침과 진짜 동시존재는 분포가 뚜렷하게 갈린다.
+OVERLAP_TOL_SEC = 0.5
 
 
 @dataclass(frozen=True)
@@ -75,6 +81,7 @@ class Params:
     max_speed_mps: float = MAX_SPEED_MPS
     slack_m: float = SLACK_M
     fragment_obs: int = FRAGMENT_OBS
+    overlap_tol_sec: float = OVERLAP_TOL_SEC
     min_obs: int = MIN_OBS
     link_tol: float = LINK_TOL
 
@@ -97,6 +104,7 @@ class Params:
             max_speed_mps=num("max_speed_mps", 0.5, 20.0),
             slack_m=num("slack_m", 0.0, 30.0),
             fragment_obs=num("fragment_obs", 0, 10000, int),
+            overlap_tol_sec=num("overlap_tol_sec", 0.0, 5.0),
             min_obs=num("min_obs", 1, 1000, int),
             link_tol=num("link_tol", 0.0, 1.0),
         )
@@ -230,9 +238,10 @@ def _tracklets(db_path: Path, min_obs: int = MIN_OBS) -> tuple[list[dict], dict]
 def _cannot_link(a: dict, b: dict, pr: "Params | None" = None) -> bool:
     """물리적으로 같은 사람일 수 없는 쌍인가."""
     pr = pr or Params()
-    # ① 같은 카메라에서 시간이 겹친다 → 한 카메라에 같은 사람이 둘일 수 없다
+    # ① 같은 카메라에서 시간이 겹친다 → 한 카메라에 같은 사람이 둘일 수 없다.
+    #    단 트랙 인계(옛 트랙 꼬리 + 새 트랙 머리)의 1~2프레임 공존은 제외한다.
     overlap = min(a["t1"], b["t1"]) - max(a["t0"], b["t0"])
-    if a["cam"] == b["cam"] and overlap > 0:
+    if a["cam"] == b["cam"] and overlap > pr.overlap_tol_sec:
         return True
     # ② 시간차 대비 이동거리가 불가능하다 (겹치면 판정 생략 — 시야 겹침 핸드오버)
     if overlap <= 0 and a["p1"] and b["p0"]:
