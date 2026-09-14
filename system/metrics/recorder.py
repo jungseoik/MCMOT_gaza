@@ -42,10 +42,15 @@ from system.contracts import TrackedObject
 
 logger = logging.getLogger("system.metrics.recorder")
 
-SCHEMA_VERSION = "5"         # 2: bbox 4열 (v1.12) · 3: gid 열 (v1.13)
+SCHEMA_VERSION = "6"         # 2: bbox 4열 (v1.12) · 3: gid 열 (v1.13)
                              # 4: track_embs 테이블 — 트랙렛 ReID 임베딩 (v1.14)
                              # 5: track_embs.thumb — 대표 프레임 JPEG (v1.15)
-EMB_PER_TRACK = 8            # 트랙당 남길 대표 임베딩 수 (시간 균등 — 시점 변화 포착)
+                             # 6: 헐 밖도 외형 저장 + 트랙당 32장 (v1.16)
+EMB_PER_TRACK = 32           # 트랙당 남길 대표 임베딩 수 (시간 균등 — 시점 변화 포착).
+                             # 32 로 올린 이유: 트랙 **안쪽**의 뒤바뀜을 찾으려면
+                             # 조밀해야 한다. 8장이면 5fps 기준 40초 트랙에서
+                             # 5초에 1장이라 바뀐 지점을 못 짚는다. 용량은
+                             # (벡터 1.5KB + 썸네일 2.3KB) x 32 ≈ 122KB/트랙.
 _COMMIT_EVERY = 200          # 이만큼 on_tracks 호출마다 commit (I/O 완충)
 _BUFFER_FLUSH = 500          # 버퍼 행이 이만큼 쌓이면 executemany
 
@@ -114,8 +119,9 @@ class SessionRecorder:
         self._con.commit()
         self._call_seq = 0
         self._buf: list[tuple] = []
-        # 트랙렛별 대표 임베딩 (cam, local) -> [(ts, float16 vec), ...] — 메모리 상주.
-        # 트랙 1,200개 × 8개 × 768d × 2B ≈ 15MB 로 세션 내내 들고 있어도 된다.
+        # 트랙렛별 대표 임베딩 (cam, local) -> [(ts, float16 vec, jpeg), ...].
+        # 트랙 1,200개 × 32개 × (1.5KB + 2.3KB) ≈ 146MB — 큰 훈련에서는 무겁다.
+        # 리허설·단일 층 규모(트랙 100여 개)에서는 4MB 수준이라 문제없다.
         self._embs: dict[tuple, list] = {}
         self._closed = False
 

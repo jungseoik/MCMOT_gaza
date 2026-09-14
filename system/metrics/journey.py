@@ -84,6 +84,10 @@ class Params:
     overlap_tol_sec: float = OVERLAP_TOL_SEC
     min_obs: int = MIN_OBS
     link_tol: float = LINK_TOL
+    # "한 사람이 같은 출구를 두 번 나가지 않는다" — 같은 카메라 동시 존재와
+    # 같은 성격의 물리 제약. 피난 훈련에서 한 번 나간 사람은 돌아오지 않는다.
+    # 시간이 안 겹쳐 기존 제약으로 못 막던 오병합을 이게 잡는다.
+    exit_unique: bool = True
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "Params":
@@ -107,6 +111,7 @@ class Params:
             overlap_tol_sec=num("overlap_tol_sec", 0.0, 5.0),
             min_obs=num("min_obs", 1, 1000, int),
             link_tol=num("link_tol", 0.0, 1.0),
+            exit_unique=bool(d.get("exit_unique", True)),
         )
 
 
@@ -186,27 +191,19 @@ def _merge_path(path: list, bin_sec: float = 0.2) -> list:
     return out
 
 
-def _exit_times(db_path: Path, persons: list, meta: dict) -> None:
-    """사람별 출구 통과 시각(경보 기준 초)을 persons 에 채운다.
+def _run_gates(db_path: Path, meta: dict) -> dict:
+    """엔진과 같은 판정기로 출구 게이트를 재생 → {(트랙렛키, exit_id): 최초 out ts}.
 
-    **엔진과 같은 판정기를 그대로 쓴다** — 자체 기준을 만들면 리포트의 통과
-    시각과 세션의 통과 인원이 다른 규칙으로 나와 서로 대조가 안 된다.
-    분기도 engine._rebuild_exits 와 동일하게 맞춘다:
-      ① count_cam + cam_zone  → ZoneGate (화면 영역 + 체류). 문이 프레임
-         가장자리면 사람이 선 반대편에 안 나타나 선으로는 못 센다.
-      ② count_cam + cam_line  → DirectionalLine (화면 px, 데드밴드 절반)
-      ③ 그 외                  → DirectionalLine (맵 px)
-    ①·②는 그 카메라의 관측만, ③은 맵 투영 좌표를 먹인다.
+    분기도 engine._rebuild_exits 와 동일: count_cam+cam_zone → ZoneGate(화면
+    영역+체류), count_cam+cam_line → DirectionalLine(화면), 그 외 → 맵 통과선.
+    게이트는 **트랙렛 단위**로 센다(엔진과 같은 키).
     """
     from system.spatial.geometry import DirectionalLine, ZoneGate
 
     exits = (meta.get("site_view") or {}).get("exits") or []
-    if not exits:
-        return
     gates = []
     for e in exits:
-        cc = e.get("count_cam")
-        z = e.get("cam_zone")
+        cc, z = e.get("count_cam"), e.get("cam_zone")
         if cc and z and len(z) >= 3:
             gates.append({"id": e.get("id"), "cam": cc, "map": False,
                           "g": ZoneGate(z, dwell=int(e.get("cam_zone_dwell") or 2))})
@@ -217,24 +214,12 @@ def _exit_times(db_path: Path, persons: list, meta: dict) -> None:
             gates.append({"id": e.get("id"), "cam": None, "map": True,
                           "g": DirectionalLine(e["line"], e["inside"], margin_px=6.0)})
     if not gates:
-        return
-
-    # 엔진은 트랙렛 키(cam:local)로 센다. 사람 키로 바꿔 세면 안 된다 —
-    # 출구 존은 대개 매핑 헐 **밖**이라 그 구간 트랙렛은 임베딩이 없어
-    # 재구성에서 빠지는데(v1.15), 그걸 건너뛰면 통과가 6/10 으로 줄어든다.
-    # 엔진과 같은 키로 세고, 나온 사건을 사후에 사람에게 귀속시킨다.
-    owner = {}                                    # (cam, local) -> person_id
-    for pp in persons:
-        for s in pp["segments"]:
-            cam, lid = s["key"].split("#", 1)[0].rsplit(":", 1)
-            owner.setdefault((cam, int(lid)), pp["person_id"])
-
+        return {}
     H = {}
     for c in meta.get("cameras", []):
         m = c.get("mapping")
         if m and m.get("H"):
             H[c["cam_id"]] = np.asarray(m["H"], dtype=np.float64).reshape(3, 3)
-
     con = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
     try:
         rows = con.execute(
@@ -242,11 +227,9 @@ def _exit_times(db_path: Path, persons: list, meta: dict) -> None:
             " ORDER BY call_seq, rowid").fetchall()
     finally:
         con.close()
-
-    alarm = meta.get("alarm_ts")
     out: dict = {}
     for ts, cam, lid, u, v, x1, y1, x2, y2 in rows:
-        okey = f"{cam}:{int(lid)}"                # 엔진과 같은 키
+        okey = f"{cam}:{int(lid)}"
         bbox = (x1, y1, x2, y2) if x1 is not None else None
         for gt in gates:
             if gt["map"]:
@@ -265,8 +248,46 @@ def _exit_times(db_path: Path, persons: list, meta: dict) -> None:
                   else gt["g"].observe(okey, pt))
             if ev == "out":
                 out.setdefault((okey, gt["id"]), float(ts))
+    return out
 
-    base = alarm if alarm is not None else (rows[0][0] if rows else 0.0)
+
+def _exit_events(db_path: Path, meta: dict) -> dict:
+    """트랙렛 키 → [(exit_id, ts), ...]. 클러스터링 **전에** 필요하다.
+
+    "한 사람이 같은 출구를 두 번 나가지는 않는다" 를 병합 제약으로 쓰기 위한
+    것. 같은 카메라 동시 존재와 같은 성격의 물리 제약이다 — 피난 훈련에서
+    한 번 나간 사람은 돌아오지 않는다.
+    """
+    ev = _run_gates(db_path, meta)
+    out: dict = {}
+    for (okey, eid), ts in ev.items():
+        out.setdefault(okey, []).append((eid, ts))
+    return out
+
+
+def _exit_times(db_path: Path, persons: list, meta: dict) -> None:
+    """사람별 출구 통과 시각(경보 기준 초)을 persons 에 채운다.
+
+    **엔진과 같은 판정기를 그대로 쓴다** — 자체 기준을 만들면 리포트의 통과
+    시각과 세션의 통과 인원이 다른 규칙으로 나와 서로 대조가 안 된다.
+    분기도 engine._rebuild_exits 와 동일하게 맞춘다:
+      ① count_cam + cam_zone  → ZoneGate (화면 영역 + 체류). 문이 프레임
+         가장자리면 사람이 선 반대편에 안 나타나 선으로는 못 센다.
+      ② count_cam + cam_line  → DirectionalLine (화면 px, 데드밴드 절반)
+      ③ 그 외                  → DirectionalLine (맵 px)
+    ①·②는 그 카메라의 관측만, ③은 맵 투영 좌표를 먹인다.
+    """
+    ev = _run_gates(db_path, meta)
+    alarm = meta.get("alarm_ts")
+    rows_t0 = None
+    out = ev
+    owner = {}
+    for pp in persons:
+        for s in pp["segments"]:
+            cam, lid = s["key"].split("#", 1)[0].rsplit(":", 1)
+            owner.setdefault((cam, int(lid)), pp["person_id"])
+
+    base = alarm if alarm is not None else (min(out.values()) if out else 0.0)
     # 트랙렛 사건 → 사람 귀속. 한 사람이 여러 번 세지면 **과병합 신호**라
     # 횟수를 그대로 남긴다(가장 이른 시각 + 횟수).
     first: dict = {}
@@ -396,16 +417,17 @@ def _tracklets(db_path: Path, min_obs: int = MIN_OBS,
     finally:
         con.close()
 
-    # 헐(valid_roi) 안 관측만 쓴다 — 헐 밖은 호모그래피 외삽이라 맵 좌표가
-    # 부정확하고, 그 좌표로 운동학 cannot-link 을 판정하면 근거 없는 판정이 된다.
-    # 녹화 db 는 raw 계약이라 헐 밖 행도 들어 있다(실측 43%). v1.15 이후 녹화는
-    # 임베딩 자체가 헐 안에서만 남지만, 위치는 여기서 다시 걸러야 한다.
+    # 헐(valid_roi)은 **위치**에만 적용한다 (v1.16).
+    #   · 시간 범위·관측 수 — 헐 밖 포함. 존재 자체는 헐과 무관하다.
+    #   · 맵 좌표(궤적·p0/p1) — 헐 안만. 헐 밖은 호모그래피 외삽이라 부정확하고,
+    #     그 좌표로 운동학 cannot-link 를 판정하면 근거 없는 판정이 된다.
+    # 이전엔 관측 자체를 헐로 걸렀는데, 출구가 헐 밖이라 문 앞 증거가 통째로
+    # 사라졌다(실측 cam09:1 관측 10개 중 헐 안 1개 → 출구 통과 미귀속).
     agg = defaultdict(list)
     for cam, lid, ts, u, v in rows:
         r = ROI.get(cam)
-        if r is not None and not _in_roi(r, u, v):
-            continue
-        agg[(cam, int(lid))].append((float(ts), float(u), float(v)))
+        ok = (r is None) or _in_roi(r, u, v)
+        agg[(cam, int(lid))].append((float(ts), float(u), float(v), ok))
 
     out = []
     for (cam, lid), obs in agg.items():
@@ -443,11 +465,14 @@ def _emit(out: list, key: str, cam: str, lid: int, obs: list, P, h, mpp) -> None
             return None
         return (float(p[0] / p[2]) * mpp, float(p[1] / p[2]) * mpp)
     # 궤적(맵 m) — 사람 단위 이동거리·속도·가속도 산출용. 투영 실패는 버린다.
-    path = [(ts, q) for ts, u, v in obs if (q := xy(u, v)) is not None]
+    inr = [o for o in obs if o[3]]            # 헐 안 관측만 위치로 쓴다
+    path = [(ts, q) for ts, u, v, _ in inr if (q := xy(u, v)) is not None]
     out.append({
         "key": key, "cam": cam, "local_id": lid,
         "t0": obs[0][0], "t1": obs[-1][0], "n": len(obs),
-        "p0": xy(obs[0][1], obs[0][2]), "p1": xy(obs[-1][1], obs[-1][2]),
+        "n_in_roi": len(inr),
+        "p0": xy(inr[0][1], inr[0][2]) if inr else None,
+        "p1": xy(inr[-1][1], inr[-1][2]) if inr else None,
         "path": path,
         "protos": P,
     })
@@ -539,11 +564,25 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
     if use_rr:
         ok_pair &= sim >= pr.rerank_th
 
+    # 트랙렛별 출구 통과 — 같은 출구를 이미 나간 둘은 같은 사람일 수 없다
+    ex_of: list = [set() for _ in range(n)]
+    if pr.exit_unique:
+        try:
+            evs = _exit_events(db_path, meta)
+            base_of = {}
+            for i, tl in enumerate(tls):
+                base_of.setdefault(tl["key"].split("#", 1)[0], []).append(i)
+            for okey, lst in evs.items():
+                for i in base_of.get(okey, []):
+                    ex_of[i] |= {eid for eid, _ in lst}
+        except Exception:
+            logger.exception("출구 제약 준비 실패 — 제약 없이 진행")
+
     # cannot-link 사전 계산
     forbid = np.zeros((n, n), dtype=bool)
     for i in range(n):
         for j in range(i + 1, n):
-            if _cannot_link(tls[i], tls[j], pr):
+            if _cannot_link(tls[i], tls[j], pr) or (ex_of[i] & ex_of[j]):
                 forbid[i, j] = forbid[j, i] = True
 
     # 제약 병합 클러스터링 — 유사도 높은 쌍부터, cannot-link 를 어기면 건너뜀

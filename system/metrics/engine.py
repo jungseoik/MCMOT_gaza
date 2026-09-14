@@ -254,7 +254,12 @@ class MetricsEngine:
             gset = _gid_settings()
             svc = self._gid_service(gset) if gset["enabled"] else None
             rec_gids: list[str | None] = []      # 녹화용 확정 gid — tracks 와 1:1 정렬
-            rec_hull: list[bool] = []            # 임베딩·썸네일을 남길 관측인가 (헐 안 + 게이트 통과)
+            # 임베딩·썸네일을 남길 관측인가 = **게이트(conf·box) 통과** 여부.
+            # 헐(valid_roi)은 조건이 아니다 — 헐은 맵 좌표(호모그래피 외삽)의
+            # 정확도 문제이고 외형 식별과는 무관하다. 헐까지 걸었더니 출구
+            # 주변에서 증거가 거의 사라졌다(실측 cam09:1 관측 10개 중 헐 안 1개
+            # → 임베딩 1개 → 출구 통과가 아무에게도 안 붙음).
+            rec_keep: list[bool] = []
             for tr in tracks:
                 okey = f"{cam_id}:{tr.local_track_id}"  # 카메라 로컬 키 — 운동학·선분 기억
                 gid_eff = okey                          # debounce·표시·인원 지표 키
@@ -265,14 +270,14 @@ class MetricsEngine:
                     gid_eff = svc.lookup(cam_id, tr.local_track_id) or okey
                 if tr.conf < min_conf:           # 저신뢰 관측 — 오탐 연명 트랙 차단
                     rec_gids.append(None)        # (BYTE 저신뢰 연관 유령 객체 방지)
-                    rec_hull.append(False)       # 게이트에 걸린 관측 — 외형도 안 남긴다
+                    rec_keep.append(False)       # 게이트에 걸린 관측 — 외형도 안 남긴다
                     continue
                 # 너무 작은 박스 — 정지 가구 오탐(책상 다리+캐스터 등). 신뢰도가
                 # 0.6 언저리라 min_conf 로 자르면 실제 관측까지 깎이는데, 높이는
                 # 실제 사람과 겹치지 않는다(실측 44~50px vs 최소 126px).
                 if min_box_h > 0 and (tr.bbox_xyxy[3] - tr.bbox_xyxy[1]) < min_box_h:
                     rec_gids.append(None)
-                    rec_hull.append(False)
+                    rec_keep.append(False)
                     continue
                 # 화면 통과선 — **투영 전에** 관측한다. 문 앞은 대응점 헐 밖이라
                 # 아래 ROI 게이트에서 버려지는데, 카운트는 거기서도 살아야 한다.
@@ -303,7 +308,7 @@ class MetricsEngine:
                     if sess is not None:
                         sess.note_dropped()
                     rec_gids.append(gid_eff if gid_eff != okey else None)
-                    rec_hull.append(False)       # 헐 밖 — 임베딩·썸네일 대상 아님
+                    rec_keep.append(True)        # 헐 밖이어도 외형은 남긴다 (위 주석)
                     continue
                 if svc is not None:              # 헐 안 관측만 특징으로 글로벌 id 확정/갱신
                     pos_m = ((p.x * self._m_per_px, p.y * self._m_per_px)
@@ -336,11 +341,11 @@ class MetricsEngine:
                 if sess is not None:             # EPFI 관측 누적 (글로벌이면 사람 단위 병합)
                     sess.observe_point(gid_eff, ts, p.x, p.y)
                 rec_gids.append(gid_eff if gid_eff != okey else None)
-                rec_hull.append(True)
+                rec_keep.append(True)
             # 녹화 — raw 계약 유지하되 이 프레임에서 **확정된** gid 를 함께 남긴다
             # (리플레이가 갤러리 없이 같은 id 를 재현, v1.13). 루프 뒤에 기록하는 이유:
             # 바인딩이 같은 프레임 안에서 일어나므로 기록 시점의 gid 가 실제 사용값이다.
-            self._record(cam_id, ts, tracks, rec_gids, rec_hull)
+            self._record(cam_id, ts, tracks, rec_gids, rec_keep)
             self._purge(self._latest_ts)
             if sess is not None:                 # 1초 샘플 (IDR·CBS·타임라인)
                 sess.maybe_sample(self._latest_ts)
@@ -366,10 +371,11 @@ class MetricsEngine:
     def _record(self, cam_id: str, ts: float, tracks, gids, in_hull=None) -> None:
         """세션 녹화 (계약 v1.10) — min_conf 필터 이전 raw + 확정 gid(v1.13).
 
-        in_hull: tracks 와 정렬된 헐(valid_roi) 안 여부. tracks 행은 raw 계약대로
-        전부 남기되, **임베딩·썸네일은 헐 안 관측만** 남긴다(v1.15). 헐 밖은
-        호모그래피 외삽이라 맵 좌표가 부정확하고, 그 좌표로 여정 재구성의
-        운동학 제약을 판정하면 근거 없는 판정이 된다. None = 전부 헐 안 취급.
+        in_hull: tracks 와 정렬된 "외형(임베딩·썸네일)을 남길 관측인가".
+        min_conf·min_box_h 게이트를 통과한 관측만 True — 오탐의 외형은 남길
+        이유가 없다. 헐 밖 여부는 조건이 아니다(v1.16): 헐은 맵 좌표 정확도의
+        문제라 위치 기반 제약에서만 걸러야 하고, 외형 식별에는 무관하다.
+        None = 전부 남김(구버전 호출 호환).
         """
         if self._recorder is None or not tracks:
             return
