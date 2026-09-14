@@ -1776,13 +1776,263 @@
         ]
       },
       "note": "경로 중 cam11·cam09 는 해당 구간 배터리 소진으로 미촬영 — 영상 없음"
+    },
+    {
+      "id": "scenario_10_full",
+      "name": "전체 (01~09 연속)",
+      "cycle_sec": 0,
+      "note": "시나리오 01~09 를 시간순 연결. 카메라가 없는 구간은 검정. 시나리오 사이 검정 4s.",
+      "gap_sec": 4.0,
+      "total_sec": 502.0,
+      "segments": [
+        {
+          "scenario": "scenario_01",
+          "name": "피난 시나리오 1",
+          "start_sec": 0.0,
+          "end_sec": 46.0,
+          "cams": [
+            "cam01",
+            "cam02",
+            "cam03",
+            "cam04",
+            "cam05",
+            "cam08",
+            "cam09"
+          ]
+        },
+        {
+          "scenario": "scenario_02",
+          "name": "피난 시나리오 2",
+          "start_sec": 50.0,
+          "end_sec": 117.0,
+          "cams": [
+            "cam01",
+            "cam02",
+            "cam03",
+            "cam04",
+            "cam05",
+            "cam06",
+            "cam07",
+            "cam12",
+            "cam13",
+            "cam14"
+          ]
+        },
+        {
+          "scenario": "scenario_03",
+          "name": "피난 시나리오 3",
+          "start_sec": 121.0,
+          "end_sec": 191.0,
+          "cams": [
+            "cam01",
+            "cam02",
+            "cam03",
+            "cam04",
+            "cam05",
+            "cam06",
+            "cam07",
+            "cam08",
+            "cam09",
+            "cam12",
+            "cam13",
+            "cam14"
+          ]
+        },
+        {
+          "scenario": "scenario_04",
+          "name": "피난 시나리오 4",
+          "start_sec": 195.0,
+          "end_sec": 237.0,
+          "cams": [
+            "cam05",
+            "cam08",
+            "cam09",
+            "cam10",
+            "cam16",
+            "cam17"
+          ]
+        },
+        {
+          "scenario": "scenario_05",
+          "name": "피난 시나리오 5",
+          "start_sec": 241.0,
+          "end_sec": 281.0,
+          "cams": [
+            "cam10",
+            "cam11",
+            "cam12",
+            "cam13",
+            "cam16",
+            "cam17"
+          ]
+        },
+        {
+          "scenario": "scenario_06",
+          "name": "피난 시나리오 6",
+          "start_sec": 285.0,
+          "end_sec": 347.0,
+          "cams": [
+            "cam04",
+            "cam05",
+            "cam06",
+            "cam07",
+            "cam08",
+            "cam09",
+            "cam10",
+            "cam12",
+            "cam13",
+            "cam14",
+            "cam16",
+            "cam17"
+          ]
+        },
+        {
+          "scenario": "scenario_07",
+          "name": "피난 시나리오 7",
+          "start_sec": 351.0,
+          "end_sec": 400.0,
+          "cams": [
+            "cam05",
+            "cam08",
+            "cam09",
+            "cam10",
+            "cam11",
+            "cam12",
+            "cam14",
+            "cam15",
+            "cam18"
+          ]
+        },
+        {
+          "scenario": "scenario_08",
+          "name": "피난 시나리오 8",
+          "start_sec": 404.0,
+          "end_sec": 436.0,
+          "cams": [
+            "cam12",
+            "cam13",
+            "cam14",
+            "cam15",
+            "cam18"
+          ]
+        },
+        {
+          "scenario": "scenario_09",
+          "name": "피난 시나리오 9",
+          "start_sec": 440.0,
+          "end_sec": 502.0,
+          "cams": [
+            "cam04",
+            "cam05",
+            "cam07",
+            "cam08",
+            "cam10",
+            "cam12",
+            "cam14",
+            "cam15",
+            "cam18"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam01",
+          "file": "scenario_10_full/cam01.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam02",
+          "file": "scenario_10_full/cam02.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam03",
+          "file": "scenario_10_full/cam03.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam04",
+          "file": "scenario_10_full/cam04.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam05",
+          "file": "scenario_10_full/cam05.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam06",
+          "file": "scenario_10_full/cam06.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam07",
+          "file": "scenario_10_full/cam07.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam08",
+          "file": "scenario_10_full/cam08.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam09",
+          "file": "scenario_10_full/cam09.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_10_full/cam10.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_10_full/cam11.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam12",
+          "file": "scenario_10_full/cam12.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam13",
+          "file": "scenario_10_full/cam13.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam14",
+          "file": "scenario_10_full/cam14.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam15",
+          "file": "scenario_10_full/cam15.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam16",
+          "file": "scenario_10_full/cam16.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam17",
+          "file": "scenario_10_full/cam17.mp4",
+          "duration_sec": 502.0
+        },
+        {
+          "cam": "cam18",
+          "file": "scenario_10_full/cam18.mp4",
+          "duration_sec": 502.0
+        }
+      ]
     }
   ],
   "_prep_TODO": "tools 준비 CLI(ADR 09 §구현)가 검증 결과를 채운다",
   "note": "액션캠 18대로 2026-09-04 촬영. cam01~cam18 은 **도면 위치 번호**(실카메라 대응은 cameras[].physical_cam). 싱크는 슬레이트(손바닥 맞닿는 프레임) 기준 프레임 단위 확정 — cameras[].concat_start 는 02_concat 타임라인 기준 오프셋. 시나리오 9개·클립 76개. 원본은 High 프로파일이라 baseline 재인코딩본을 송출용으로 둔다(_orig_high_profile/ 에 원본). 촬영 기록: docs/촬영기록-및-카메라-매핑.md",
   "docs": "docs/",
   "prep": {
-    "checked_at": "2026-09-08T06:40:16+00:00",
+    "checked_at": "2026-09-09T05:03:20+00:00",
     "tool": "tools/rehearsal_prep.py",
     "ok": true,
     "fails": [],
@@ -2471,6 +2721,168 @@
         "wh": "1920x1080",
         "fps": 30.0,
         "duration": 62.0
+      },
+      "scenario_10_full/cam01.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam02.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam03.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam04.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam05.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam06.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam07.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam08.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam09.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam10.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam11.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam12.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam13.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam14.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam15.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam16.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam17.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
+      },
+      "scenario_10_full/cam18.mp4": {
+        "codec": "h264",
+        "profile": "Constrained Baseline",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "wh": "1920x1080",
+        "fps": 30.0,
+        "duration": 502.0
       }
     }
   }

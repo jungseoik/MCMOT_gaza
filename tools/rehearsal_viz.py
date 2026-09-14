@@ -33,6 +33,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from system.vsource import package as vpkg          # noqa: E402
+from system.tracking.analyzer import AnalyzerThread   # noqa: E402  (_matched_score 재사용)
+
+_matched_score = AnalyzerThread._matched_score
+_frame_dets = AnalyzerThread._frame_dets
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 CAM_COLORS = [(80, 200, 255), (255, 120, 80), (120, 255, 120), (255, 80, 220),
@@ -194,6 +198,14 @@ def main() -> int:
                      "tracker": BoostTrack(per_instance_ids=True,
                                            max_age=max(1, int(round(a.fps * 2)))),
                      "color": CAM_COLORS[i % len(CAM_COLORS)],
+                     # 표출·지표 게이트 — 엔진(engine.py on_tracks)과 같은 상속 규칙:
+                     # 카메라 오버라이드 우선, None 이면 사이트 Thresholds.
+                     # 안 걸면 정지 가구 오탐이 영상에만 계속 보여 라이브와 어긋난다.
+                     "min_conf": (c["min_conf"] if c.get("min_conf") is not None
+                                  else th.get("min_conf", 0.35)),
+                     "min_box_h": (c["min_box_h"] if c.get("min_box_h") is not None
+                                   else th.get("min_box_h", 0.0)),
+                     "n_gated": 0,
                      "n_in": 0, "n_out": 0, "cam_lines": cam_lines,
                      "w": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), "h": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))})
 
@@ -243,6 +255,13 @@ def main() -> int:
             got_any = True
             pred, ref = model.detector.detect_frame(frame)
             targets = c["tracker"].update(pred, ref, frame, f"{c['cam']}:{k}")
+            # 게이트용 검출 배열 — 라이브 AnalyzerThread._frame_dets 를 그대로 재사용.
+            # 직접 만들면 안 된다: YOLOX 는 dets 가 **letterbox 좌표의 CUDA 텐서**로
+            # 오고(inference_trt.detect_frame), YOLO26/RF-DETR 은 원본좌표 numpy 다.
+            # scale_r 은 ref 텐서 shape 로 복원한다(BoostTrack.update 와 같은 규약).
+            _h, _w = frame.shape[:2]
+            _sr = min(ref.shape[2] / _h, ref.shape[3] / _w)
+            det_xyxy, det_scores = _frame_dets(pred, _sr)
             vis = frame.copy()
             # 유효영역(헐/ROI)
             cv2.polylines(vis, [c["roi"].astype(np.int32)], True, (255, 220, 0), 2, cv2.LINE_AA)
@@ -261,6 +280,18 @@ def main() -> int:
                     cv2.putText(vis, lab, tuple(map(int, line[0])), FONT, 0.8, (0, 140, 255), 2, cv2.LINE_AA)
             for t in targets:
                 x1, y1, x2, y2, tid = int(t[0]), int(t[1]), int(t[2]), int(t[3]), int(t[4])
+                # ---- 표출·지표 게이트 (라이브 engine.py 와 동일 순서·동일 값) ----
+                # conf 는 라이브와 같은 방식으로: 트랙 박스와 최대 IoU 검출의 점수
+                # (AnalyzerThread._matched_score 재사용 — 직접 구현하면 또 어긋난다).
+                _conf = _matched_score(np.array([x1, y1, x2, y2], np.float64),
+                                       det_xyxy, det_scores)
+                if _conf < c["min_conf"] or (c["min_box_h"] > 0 and (y2 - y1) < c["min_box_h"]):
+                    c["n_gated"] += 1
+                    # 버려지는 관측임을 화면에 남긴다 — 회색 점선 박스
+                    cv2.rectangle(vis, (x1, y1), (x2, y2), (120, 120, 120), 1)
+                    cv2.putText(vis, f"gated {_conf:.2f}/{y2 - y1}px", (x1, max(0, y1 - 4)),
+                                FONT, 0.5, (120, 120, 120), 1, cv2.LINE_AA)
+                    continue
                 col = _color_id(tid)
                 cv2.rectangle(vis, (x1, y1), (x2, y2), col, 2)
                 cv2.putText(vis, str(tid), (x1, max(0, y1 - 6)), FONT, 0.8, col, 2, cv2.LINE_AA)
@@ -386,6 +417,9 @@ def main() -> int:
     for c in cams:
         tot = c["n_in"] + c["n_out"]
         print(f"   {c['cam']}: 관측 {tot} · 헐 안 {c['n_in']} · 헐 밖(라이브 폐기) {c['n_out']} ({(100 * c['n_out'] / tot) if tot else 0:.0f}%)"
+              + (f" · 게이트 폐기 {c['n_gated']}(conf<{c['min_conf']:.2f}"
+                 + (f" or h<{c['min_box_h']:.0f}px" if c["min_box_h"] > 0 else "") + ")"
+                 if c["n_gated"] else "")
               + ("" if c["has_roi"] else " · ROI 없음→대응점 헐 사용"))
     return 0
 

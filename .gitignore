@@ -213,6 +213,14 @@ wheels/
 # 코어덤프(root 소유) · 리허설 시각화 산출물(영상, 재생성 가능)
 /core
 results/rehearsal_viz/
+# AI hub 리허설 시각화 — 영상만 제외(README 의 실측표는 남긴다)
+results/rehearsal_viz_aihub/*.mp4
+# 글로벌ID 비교 하네스 산출물(영상·프레임) — 하네스 코드는 tools/gid_compare/
+results/gid_compare/
+# ReID 모델 벤치 산출물(925MB, 모델별 crop·피처 덤프)
+results/reid_bench/
+# 외부 제공 참조 코드 아카이브 — 레포에 풀어 넣지 않는다
+/multi_camera_tracking.zip
 !.env.example
 results/rehearsal_sessions/
 tracking*.zip

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -75,8 +76,10 @@ def build_cam(cam: str, segs: list[dict], root: Path, out: Path, gap_frames: int
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--package", required=True)
-    ap.add_argument("--out", default="scenario_15_full", help="출력 시나리오 폴더/id")
-    ap.add_argument("--name", default="전체 (01~14 연속)")
+    # 기본 이름은 **패키지에서 유도**한다 — 예전엔 CJ 전용 상수(scenario_15_full,
+    # "전체 (01~14 연속)")여서, 시나리오 9개짜리 AI hub 에도 15번이 붙어 오해를 샀다.
+    ap.add_argument("--out", default=None, help="출력 시나리오 폴더/id (기본: scenario_<마지막+1>_full)")
+    ap.add_argument("--name", default=None, help="시나리오 표시 이름 (기본: 전체 (01~NN 연속))")
     ap.add_argument("--gap", type=float, default=4.0, help="시나리오 사이 검정 간격(초). 0=없음")
     ap.add_argument("--only", nargs="*", help="특정 카메라만 (테스트용, 예: cam8 cam9)")
     ap.add_argument("--skip-existing", action="store_true",
@@ -87,6 +90,15 @@ def main() -> int:
     if not pkg:
         raise SystemExit(f"패키지 없음: {a.package}")
     root = Path(pkg["_root"])
+    if a.out is None or a.name is None:
+        # 이미 만들어둔 *_full 은 원본에서 빼고 번호를 센다 (재실행해도 번호가 안 밀린다)
+        nums = sorted(int(m.group(1)) for s in pkg["scenarios"]
+                      if (m := re.fullmatch(r"scenario_(\d+)", s["id"])))
+        last = nums[-1] if nums else 0
+        if a.out is None:
+            a.out = f"scenario_{last + 1:02d}_full"
+        if a.name is None:
+            a.name = f"전체 (01~{last:02d} 연속)"
     scen = [s for s in pkg["scenarios"] if s["id"] != a.out and s.get("streams")]
     scen.sort(key=lambda s: s["id"])
     cams = sorted({c["cam"] for c in pkg["cameras"]}, key=lambda x: int("".join(ch for ch in x if ch.isdigit())))
