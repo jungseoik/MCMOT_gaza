@@ -765,22 +765,49 @@ body.rehearsing .rhbanner{ display:block; }
   border-top:1px solid var(--stroke-1); padding-top:6px; }
 .btn.primary.xs{ height:22px; padding:0 10px; font-size:10px; }
 
-/* 리포트 [ID 재구성] — 썸네일·전후 표·인자 패널 (v1.15) */
+/* 리포트 [ID 재구성] — 썸네일·전후 뷰·인자 패널 (v1.15) */
 .repsec-h .tag-btn{ margin-left:10px; vertical-align:1px; }
-.jythumb{ width:20px; height:40px; object-fit:cover; border-radius:3px; display:block;
-  background:var(--bg-1); border:1px solid var(--stroke-1); }
-.jythumb.sm{ width:14px; height:28px; display:inline-block; vertical-align:-9px; margin-right:5px; }
-.jytbl{ width:100%; }
-.jytbl td:first-child{ width:24px; padding:2px 4px; }
-.jytbl .jyrow{ cursor:pointer; }
-.jytbl .jyrow:hover{ background:var(--bg-4); }
-.jytbl .jyrow.frag{ opacity:.5; }
-.jytbl .jyrow i, .jytbl .jyseg i{ font-style:normal; font-size:10px; color:var(--text-3); }
-.jytbl .jyseg td{ padding:2px 4px 2px 10px; font-size:11px; color:var(--text-3); }
-.jytbl code{ font-family:var(--font-num); font-size:11px; }
 .jybar{ display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700;
-  color:var(--text-2); margin:16px 0 6px; }
+  color:var(--text-2); margin:16px 0 8px; }
 .jybar i{ font-style:normal; font-weight:400; font-size:10.5px; color:var(--text-3); }
+
+/* 썸네일 — 작아서 "뭐가 사람인지" 가 안 보였다. 기본을 키우고 hover 로 더 키운다. */
+.jythumb{ width:52px; height:104px; object-fit:cover; border-radius:3px; display:block;
+  background:var(--bg-1); border:1px solid var(--stroke-2); transition:transform .12s; }
+.jyfig{ margin:0; display:flex; flex-direction:column; gap:3px; }
+.jyfig > .jythumb{ display:inline-block; }
+.jyfig figcaption{ font-family:var(--font-num); font-size:9px; color:var(--text-3);
+  line-height:1.3; white-space:nowrap; }
+/* 확대 — 표 흐름을 밀지 않도록 변형만, 위로 띄운다 */
+.jythumb:hover{ transform:scale(2.4); transform-origin:left center;
+  border-color:var(--pia-cyan); position:relative; z-index:20; }
+
+/* 사람 카드 */
+.jycards{ display:flex; flex-direction:column; gap:8px; }
+.jyp{ background:var(--bg-2); border:1px solid var(--stroke-1); border-radius:var(--r-sm);
+  padding:8px 10px; cursor:pointer; }
+.jyp:hover{ border-color:var(--stroke-3); }
+.jyp.open{ border-color:var(--pia-cyan); }
+.jyp.frag{ opacity:.55; }
+.jyp-h{ display:flex; align-items:center; gap:7px; font-size:12px; margin-bottom:7px; }
+.jyp-h b{ font-family:var(--font-num); font-size:13px; }
+.jyp-h i{ font-style:normal; font-size:10.5px; color:var(--text-3); }
+.jyp-h .ftag{ background:var(--bg-4); border-radius:3px; padding:0 4px; font-size:9px; }
+.jyp-h .camlist{ font-family:var(--font-num); }
+.jyp-h .jyx{ font-size:10px; color:var(--pia-cyan); white-space:nowrap; }
+/* 조각이 많으면 가로 스크롤 — 카드가 세로로 늘어나 목록을 밀지 않게 */
+.jyp-strip{ display:flex; gap:10px; overflow-x:auto; padding-bottom:4px; }
+.jyp.open .jyp-strip{ flex-wrap:wrap; overflow-x:visible; row-gap:10px; }
+.jyp.open .jyfig{ flex-direction:row; align-items:flex-start; gap:2px; flex-wrap:nowrap; }
+.jyp.open .jyfig figcaption{ writing-mode:vertical-rl; font-size:8.5px; }
+.jyp.open .jythumb{ width:38px; height:76px; }
+
+/* 트랙렛(재구성 전) 격자 */
+.jygrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(78px,1fr)); gap:10px; }
+.jygrid .jyfig{ align-items:flex-start; }
+.jygrid figcaption{ white-space:normal; }
+
+/* 인자 패널 */
 .jycfg{ background:var(--bg-2); border:1px solid var(--stroke-1);
   border-radius:var(--r-sm); padding:10px 12px; margin:8px 0 4px; }
 .jycfg.hidden{ display:none; }

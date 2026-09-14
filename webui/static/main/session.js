@@ -1382,14 +1382,23 @@ const Session = (() => {
 
   /** 트랙렛 키("cam:local")의 대표 프레임 썸네일 — 임베딩과 같은 프레임의 crop.
    *  옛 녹화(schema ≤4)는 404 → onerror 로 지워 빈칸을 남기지 않는다. */
-  function jyThumb(key, cls) {
+  function jyThumb(key, i, cls) {
     if (!key || !JY_SID) return "";
-    const i = String(key).lastIndexOf(":");
-    if (i < 0) return "";
-    const cam = key.slice(0, i), lid = key.slice(i + 1);
+    const k = String(key).lastIndexOf(":");
+    if (k < 0) return "";
+    const cam = key.slice(0, k), lid = key.slice(k + 1);
     if (!/^\d+$/.test(lid)) return "";
     return `<img class="jythumb ${cls || ""}" loading="lazy" alt=""`
-      + ` src="${API.drillThumbUrl(JY_SID, cam, lid, JY_FLOOR, 0)}" onerror="this.remove()">`;
+      + ` src="${API.drillThumbUrl(JY_SID, cam, lid, JY_FLOOR, i || 0)}" onerror="this.remove()">`;
+  }
+
+  /** 한 트랙렛의 대표 프레임 띠. n 장까지 — 접힘 1장, 펼침 EMB_PER_TRACK(8)장.
+   *  없는 인덱스는 서버가 마지막 것으로 되돌려주므로 중복이 보일 수 있는데,
+   *  그게 "이 트랙렛은 프레임이 적다" 는 신호라 지우지 않는다. */
+  function jyStrip(seg, frames) {
+    const cap = `${seg.key.replace("rh_", "")} · ${(seg.t1 - seg.t0).toFixed(1)}s · ${seg.n}관측`;
+    const imgs = Array.from({ length: frames }, (_, i) => jyThumb(seg.key, i)).join("");
+    return `<figure class="jyfig" title="${cap}">${imgs}<figcaption>${cap}</figcaption></figure>`;
   }
 
   function jySection() {
@@ -1448,44 +1457,40 @@ const Session = (() => {
           <button class="tag-btn xs${JY_MODE === "pr" ? " on" : ""}" id="jyModePr"
             title="재구성 후 — ReID 로 묶은 사람">사람 ${JY.n_persons}</button>
         </span>
-        <i>${JY_MODE === "pr" ? "행을 누르면 구성 트랙렛이 펼쳐집니다" : "재구성 전 조각 — 같은 사람이 여러 줄로 흩어져 있습니다"}</i>
+        <i>${JY_MODE === "pr" ? "카드를 누르면 조각별 대표 프레임 8장이 펼쳐집니다 · 썸네일에 마우스를 올리면 확대" : "재구성 전 조각 — 같은 사람이 여러 개로 흩어져 있습니다. 색이 소속"}</i>
       </div>`;
     h += JY_MODE === "pr" ? jyPersonTbl() : jyTrackletTbl();
     return h;
   }
 
   function jyPersonTbl() {
-    return `<table class="reptbl jytbl"><thead><tr><th></th><th>사람</th><th>조각</th>`
-      + `<th>관측</th><th>지속</th><th>카메라</th></tr></thead><tbody>`
-      + (JY.persons || []).map((p) => {
-          const open = !!JY_OPEN[p.person_id];
-          const segs = open ? (p.segments || []).map((s) =>
-            `<tr class="jyseg"><td></td><td colspan="5">${jyThumb(s.key, "sm")}`
-            + `<code>${s.key.replace("rh_", "")}</code>`
-            + ` <i>${(s.t1 - s.t0).toFixed(1)}s · ${s.n}관측</i></td></tr>`).join("") : "";
-          const best = (p.segments || []).slice().sort((a, b) => b.n - a.n)[0] || {};
-          return `<tr class="jyrow${p.fragment ? " frag" : ""}" data-pid="${p.person_id}">`
-            + `<td>${jyThumb(best.key)}</td>`
-            + `<td><span class="jydot" style="background:${jyColor(p.person_id)}"></span>`
-            + `${open ? "▾" : "▸"} ${p.person_id}${p.fragment ? " <i>파편</i>" : ""}</td>`
-            + `<td class="t-num">${p.n_tracklets}</td><td class="t-num">${p.obs}</td>`
-            + `<td class="t-num">${(p.t1 - p.t0).toFixed(1)}s</td>`
-            + `<td>${p.cams.map((c) => c.replace("rh_", "")).join(" ")}</td></tr>` + segs;
-        }).join("")
-      + `</tbody></table>`;
+    // 표 대신 카드 — 행 높이에 갇히면 썸네일을 키울 수 없어 "뭐가 사람인지"
+    // 안 보였다. 카드는 폭을 통째로 써서 조각별 대표 프레임을 나란히 건다.
+    return `<div class="jycards">` + (JY.persons || []).map((p) => {
+      const open = !!JY_OPEN[p.person_id];
+      const cams = p.cams.map((c) => c.replace("rh_", "")).join(" ");
+      const segs = (p.segments || []).slice().sort((a, b) => a.t0 - b.t0);
+      return `<div class="jyp${p.fragment ? " frag" : ""}${open ? " open" : ""}" data-pid="${p.person_id}">
+        <div class="jyp-h">
+          <span class="jydot" style="background:${jyColor(p.person_id)}"></span>
+          <b>${p.person_id}</b>${p.fragment ? ` <i class="ftag">파편</i>` : ""}
+          <i>${p.n_tracklets}조각 · ${p.obs}관측 · ${(p.t1 - p.t0).toFixed(1)}s · ${p.cams.length}캠</i>
+          <span class="sp"></span>
+          <i class="camlist">${cams}</i>
+          <span class="jyx">${open ? "대표 프레임 접기 ▴" : "대표 프레임 펼치기 ▾"}</span>
+        </div>
+        <div class="jyp-strip">${segs.map((s) => jyStrip(s, open ? 8 : 1)).join("")}</div>
+      </div>`;
+    }).join("") + `</div>`;
   }
 
   function jyTrackletTbl() {
-    return `<table class="reptbl jytbl"><thead><tr><th></th><th>트랙렛</th><th>관측</th>`
-      + `<th>지속</th><th>소속</th></tr></thead><tbody>`
-      + JY_TL.map((s) => `<tr>`
-          + `<td>${jyThumb(s.key)}</td>`
-          + `<td><code>${s.key.replace("rh_", "")}</code></td>`
-          + `<td class="t-num">${s.n}</td>`
-          + `<td class="t-num">${(s.t1 - s.t0).toFixed(1)}s</td>`
-          + `<td><span class="jydot" style="background:${jyColor(s.pid)}"></span>${s.pid}`
-          + `${s.fragment ? " <i>파편</i>" : ""}</td></tr>`).join("")
-      + `</tbody></table>`;
+    return `<div class="jygrid">` + JY_TL.map((s) =>
+      `<figure class="jyfig tl" title="${s.key.replace("rh_", "")} · 소속 ${s.pid}">
+        ${jyThumb(s.key, 0)}
+        <figcaption><span class="jydot" style="background:${jyColor(s.pid)}"></span>
+          ${s.key.replace("rh_", "")}<br><i>${s.n}관측 · ${(s.t1 - s.t0).toFixed(1)}s</i></figcaption>
+      </figure>`).join("") + `</div>`;
   }
 
   /** 재구성 결과에서 "재구성 전" 트랙렛 목록을 만든다 — 같은 데이터의 반대편 뷰라
@@ -1556,7 +1561,7 @@ const Session = (() => {
     on("jyModePr", () => { JY_MODE = "pr"; jyPaint(); });
     on("jyReset", () => { JY_PARAMS = null; jyLoad(); });
     on("jyApply", () => { JY_PARAMS = jyCfgRead(); jyLoad(); });
-    pane.querySelectorAll(".jyrow").forEach((el) => {
+    pane.querySelectorAll(".jyp").forEach((el) => {
       el.onclick = () => {
         const pid = el.dataset.pid;
         JY_OPEN[pid] = !JY_OPEN[pid];
