@@ -1353,16 +1353,15 @@ const Session = (() => {
       + `</div>`
       + `<div class="reppane" data-rp="sum">${main}</div>`
       + `<div class="reppane hidden" data-rp="jy"></div>`;
-    let loaded = false;
     body.querySelectorAll(".reptabs .tag-btn").forEach((b) => {
       b.onclick = () => {
         const k = b.dataset.rt;
         body.querySelectorAll(".reptabs .tag-btn").forEach((x) => x.classList.toggle("on", x === b));
         body.querySelectorAll(".reppane").forEach((x) => x.classList.toggle("hidden", x.dataset.rp !== k));
-        // 재구성은 탭을 처음 열 때만 — 리포트를 여는 것만으로 계산하지 않는다
-        if (k === "jy" && !loaded) { loaded = true; jyLoad(); }
       };
     });
+    // 사람별 지표가 [종합]에 있으므로 재구성은 리포트를 열 때 바로 돌린다.
+    jyLoad();
   }
 
   // ================================================== 리포트 — ID 재구성 탭
@@ -1381,8 +1380,8 @@ const Session = (() => {
   const JY_FIELDS = { jyCosTh: "cos_th", jyRrTh: "rerank_th", jyLinkTol: "link_tol",
                       jySpeed: "max_speed_mps", jySlack: "slack_m", jyFragObs: "fragment_obs" };
 
-  const jyColor = (pid) => {
-    const ids = (JY && JY.persons || []).map((p) => p.person_id);
+  const jyColor = (pid, jy) => {
+    const ids = (((jy || JY) || {}).persons || []).map((p) => p.person_id);
     const i = Math.max(0, ids.indexOf(pid));
     return `hsl(${(i * 47) % 360},70%,58%)`;
   };
@@ -1457,7 +1456,6 @@ const Session = (() => {
           <canvas id="jyMatrix" width="340" height="340"></canvas></div>
       </div>`;
     }
-    h += jyMetricTbl();
     h += `<div class="jybar">객체별
         <span class="seg">
           <button class="tag-btn xs${JY_MODE === "tl" ? " on" : ""}" id="jyModeTl"
@@ -1499,18 +1497,21 @@ const Session = (() => {
 
   /** 사람별 4대지표·운동 지표 표 — 재구성이 만든 '사람' 단위로 본 결과.
    *  ④ 리플레이 사이드바의 표는 트랙렛(조각) 단위라 한 사람이 여러 줄로 나온다. */
-  function jyMetricTbl() {
-    const ps = (JY.persons || []).filter((p) => !p.fragment);
+  function jyMetricTbl(jy) {
+    jy = jy || JY;
+    if (!jy || !jy.ok) return "";
+    const ps = (jy.persons || []).filter((p) => !p.fragment);
     if (!ps.length) return "";
     const pm = {};
     (JY_PM || []).forEach((m) => { if (m.global_track_id) pm[m.global_track_id] = m; });
+    const ex = jy.exit_summary || {};
     const f = (v, d) => v == null ? "—" : (+v).toFixed(d);
     const rows = ps.map((p) => {
       const m = jyFoldMetrics(p, pm);
       const exits = Object.entries(p.exit_at || {});
       const bad = m.epfi != null && m.epfi < 60;
       return `<tr>
-        <td><span class="jydot" style="background:${jyColor(p.person_id)}"></span>
+        <td><span class="jydot" style="background:${jyColor(p.person_id, jy)}"></span>
             <b>${p.person_id}</b></td>
         <td class="t-num${bad ? " bad" : ""}">${f(m.epfi, 0)}</td>
         <td class="t-num">${f(m.dev, 2)}</td>
@@ -1519,12 +1520,26 @@ const Session = (() => {
         <td class="t-num">${f(p.speed_avg, 2)}</td>
         <td class="t-num">${f(p.speed_p95, 2)}</td>
         <td class="t-num">${f(p.accel_p95, 2)}</td>
-        <td class="t-num">${exits.length ? exits.map(([k, v]) => `${v}s`).join(" ") : "—"}</td>
+        <td class="t-num">${exits.length
+            ? exits.map(([k, v]) => `${v}s`).join(" ")
+              + (p.exit_count > 1
+                 ? ` <i class="warn" title="이 사람 이름으로 게이트가 ${p.exit_count}번 셌다 — 서로 다른 사람이 하나로 묶였을 수 있다">×${p.exit_count}</i>`
+                 : "")
+            : `<i class="dim" title="이 사람의 조각 중 출구 게이트를 통과한 것이 없다">—</i>`}</td>
         <td class="t-num">${f(p.t1 - p.t0, 1)}</td>
         <td>${m.route ? m.route.replace("auto-evac-", "ae") : "—"}${m.routeSplit ? ' <i title="조각마다 배정 경로가 달랐다 — 경로를 오갔을 수 있음">↔</i>' : ""}</td>
       </tr>`;
     }).join("");
-    return `<div class="jybar">사람별 지표 <i>재구성된 ${ps.length}명 기준 · EPFI·이탈은 조각값을 관측 수로 가중평균</i></div>
+    const note = ex.events != null
+      ? `출구 게이트 ${ex.events}건 → 사람 ${ex.persons_with_exit}명 귀속`
+        + (ex.unowned ? ` · ${ex.unowned}건 미귀속(재구성에서 빠진 조각)` : "")
+      : "";
+    return `<div class="jybar">사람별 지표
+        <i>재구성된 ${ps.length}명(global id) · EPFI·이탈은 조각값을 관측 수로 가중평균</i></div>`
+      + (note ? `<div class="jynote">${note} — 게이트는 <b>트랙렛 단위</b>로 세므로
+          한 사람이 조각나면 여러 번, 재구성에서 빠진 조각은 아무에게도 안 붙는다.
+          사람 수와 통과 수가 다른 것 자체가 품질 신호다.</div>` : "")
+      + `
       <div class="jymwrap"><table class="reptbl jymtbl">
         <thead><tr>
           <th>사람</th>
@@ -1601,6 +1616,13 @@ const Session = (() => {
 
   /** ID 재구성 패널만 다시 그린다 — 종합 탭은 건드리지 않는다. */
   function jyPaint() {
+    // 사람별 지표는 [종합] 탭에 산다 — 결과이지 재구성 진단이 아니다.
+    const mt = document.getElementById("repPersonTbl");
+    if (mt) {
+      mt.innerHTML = JY_BUSY ? `<div class="mnote">ReID 재구성 중…</div>`
+        : (JY && JY.ok) ? jyMetricTbl(JY)
+        : `<div class="mnote">${(JY && JY.reason) || "재구성 결과 없음"}</div>`;
+    }
     const pane = document.querySelector('.reppane[data-rp="jy"]');
     if (!pane) return;
     pane.innerHTML = jySection();
@@ -1779,6 +1801,8 @@ const Session = (() => {
                    exits, persons, zones, bns, fname })
       + exitBars(exits, fname)
       + journeysTable(journeys, fname)
+      + `<div class="repsec-h">사람별 지표 <i class="mtag">global id 기준</i></div>`
+      + `<div id="repPersonTbl"><div class="mnote">ReID 재구성 중…</div></div>`
       + `<div class="drill-perfloor">
         <div class="drill-perfloor-h">층별 상세</div>
         <table class="drill-tbl">

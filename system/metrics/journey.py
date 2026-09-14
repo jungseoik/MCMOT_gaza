@@ -186,28 +186,107 @@ def _merge_path(path: list, bin_sec: float = 0.2) -> list:
     return out
 
 
-def _seg_cross_ts(path: list, line, inside) -> float | None:
-    """궤적이 통과선을 '안 → 밖' 으로 넘은 시각. 못 넘었으면 None.
+def _exit_times(db_path: Path, persons: list, meta: dict) -> None:
+    """사람별 출구 통과 시각(경보 기준 초)을 persons 에 채운다.
 
-    출입구 통과 시각용. 엔진의 DirectionalLine 과 같은 부호 규칙을 쓴다 —
-    inside 점이 있는 쪽이 양(+), 반대쪽으로 넘어가면 통과.
+    **엔진과 같은 판정기를 그대로 쓴다** — 자체 기준을 만들면 리포트의 통과
+    시각과 세션의 통과 인원이 다른 규칙으로 나와 서로 대조가 안 된다.
+    분기도 engine._rebuild_exits 와 동일하게 맞춘다:
+      ① count_cam + cam_zone  → ZoneGate (화면 영역 + 체류). 문이 프레임
+         가장자리면 사람이 선 반대편에 안 나타나 선으로는 못 센다.
+      ② count_cam + cam_line  → DirectionalLine (화면 px, 데드밴드 절반)
+      ③ 그 외                  → DirectionalLine (맵 px)
+    ①·②는 그 카메라의 관측만, ③은 맵 투영 좌표를 먹인다.
     """
-    if not line or len(line) < 2 or not inside or len(path) < 2:
-        return None
-    (x1, y1), (x2, y2) = line[0], line[1]
-    def side(p):
-        return (x2 - x1) * (p[1] - y1) - (y2 - y1) * (p[0] - x1)
-    s_in = side(inside)
-    if abs(s_in) < 1e-9:
-        return None
-    prev = None
-    for ts, p in path:
-        s = side(p) * (1.0 if s_in > 0 else -1.0)
-        if prev is not None and prev > 0 >= s:
-            return float(ts)
-        prev = s
-    return None
+    from system.spatial.geometry import DirectionalLine, ZoneGate
 
+    exits = (meta.get("site_view") or {}).get("exits") or []
+    if not exits:
+        return
+    gates = []
+    for e in exits:
+        cc = e.get("count_cam")
+        z = e.get("cam_zone")
+        if cc and z and len(z) >= 3:
+            gates.append({"id": e.get("id"), "cam": cc, "map": False,
+                          "g": ZoneGate(z, dwell=int(e.get("cam_zone_dwell") or 2))})
+        elif cc and e.get("cam_line") and e.get("cam_inside"):
+            gates.append({"id": e.get("id"), "cam": cc, "map": False,
+                          "g": DirectionalLine(e["cam_line"], e["cam_inside"], margin_px=3.0)})
+        elif e.get("line") and e.get("inside"):
+            gates.append({"id": e.get("id"), "cam": None, "map": True,
+                          "g": DirectionalLine(e["line"], e["inside"], margin_px=6.0)})
+    if not gates:
+        return
+
+    # 엔진은 트랙렛 키(cam:local)로 센다. 사람 키로 바꿔 세면 안 된다 —
+    # 출구 존은 대개 매핑 헐 **밖**이라 그 구간 트랙렛은 임베딩이 없어
+    # 재구성에서 빠지는데(v1.15), 그걸 건너뛰면 통과가 6/10 으로 줄어든다.
+    # 엔진과 같은 키로 세고, 나온 사건을 사후에 사람에게 귀속시킨다.
+    owner = {}                                    # (cam, local) -> person_id
+    for pp in persons:
+        for s in pp["segments"]:
+            cam, lid = s["key"].rsplit(":", 1)
+            owner[(cam, int(lid))] = pp["person_id"]
+
+    H = {}
+    for c in meta.get("cameras", []):
+        m = c.get("mapping")
+        if m and m.get("H"):
+            H[c["cam_id"]] = np.asarray(m["H"], dtype=np.float64).reshape(3, 3)
+
+    con = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
+    try:
+        rows = con.execute(
+            "SELECT ts, cam_id, local_id, u, v, x1, y1, x2, y2 FROM tracks"
+            " ORDER BY call_seq, rowid").fetchall()
+    finally:
+        con.close()
+
+    alarm = meta.get("alarm_ts")
+    out: dict = {}
+    for ts, cam, lid, u, v, x1, y1, x2, y2 in rows:
+        okey = f"{cam}:{int(lid)}"                # 엔진과 같은 키
+        bbox = (x1, y1, x2, y2) if x1 is not None else None
+        for gt in gates:
+            if gt["map"]:
+                h = H.get(cam)
+                if h is None:
+                    continue
+                q = h @ np.array([float(u), float(v), 1.0])
+                if abs(q[2]) < 1e-9:
+                    continue
+                pt, bb = (float(q[0] / q[2]), float(q[1] / q[2])), None
+            else:
+                if cam != gt["cam"]:
+                    continue
+                pt, bb = (float(u), float(v)), bbox
+            ev = (gt["g"].observe(okey, pt, bb) if isinstance(gt["g"], ZoneGate)
+                  else gt["g"].observe(okey, pt))
+            if ev == "out":
+                out.setdefault((okey, gt["id"]), float(ts))
+
+    base = alarm if alarm is not None else (rows[0][0] if rows else 0.0)
+    # 트랙렛 사건 → 사람 귀속. 한 사람이 여러 번 세지면 **과병합 신호**라
+    # 횟수를 그대로 남긴다(가장 이른 시각 + 횟수).
+    first: dict = {}
+    cnt: dict = {}
+    unowned = 0
+    for (okey, eid), ts in sorted(out.items(), key=lambda kv: kv[1]):
+        cam, lid = okey.rsplit(":", 1)
+        pid = owner.get((cam, int(lid)))
+        if pid is None:
+            unowned += 1
+            continue
+        k = (pid, eid)
+        first.setdefault(k, ts)
+        cnt[k] = cnt.get(k, 0) + 1
+    for pp in persons:
+        pid = pp["person_id"]
+        pp["exit_at"] = {eid: round(ts - base, 1) for (q, eid), ts in first.items() if q == pid}
+        pp["exit_count"] = sum(v for (q, _), v in cnt.items() if q == pid)
+    return {"events": len(out), "unowned": unowned,
+            "persons_with_exit": len({q for q, _ in first})}
 
 def _kinematics(path: list, mps_cap: float = 12.0) -> dict:
     """궤적(초, (x,y) m) → 이동거리·속도·가속도.
@@ -463,17 +542,6 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
     for i in range(n):
         groups[find(i)].append(i)
 
-    # 출입구 통과선(맵 px → m) — 통과 시각 산출용
-    mpp = float(((meta.get("site_view") or {}).get("map") or {}).get("m_per_px") or 0)
-    alarm_ts = meta.get("alarm_ts")
-    exgeo = {}
-    for e in ((meta.get("site_view") or {}).get("exits") or []):
-        ln, ins = e.get("line"), e.get("inside")
-        if ln and len(ln) >= 2 and ins and mpp:
-            exgeo[e.get("id") or e.get("name")] = (
-                [(p[0] * mpp, p[1] * mpp) for p in ln[:2]],
-                (ins[0] * mpp, ins[1] * mpp))
-
     persons = []
     for gi, (_, idxs) in enumerate(sorted(groups.items(),
                                           key=lambda kv: min(tls[i]["t0"] for i in kv[1])), 1):
@@ -488,11 +556,6 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
             path.extend(tls[i].get("path") or [])
         path = _merge_path(path)
         kin = _kinematics(path)
-        exits = {}
-        for eid, (line, inside) in exgeo.items():
-            ts = _seg_cross_ts(path, line, inside)
-            if ts is not None:
-                exits[eid] = round(ts - (alarm_ts or path[0][0]), 1)
         persons.append({
             "person_id": f"p{gi}",
             "fragment": obs_n < pr.fragment_obs,
@@ -502,9 +565,14 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
             "obs": sum(s["n"] for s in segs),
             "segments": segs,
             **kin,
-            # 경보 이후 몇 초에 나갔나 (출구별). 안 나갔으면 키 없음.
-            "exit_at": exits,
+            "exit_at": {},          # 아래에서 엔진과 같은 판정기로 채운다
         })
+    # 출구 통과 — 엔진과 같은 판정기로 시간순 1패스 (사람 단위 키)
+    exinfo = None
+    try:
+        exinfo = _exit_times(db_path, persons, meta)
+    except Exception:
+        logger.exception("출구 통과 시각 산출 실패 — 나머지 지표는 그대로")
     persons.sort(key=lambda x: (x["fragment"], -x["obs"]))
     main = [x for x in persons if not x["fragment"]]
 
@@ -533,6 +601,10 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
         "n_persons": len(main),                     # 파편 제외한 '사람' 수
         "n_fragments": len(persons) - len(main),
         "fragment_obs_th": pr.fragment_obs,
+        # 출구 게이트 집계 — 게이트는 **트랙렛 단위**로 센다. 사람 수와 다를 수
+        # 있고, 그 차이 자체가 품질 신호다(한 사람이 여러 번 = 과병합 의심,
+        # 미귀속 = 재구성에서 빠진 조각이 문을 통과).
+        "exit_summary": exinfo,
         "params": asdict(pr),                       # 무엇으로 계산했는지 그대로 반환
         "defaults": asdict(Params()),               # UI 가 "기본값으로" 를 그릴 수 있게
         "cos_th": pr.cos_th, "rerank": pr.rerank, "viz": vizdata,
