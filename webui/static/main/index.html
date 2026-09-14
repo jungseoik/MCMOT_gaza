@@ -579,44 +579,6 @@
             <div id="rpIdrTbl" class="rpidrtbl"></div>
           </div>
           <div class="group">
-            <div class="gtitle">객체 <span class="cnt" id="rpObjCnt">0</span>
-              <span class="sp"></span>
-              <button class="tag-btn xs" id="rpObjSort" title="정렬 기준 전환">EPFI↑</button>
-            </div>
-            <!-- 재구성 전/후 토글 — 제목줄에 같이 두면 글자가 겹친다(사이드바 294px) -->
-            <div class="rpobjbar">
-              <span class="seg">
-                <button class="tag-btn xs on" id="rpObjModeTl" title="재구성 전 — 카메라별 트랙 조각">트랙렛</button>
-                <button class="tag-btn xs" id="rpObjModePr" title="재구성 후 — ReID 로 묶은 사람">사람</button>
-              </span>
-              <button class="tag-btn xs" id="rpJyCfgBtn" title="재구성 인자 조정">⚙</button>
-            </div>
-            <div class="mnote" id="rpJyNote"></div>
-            <!-- 재구성 인자 — 기본값으로 돌고, 여기서 바꿔 [재구성] 하면 다시 계산한다 -->
-            <div class="jycfg hidden" id="rpJyCfg">
-              <div class="jycfg-r"><label title="원본 코사인 하한 — 재랭킹과 무관하게 의미 고정">코사인 하한
-                <input type="number" id="jyCosTh" step="0.05" min="0" max="0.99"></label></div>
-              <div class="jycfg-r"><label title="k-reciprocal 재랭킹 유사도 하한">재랭킹 하한
-                <input type="number" id="jyRrTh" step="0.02" min="0" max="0.99"></label></div>
-              <div class="jycfg-r"><label title="군집 간 허용 금지쌍 비율. 0=한 쌍만 어겨도 병합 거부(엄격)">제약 완화
-                <input type="number" id="jyLinkTol" step="0.05" min="0" max="1"></label></div>
-              <div class="jycfg-r"><label title="사람 보행 상한 — 넘으면 다른 사람으로 본다">보행 상한 m/s
-                <input type="number" id="jySpeed" step="0.5" min="0.5" max="20"></label></div>
-              <div class="jycfg-r"><label title="카메라 간 매핑 오차 여유 — 이 안은 속도 판정 생략">매핑 여유 m
-                <input type="number" id="jySlack" step="0.5" min="0" max="30"></label></div>
-              <div class="jycfg-r"><label title="관측이 이보다 적은 군집은 '파편'으로 빼고 사람 수에서 제외">파편 기준 관측
-                <input type="number" id="jyFragObs" step="10" min="0"></label></div>
-              <div class="jycfg-r"><label title="끄면 원본 코사인만으로 묶는다">재랭킹
-                <input type="checkbox" id="jyRerank"></label></div>
-              <div class="jycfg-b">
-                <button class="tag-btn xs" id="jyReset" title="기본값으로">기본값</button>
-                <button class="btn primary xs" id="jyApply">재구성</button>
-              </div>
-            </div>
-            <div class="rpobj-hd" id="rpObjHd"></div>
-            <div id="rpObjTbl" class="rpobjtbl"></div>
-          </div>
-          <div class="group">
             <div class="gtitle">CBS 병목 선택 집계 <span class="mtag" id="rpBnTag"></span></div>
             <div class="mbnlist" id="rpBn"></div>
           </div>

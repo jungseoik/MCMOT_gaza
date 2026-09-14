@@ -1333,62 +1333,234 @@ const Session = (() => {
    *   ② 유사도 행렬  클러스터 순 정렬 — **대각 블록**이 뚜렷하면 잘 묶인 것이고,
    *      블록 밖 밝은 점은 "합쳤어야 했는데 못 합친 쌍"이라 바로 눈에 띈다.
    */
-  function journeySection(jy) {
-    if (!jy || !jy.ok) return "";
-    const v = jy.viz;
-    const pids = [...new Set((v && v.person_of) || [])].filter(Boolean);
-    const col = (pid) => {
-      const i = Math.max(0, pids.indexOf(pid));
-      return `hsl(${(i * 47) % 360},70%,58%)`;
-    };
-    let body = `<div class="repsec-h">여정 재구성 <i class="mtag">ReID 후처리</i></div>`
+  /** 리포트 탭 — 이미 채워진 resBody 를 [종합] 패널로 감싸고, [ID 재구성] 패널을
+   *  형제로 붙인다. 기존 리포트 마크업은 건드리지 않는다. */
+  function mountRepTabs(sid, floor) {
+    const body = $("resBody");
+    const main = body.innerHTML;
+    JY_SID = sid; JY_FLOOR = floor || "";
+    JY = null; JY_PARAMS = null; JY_OPEN = {}; JY_MODE = "pr"; JY_TL = [];
+    body.innerHTML =
+      `<div class="reptabs">`
+      + `<button class="tag-btn on" data-rt="sum">종합</button>`
+      + `<button class="tag-btn" data-rt="jy">ID 재구성</button>`
+      + `</div>`
+      + `<div class="reppane" data-rp="sum">${main}</div>`
+      + `<div class="reppane hidden" data-rp="jy"></div>`;
+    let loaded = false;
+    body.querySelectorAll(".reptabs .tag-btn").forEach((b) => {
+      b.onclick = () => {
+        const k = b.dataset.rt;
+        body.querySelectorAll(".reptabs .tag-btn").forEach((x) => x.classList.toggle("on", x === b));
+        body.querySelectorAll(".reppane").forEach((x) => x.classList.toggle("hidden", x.dataset.rp !== k));
+        // 재구성은 탭을 처음 열 때만 — 리포트를 여는 것만으로 계산하지 않는다
+        if (k === "jy" && !loaded) { loaded = true; jyLoad(); }
+      };
+    });
+  }
+
+  // ================================================== 리포트 — ID 재구성 탭
+  // 재생 화면 옆에 객체를 하나씩 늘어놓으면 조잡하다. 필요한 것은 "리포트를 눌러
+  // 분석 결과를 따로 확인" 하는 것이라, 전/후 표·썸네일·인자를 전부 이 탭에 둔다.
+  let JY = null;        // 현재 탭의 재구성 결과
+  let JY_SID = null;    // 대상 세션 id
+  let JY_FLOOR = null;  // 대상 층
+  let JY_PARAMS = null; // 사용자가 바꾼 인자 (null = 기본값)
+  let JY_MODE = "pr";   // pr=사람(재구성 후) · tl=트랙렛(재구성 전)
+  let JY_OPEN = {};     // 사람 행 펼침 상태
+  let JY_BUSY = false;
+  let JY_TL = [];       // 재구성 전 트랙렛 목록 (segments 를 펼쳐 만든다)
+
+  const JY_FIELDS = { jyCosTh: "cos_th", jyRrTh: "rerank_th", jyLinkTol: "link_tol",
+                      jySpeed: "max_speed_mps", jySlack: "slack_m", jyFragObs: "fragment_obs" };
+
+  const jyColor = (pid) => {
+    const ids = (JY && JY.persons || []).map((p) => p.person_id);
+    const i = Math.max(0, ids.indexOf(pid));
+    return `hsl(${(i * 47) % 360},70%,58%)`;
+  };
+
+  /** 트랙렛 키("cam:local")의 대표 프레임 썸네일 — 임베딩과 같은 프레임의 crop.
+   *  옛 녹화(schema ≤4)는 404 → onerror 로 지워 빈칸을 남기지 않는다. */
+  function jyThumb(key, cls) {
+    if (!key || !JY_SID) return "";
+    const i = String(key).lastIndexOf(":");
+    if (i < 0) return "";
+    const cam = key.slice(0, i), lid = key.slice(i + 1);
+    if (!/^\d+$/.test(lid)) return "";
+    return `<img class="jythumb ${cls || ""}" loading="lazy" alt=""`
+      + ` src="${API.drillThumbUrl(JY_SID, cam, lid, JY_FLOOR, 0)}" onerror="this.remove()">`;
+  }
+
+  function jySection() {
+    if (JY_BUSY) return `<div class="repsec-h">여정 재구성</div><div class="mnote">재구성 중…</div>`;
+    if (!JY || !JY.ok) {
+      return `<div class="repsec-h">여정 재구성</div>`
+        + `<div class="mnote">${(JY && JY.reason) || "재구성 결과 없음"}</div>`;
+    }
+    const cfgOpen = JY_PARAMS != null;
+    let h = `<div class="repsec-h">여정 재구성 <i class="mtag">ReID 후처리</i>`
+      + `<button class="tag-btn xs" id="jyCfgBtn" title="재구성 인자 조정">⚙ 인자</button></div>`
       + `<div class="repgrid">`
-      + repRow("재구성", `트랙렛 <b>${jy.tracklets}</b>개 → 사람 <b>${jy.n_persons}</b>명 + 파편 ${jy.n_fragments}개`)
-      + repRow("병합 문턱", `${jy.cos_th}${jy.rerank ? " · k-reciprocal 재랭킹(CVPR 2017)" : ""}`)
-      + repRow("파편 기준", `관측 ${jy.fragment_obs_th} 미만 — 오탐·스침으로 분리`)
-      + `</div>`;
+      + repRow("재구성", `트랙렛 <b>${JY.tracklets}</b>개 → 사람 <b>${JY.n_persons}</b>명`
+               + ` + 파편 ${JY.n_fragments}개`)
+      + repRow("병합 문턱", `코사인 ${JY.params.cos_th}`
+               + (JY.params.rerank ? ` · 재랭킹 ${JY.params.rerank_th} (k-reciprocal, CVPR 2017)` : " · 재랭킹 없음"))
+      + repRow("파편 기준", `관측 ${JY.fragment_obs_th} 미만 — 오탐·스침으로 분리`)
+      + repRow("물리 제약", `보행 ${JY.params.max_speed_mps}m/s · 매핑 여유 ${JY.params.slack_m}m`
+               + ` · 제약 완화 ${JY.params.link_tol}`)
+      + `</div>`
+      + `<div class="jycfg${cfgOpen ? "" : " hidden"}" id="jyCfg">
+          <div class="jycfg-g">
+            <label title="원본 코사인 하한 — 재랭킹과 무관하게 의미 고정">코사인 하한
+              <input type="number" id="jyCosTh" step="0.05" min="0" max="0.99"></label>
+            <label title="k-reciprocal 재랭킹 유사도 하한">재랭킹 하한
+              <input type="number" id="jyRrTh" step="0.02" min="0" max="0.99"></label>
+            <label title="군집 간 허용 금지쌍 비율. 0=한 쌍만 어겨도 병합 거부(엄격)">제약 완화
+              <input type="number" id="jyLinkTol" step="0.05" min="0" max="1"></label>
+            <label title="사람 보행 상한 — 넘으면 다른 사람으로 본다">보행 상한 m/s
+              <input type="number" id="jySpeed" step="0.5" min="0.5" max="20"></label>
+            <label title="카메라 간 매핑 오차 여유 — 이 안은 속도 판정 생략">매핑 여유 m
+              <input type="number" id="jySlack" step="0.5" min="0" max="30"></label>
+            <label title="관측이 이보다 적은 군집은 '파편'으로 빼고 사람 수에서 제외">파편 기준 관측
+              <input type="number" id="jyFragObs" step="10" min="0"></label>
+            <label title="끄면 원본 코사인만으로 묶는다">재랭킹
+              <input type="checkbox" id="jyRerank"></label>
+          </div>
+          <div class="jycfg-b">
+            <button class="tag-btn" id="jyReset">기본값</button>
+            <button class="btn primary sm" id="jyApply">재구성</button>
+          </div>
+        </div>`;
+    const v = JY.viz;
     if (v && v.xy && v.xy.length) {
-      body += `<div class="jyviz">
+      h += `<div class="jyviz">
         <div class="jyv"><div class="jyv-h">임베딩 2D 투영 <i>점=트랙렛 · 색=사람</i></div>
           <canvas id="jyScatter" width="440" height="340"></canvas></div>
         <div class="jyv"><div class="jyv-h">유사도 행렬 <i>클러스터 순 · 대각 블록이 뚜렷할수록 잘 묶임</i></div>
           <canvas id="jyMatrix" width="340" height="340"></canvas></div>
       </div>`;
     }
-    body += `<table class="reptbl"><thead><tr><th>사람</th><th>조각</th><th>관측</th>`
-      + `<th>지속</th><th>카메라</th></tr></thead><tbody>`
-      + (jy.persons || []).map((p) => `<tr${p.fragment ? ' style="opacity:.5"' : ""}>`
-          + `<td><span class="jydot" style="background:${col(p.person_id)}"></span>${p.person_id}`
-          + `${p.fragment ? " <i>파편</i>" : ""}</td>`
-          + `<td class="t-num">${p.n_tracklets}</td><td class="t-num">${p.obs}</td>`
-          + `<td class="t-num">${(p.t1 - p.t0).toFixed(1)}s</td>`
-          + `<td>${p.cams.map((c) => c.replace("rh_", "")).join(" ")}</td></tr>`).join("")
-      + `</tbody></table>`;
-    return body;
+    h += `<div class="jybar">객체별
+        <span class="seg">
+          <button class="tag-btn xs${JY_MODE === "tl" ? " on" : ""}" id="jyModeTl"
+            title="재구성 전 — 카메라별 트랙 조각">트랙렛 ${JY.tracklets}</button>
+          <button class="tag-btn xs${JY_MODE === "pr" ? " on" : ""}" id="jyModePr"
+            title="재구성 후 — ReID 로 묶은 사람">사람 ${JY.n_persons}</button>
+        </span>
+        <i>${JY_MODE === "pr" ? "행을 누르면 구성 트랙렛이 펼쳐집니다" : "재구성 전 조각 — 같은 사람이 여러 줄로 흩어져 있습니다"}</i>
+      </div>`;
+    h += JY_MODE === "pr" ? jyPersonTbl() : jyTrackletTbl();
+    return h;
   }
 
-  /** 리포트 탭 — 이미 채워진 resBody 를 [종합] 패널로 감싸고, 여정 재구성이 있으면
-   *  [ID 재구성] 패널을 형제로 붙인다. 기존 리포트 마크업은 건드리지 않는다. */
-  function mountRepTabs(jy) {
-    const body = $("resBody");
-    const hasJy = !!(jy && jy.ok);
-    const main = body.innerHTML;
-    body.innerHTML =
-      `<div class="reptabs">`
-      + `<button class="tag-btn on" data-rt="sum">종합</button>`
-      + (hasJy ? `<button class="tag-btn" data-rt="jy">ID 재구성`
-                 + ` <i class="mtag">${jy.tracklets}→${jy.n_persons}</i></button>` : "")
-      + `</div>`
-      + `<div class="reppane" data-rp="sum">${main}</div>`
-      + (hasJy ? `<div class="reppane hidden" data-rp="jy">${journeySection(jy)}</div>` : "");
-    let drawn = false;
-    body.querySelectorAll(".reptabs .tag-btn").forEach((b) => {
-      b.onclick = () => {
-        const k = b.dataset.rt;
-        body.querySelectorAll(".reptabs .tag-btn").forEach((x) => x.classList.toggle("on", x === b));
-        body.querySelectorAll(".reppane").forEach((x) => x.classList.toggle("hidden", x.dataset.rp !== k));
-        // canvas 는 폭이 잡힌 뒤 한 번만 그린다
-        if (k === "jy" && !drawn) { drawn = true; try { drawJourneyViz(jy); } catch (e) {} }
+  function jyPersonTbl() {
+    return `<table class="reptbl jytbl"><thead><tr><th></th><th>사람</th><th>조각</th>`
+      + `<th>관측</th><th>지속</th><th>카메라</th></tr></thead><tbody>`
+      + (JY.persons || []).map((p) => {
+          const open = !!JY_OPEN[p.person_id];
+          const segs = open ? (p.segments || []).map((s) =>
+            `<tr class="jyseg"><td></td><td colspan="5">${jyThumb(s.key, "sm")}`
+            + `<code>${s.key.replace("rh_", "")}</code>`
+            + ` <i>${(s.t1 - s.t0).toFixed(1)}s · ${s.n}관측</i></td></tr>`).join("") : "";
+          const best = (p.segments || []).slice().sort((a, b) => b.n - a.n)[0] || {};
+          return `<tr class="jyrow${p.fragment ? " frag" : ""}" data-pid="${p.person_id}">`
+            + `<td>${jyThumb(best.key)}</td>`
+            + `<td><span class="jydot" style="background:${jyColor(p.person_id)}"></span>`
+            + `${open ? "▾" : "▸"} ${p.person_id}${p.fragment ? " <i>파편</i>" : ""}</td>`
+            + `<td class="t-num">${p.n_tracklets}</td><td class="t-num">${p.obs}</td>`
+            + `<td class="t-num">${(p.t1 - p.t0).toFixed(1)}s</td>`
+            + `<td>${p.cams.map((c) => c.replace("rh_", "")).join(" ")}</td></tr>` + segs;
+        }).join("")
+      + `</tbody></table>`;
+  }
+
+  function jyTrackletTbl() {
+    return `<table class="reptbl jytbl"><thead><tr><th></th><th>트랙렛</th><th>관측</th>`
+      + `<th>지속</th><th>소속</th></tr></thead><tbody>`
+      + JY_TL.map((s) => `<tr>`
+          + `<td>${jyThumb(s.key)}</td>`
+          + `<td><code>${s.key.replace("rh_", "")}</code></td>`
+          + `<td class="t-num">${s.n}</td>`
+          + `<td class="t-num">${(s.t1 - s.t0).toFixed(1)}s</td>`
+          + `<td><span class="jydot" style="background:${jyColor(s.pid)}"></span>${s.pid}`
+          + `${s.fragment ? " <i>파편</i>" : ""}</td></tr>`).join("")
+      + `</tbody></table>`;
+  }
+
+  /** 재구성 결과에서 "재구성 전" 트랙렛 목록을 만든다 — 같은 데이터의 반대편 뷰라
+   *  별도 요청 없이 전/후를 그대로 대조할 수 있다. */
+  function jyBuildTracklets() {
+    JY_TL = [];
+    (JY && JY.persons || []).forEach((p) =>
+      (p.segments || []).forEach((s) =>
+        JY_TL.push({ ...s, pid: p.person_id, fragment: p.fragment })));
+    JY_TL.sort((a, b) => a.t0 - b.t0);
+  }
+
+  async function jyLoad() {
+    if (!JY_SID || JY_BUSY) return;
+    JY_BUSY = true; jyPaint();
+    try {
+      const r = await API.drillJourney(JY_SID,
+        { floor: JY_FLOOR, viz: true, ...(JY_PARAMS || {}) });
+      const by = r.by_floor || {};
+      JY = by[JY_FLOOR] || Object.values(by).find((x) => x && x.ok) || Object.values(by)[0] || null;
+      if (JY && JY.ok && JY.floor_id) JY_FLOOR = JY.floor_id;   // 썸네일 URL 이 맞도록
+    } catch (e) {
+      JY = { ok: false, reason: "재구성 실패: " + e.message };
+    } finally {
+      JY_BUSY = false;
+      jyBuildTracklets();
+      jyPaint();
+    }
+  }
+
+  /** ID 재구성 패널만 다시 그린다 — 종합 탭은 건드리지 않는다. */
+  function jyPaint() {
+    const pane = document.querySelector('.reppane[data-rp="jy"]');
+    if (!pane) return;
+    pane.innerHTML = jySection();
+    if (JY && JY.ok) {
+      jyCfgFill(JY_PARAMS || JY.params);
+      try { drawJourneyViz(JY); } catch (e) { /* 시각화 실패가 리포트를 막지 않게 */ }
+    }
+    jyBind(pane);
+  }
+
+  function jyCfgFill(src) {
+    if (!src) return;
+    Object.entries(JY_FIELDS).forEach(([el, k]) => {
+      const n = document.getElementById(el);
+      if (n && src[k] != null) n.value = src[k];
+    });
+    const rr = document.getElementById("jyRerank");
+    if (rr && src.rerank != null) rr.checked = !!src.rerank;
+  }
+
+  function jyCfgRead() {
+    const out = {};
+    Object.entries(JY_FIELDS).forEach(([el, k]) => {
+      const n = document.getElementById(el);
+      if (n && n.value !== "") out[k] = Number(n.value);
+    });
+    const rr = document.getElementById("jyRerank");
+    out.rerank = !!(rr && rr.checked);
+    return out;
+  }
+
+  function jyBind(pane) {
+    const on = (id, fn) => { const n = pane.querySelector("#" + id); if (n) n.onclick = fn; };
+    on("jyCfgBtn", () => pane.querySelector("#jyCfg").classList.toggle("hidden"));
+    on("jyModeTl", () => { JY_MODE = "tl"; jyPaint(); });
+    on("jyModePr", () => { JY_MODE = "pr"; jyPaint(); });
+    on("jyReset", () => { JY_PARAMS = null; jyLoad(); });
+    on("jyApply", () => { JY_PARAMS = jyCfgRead(); jyLoad(); });
+    pane.querySelectorAll(".jyrow").forEach((el) => {
+      el.onclick = () => {
+        const pid = el.dataset.pid;
+        JY_OPEN[pid] = !JY_OPEN[pid];
+        jyPaint();
       };
     });
   }
@@ -1497,7 +1669,7 @@ const Session = (() => {
       + REP_NOTE;
     // 여정 재구성은 성격이 달라(후처리 진단) 종합 리포트에 이어 붙이면 읽기가
     // 어렵다 — 탭으로 분리하고 기본은 [종합](기존 리포트 그대로).
-    mountRepTabs(roll.journey);
+    mountRepTabs(roll.session_id, roll.jy_floor);
     $("resultModal").classList.remove("hidden");
   }
 
