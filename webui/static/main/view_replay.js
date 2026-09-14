@@ -169,7 +169,11 @@ Views.replay = (() => {
     fillThresholds(st0 && st0.thresholds);
     setControlsEnabled(true);
     $("rpReset").disabled = false; $("rpApply").disabled = false; $("rpReport").disabled = false;
-    if (floors.length) loadDrillFloor(floors[0]);
+    // 관측이 **있는** 층을 먼저 연다. floors[0] 은 사이트 층 순서라 카메라가 없는
+    // 층(예: 리허설 빙의 때의 default)이 걸리면 빈 화면부터 보게 된다.
+    const first = floors.slice().sort(
+      (a, b) => (drillFrames[b] || []).length - (drillFrames[a] || []).length)[0];
+    if (floors.length) loadDrillFloor(first || floors[0]);
     $("rpHint").textContent = `건물 훈련 · 참여 ${floors.length}개 층 — 층을 골라 2D 재생, 임계값을 바꿔 [재계산]하면 건물 지표가 갱신됩니다.`;
   }
 
@@ -177,7 +181,16 @@ Views.replay = (() => {
   // seekAbsTs(선택): 이 절대 시각(초)으로 맞춘다 — 층 전환 시 같은 순간 유지용.
   // (드릴은 전 층 t_alarm 공유라 절대 ts로 맞추면 다른 층의 '같은 시점'이 보인다.)
   function loadDrillFloor(floor, seekAbsTs) {
+    if (curDrillFloor !== floor) journey = null;   // 층이 바뀌면 여정도 그 층 것으로
     curDrillFloor = floor;
+    // 객체별 지표는 층 단위다. showBuildingMetrics 는 층이 정해지기 **전에**
+    // 한 번 도는데(그때는 per_floor[0] 로 대체), 그 뒤 다시 그리지 않으면
+    // 카메라가 없는 층의 빈 목록이 그대로 남는다.
+    if (drill) {
+      const pf0 = (drill.per_floor || []).find((x) => x.floor_id === floor);
+      renderObjTbl((pf0 && pf0.result && pf0.result.person_metrics) || []);
+      if (objMode === "pr") renderPersonTbl();
+    }
     $("rpFloorSel").value = floor;
     const st = drillSites[floor] || null;
     site = st;
@@ -800,6 +813,7 @@ Views.replay = (() => {
       const absNow = (data && data.frames && data.frames.length)
         ? data.frames[0].ts + cursor : null;
       loadDrillFloor(e.target.value, absNow);
+      if (objMode === "pr") loadJourney();     // 층이 바뀌었으니 그 층으로 재구성
     };
     $("rpReport").onclick = async () => {
       if (!(drill && window.Session && Session.openDrillReport)) return;

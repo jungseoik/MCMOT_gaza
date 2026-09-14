@@ -120,11 +120,18 @@ class SessionRecorder:
         self._closed = False
 
     def record(self, cam_id: str, ts: float, tracks,
-               gids: list[str | None] | None = None) -> None:
+               gids: list[str | None] | None = None,
+               in_hull: list[bool] | None = None) -> None:
         """on_tracks 1회분 raw 트랙 버퍼링 (엔진 락 안에서 호출).
 
         gids: tracks 와 정렬된 확정 global_id (글로벌 ID 모드, v1.13) — 리플레이가
-        갤러리 상태를 재현하지 않고도 같은 id 를 쓰게 한다(결정성). None = 미확정."""
+        갤러리 상태를 재현하지 않고도 같은 id 를 쓰게 한다(결정성). None = 미확정.
+
+        in_hull: tracks 와 정렬된 "임베딩·썸네일을 남길 관측인가" (v1.15).
+        tracks 행은 raw 계약대로 전부 남기지만 외형은 헐(valid_roi) 안에서만
+        남긴다 — 헐 밖은 호모그래피 외삽이라 맵 좌표가 부정확하고, 그 좌표로
+        여정 재구성의 운동학 제약을 판정하면 근거 없는 판정이 된다.
+        None = 전부 남김(구버전 호출 호환)."""
         if self._closed:
             return
         seq = self._call_seq
@@ -136,8 +143,9 @@ class SessionRecorder:
                               float(u), float(v), float(tr.conf),
                               float(x1), float(y1), float(x2), float(y2),
                               (gids[i] if gids else None)))
-            self._note_emb(cam_id, int(tr.local_track_id), float(ts), tr.emb,
-                           getattr(tr, "crop_bgr", None))
+            if in_hull is None or (i < len(in_hull) and in_hull[i]):
+                self._note_emb(cam_id, int(tr.local_track_id), float(ts), tr.emb,
+                               getattr(tr, "crop_bgr", None))
         if len(self._buf) >= _BUFFER_FLUSH:
             self._flush()
         if seq % _COMMIT_EVERY == 0:

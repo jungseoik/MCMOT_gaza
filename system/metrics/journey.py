@@ -146,15 +146,40 @@ def _rerank(S: np.ndarray, k1: int = 20, k2: int = 6, lam: float = 0.3) -> np.nd
     return jac * (1 - lam) + orig * lam
 
 
+def _roi_of(cam: dict):
+    """카메라의 유효영역 polygon (맵 투영과 같은 규칙, spatial/projector 와 동일).
+
+    valid_roi 가 있으면 그것, 없으면 대응점(cctv_pts)의 컨벡스 헐 — 즉 보간
+    범위. 둘 다 없으면 None(거르지 않음).
+    """
+    if cam.get("valid_roi"):
+        return np.asarray(cam["valid_roi"], dtype=np.float32).reshape(-1, 2)
+    pts = ((cam.get("mapping") or {}).get("cctv_pts")) or None
+    if not pts or len(pts) < 3:
+        return None
+    import cv2
+    return cv2.convexHull(
+        np.asarray(pts, dtype=np.float32).reshape(-1, 1, 2)).reshape(-1, 2)
+
+
+def _in_roi(roi, u: float, v: float) -> bool:
+    import cv2
+    return cv2.pointPolygonTest(roi.reshape(-1, 1, 2).astype(np.float32),
+                                (float(u), float(v)), False) >= 0
+
+
 def _tracklets(db_path: Path, min_obs: int = MIN_OBS) -> tuple[list[dict], dict]:
     """트랙렛 집계 — (cam_id, local_id) 별 시각·맵위치(m)·임베딩."""
     meta = recorder.load_meta(db_path)
     mpp = float(((meta.get("site_view") or {}).get("map") or {}).get("m_per_px") or 0) or None
-    H = {}
+    H, ROI = {}, {}
     for c in meta.get("cameras", []):
         m = c.get("mapping")
         if m and m.get("H"):
             H[c["cam_id"]] = np.asarray(m["H"], dtype=np.float64).reshape(3, 3)
+        r = _roi_of(c)
+        if r is not None:
+            ROI[c["cam_id"]] = r
     embs = recorder.load_track_embs(db_path)
 
     con = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
@@ -165,8 +190,15 @@ def _tracklets(db_path: Path, min_obs: int = MIN_OBS) -> tuple[list[dict], dict]
     finally:
         con.close()
 
+    # 헐(valid_roi) 안 관측만 쓴다 — 헐 밖은 호모그래피 외삽이라 맵 좌표가
+    # 부정확하고, 그 좌표로 운동학 cannot-link 을 판정하면 근거 없는 판정이 된다.
+    # 녹화 db 는 raw 계약이라 헐 밖 행도 들어 있다(실측 43%). v1.15 이후 녹화는
+    # 임베딩 자체가 헐 안에서만 남지만, 위치는 여기서 다시 걸러야 한다.
     agg = defaultdict(list)
     for cam, lid, ts, u, v in rows:
+        r = ROI.get(cam)
+        if r is not None and not _in_roi(r, u, v):
+            continue
         agg[(cam, int(lid))].append((float(ts), float(u), float(v)))
 
     out = []
