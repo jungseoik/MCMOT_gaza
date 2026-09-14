@@ -25,6 +25,9 @@ Views.replay = (() => {
   let drillFrames = {};     // {floor: frames[]} — 층별 2D 재생 프레임
   let drillSites = {};      // {floor: site_view} — 층별 배경 공간요소
   let curDrillFloor = null; // 현재 재생 중인 층
+  let objSortKey = "epfi";   // epfi | dev | dur
+  let objRows = [];          // 표시 중인 person_metrics (트랙렛 단위)
+  let objSel = null;         // 선택된 객체 id (맵 하이라이트용)
 
   // 재생 상태
   let playing = false;
@@ -175,6 +178,10 @@ Views.replay = (() => {
   function loadDrillFloor(floor, seekAbsTs) {
     curDrillFloor = floor;
     $("rpFloorSel").value = floor;
+    if (drill) {
+      const pf0 = (drill.per_floor || []).find((x) => x.floor_id === floor);
+      renderObjTbl((pf0 && pf0.result && pf0.result.person_metrics) || []);
+    }
     const st = drillSites[floor] || null;
     site = st;
     data = { frames: drillFrames[floor] || [], site: st, result: floorResultOf(floor),
@@ -220,10 +227,55 @@ Views.replay = (() => {
       ? (vs.reduce((s, v) => s + v, 0) / vs.length).toFixed(2) : "—";
     $("rpIdrProg").textContent = `${zSt}/${zTot}`;
     renderIdrTbl(allZ, dr.alarm_ts, tag);
+    // 객체별 지표는 층 단위 — 드릴이면 지금 보고 있는 층 것. 층이 정해지기 전에
+    // 한 번 도므로 loadDrillFloor 에서 그 층 것으로 다시 그린다.
+    const pf = (dr.per_floor || []).find((x) => x.floor_id === curDrillFloor)
+            || (dr.per_floor || [])[0];
+    renderObjTbl((pf && pf.result && pf.result.person_metrics) || []);
     $("rpBase").innerHTML = (dr.per_floor || []).map((pf) => {
       const r = pf.result || {};
       return `<div class="rpbase-row"><b>${floorName(pf.floor_id)}</b> · SEI ${fmtVal(r.sei,0)} · EPFI ${fmtVal(r.epfi_avg,0)} · CBS ${fmtVal(r.cbs_total,1)}</div>`;
     }).join("");
+  }
+
+  /** 객체별 지표 표 — 재계산된 person_metrics(EPFI·이탈거리·배정경로·지속).
+   *  트랙렛(카메라별 조각) 단위다. 사람 단위로 묶은 값·썸네일은 리포트의
+   *  [ID 재구성] 탭에 있다 — 재생 화면 옆에 늘어놓으면 조잡해서 옮겼다. */
+  function renderObjTbl(pms) {
+    const wrap = $("rpObjTbl");
+    if (!wrap) return;
+    objRows = pms || [];
+    $("rpObjCnt").textContent = objRows.length;
+    if (!objRows.length) {
+      wrap.innerHTML = `<div class="mnote">객체 지표 없음</div>`;
+      return;
+    }
+    const key = { epfi: (o) => o.epfi == null ? -1 : o.epfi,
+                  dev:  (o) => o.mean_deviation_m == null ? -1 : o.mean_deviation_m,
+                  dur:  (o) => o.duration_sec == null ? -1 : o.duration_sec }[objSortKey];
+    // EPFI 는 낮을수록 나쁨 → 오름차순(문제 객체 먼저), 나머지는 큰 값 먼저
+    const rows = [...objRows].sort((a, b) =>
+      objSortKey === "epfi" ? key(a) - key(b) : key(b) - key(a));
+    const f = (v, d) => v == null ? "—" : v.toFixed(d);
+    wrap.innerHTML = rows.map((o) => {
+      const id = o.global_track_id || "—";
+      const bad = o.epfi != null && o.epfi < 60;
+      return `<div class="rpobj-row${id === objSel ? " sel" : ""}" data-oid="${id}"
+           title="${id} · 경로 ${o.assigned_route_id || "—"} · 최대이탈 ${f(o.max_deviation_m, 2)}m">
+        <span class="oid">${id.replace("rh_", "")}</span>
+        <span class="t-num"${bad ? ' style="color:#e5484d"' : ""}>${f(o.epfi, 0)}</span>
+        <span class="t-num">${f(o.mean_deviation_m, 1)}</span>
+        <span class="t-num">${f(o.duration_sec, 1)}</span>
+        <span class="ort">${(o.assigned_route_id || "—").replace("auto-evac-", "ae")}</span>
+      </div>`;
+    }).join("");
+    wrap.querySelectorAll(".rpobj-row").forEach((el) => {
+      el.onclick = () => {
+        objSel = objSel === el.dataset.oid ? null : el.dataset.oid;
+        renderObjTbl(objRows);
+        if (mc) mc.render();
+      };
+    });
   }
 
   /** IDR 구역별 표 — 값(m/s)·개시지연·참여비율. 재계산이면 원본 대비 변화를 함께 보여준다.
@@ -267,6 +319,9 @@ Views.replay = (() => {
   function clearMetrics() {
     ["rpSei","rpEpfi","rpCbs","rpIdr"].forEach((id) => { $(id).textContent = "—"; });
     $("rpBase").innerHTML = "";
+    if ($("rpObjTbl")) $("rpObjTbl").innerHTML = "";
+    if ($("rpObjCnt")) $("rpObjCnt").textContent = "0";
+    objRows = []; objSel = null;
     if ($("rpIdrTbl")) $("rpIdrTbl").innerHTML = "";
     if ($("rpIdrProg")) $("rpIdrProg").textContent = "—";
     idrBase = null;
@@ -489,6 +544,7 @@ Views.replay = (() => {
     $("rpSei").textContent = res.sei == null ? "—" : Math.round(res.sei);
     $("rpEpfi").textContent = res.epfi_avg == null ? "—" : Math.round(res.epfi_avg);
     $("rpCbs").textContent = (res.cbs_total || 0).toFixed(1);
+    renderObjTbl(res.person_metrics || []);        // 개별 층 모드 경로
     const zm = res.zone_metrics || [];
     const started = zm.filter((z) => z.status === "started").length;
     const vs = zm.map((z) => z.idr).filter((v) => v != null);
@@ -582,6 +638,12 @@ Views.replay = (() => {
     $("rpSpeed").onchange = (e) => { speed = parseFloat(e.target.value) || 1; };
     $("rpApply").onclick = recompute;
     $("rpReset").onclick = () => { fillThresholds(site && site.thresholds); $("rpMsg").textContent = "원래값으로 되돌림 — [재계산]을 눌러 반영"; };
+    $("rpObjSort").onclick = () => {                    // EPFI↑ → 이탈↓ → 지속↓ 순환
+      const nxt = { epfi: "dev", dev: "dur", dur: "epfi" };
+      objSortKey = nxt[objSortKey];
+      $("rpObjSort").textContent = { epfi: "EPFI↑", dev: "이탈↓", dur: "지속↓" }[objSortKey];
+      renderObjTbl(objRows);
+    };
     $("rpModeSess").onclick = () => setMode("sess");
     $("rpModeDrill").onclick = () => setMode("drill");
     $("rpFloorSel").onchange = (e) => {

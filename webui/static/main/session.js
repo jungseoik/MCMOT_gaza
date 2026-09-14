@@ -1340,12 +1340,12 @@ const Session = (() => {
     if (z) z.classList.add("hidden");
   }
 
-  function mountRepTabs(sid, floor) {
+  function mountRepTabs(sid, floor, pm) {
     jyZoomHide();
     const body = $("resBody");
     const main = body.innerHTML;
     JY_SID = sid; JY_FLOOR = floor || "";
-    JY = null; JY_PARAMS = null; JY_OPEN = {}; JY_MODE = "pr"; JY_TL = [];
+    JY = null; JY_PARAMS = null; JY_OPEN = {}; JY_MODE = "pr"; JY_TL = []; JY_PM = pm || [];
     body.innerHTML =
       `<div class="reptabs">`
       + `<button class="tag-btn on" data-rt="sum">종합</button>`
@@ -1376,6 +1376,7 @@ const Session = (() => {
   let JY_OPEN = {};     // 사람 행 펼침 상태
   let JY_BUSY = false;
   let JY_TL = [];       // 재구성 전 트랙렛 목록 (segments 를 펼쳐 만든다)
+  let JY_PM = [];       // 그 층의 person_metrics (트랙렛 단위 EPFI·이탈)
 
   const JY_FIELDS = { jyCosTh: "cos_th", jyRrTh: "rerank_th", jyLinkTol: "link_tol",
                       jySpeed: "max_speed_mps", jySlack: "slack_m", jyFragObs: "fragment_obs" };
@@ -1456,6 +1457,7 @@ const Session = (() => {
           <canvas id="jyMatrix" width="340" height="340"></canvas></div>
       </div>`;
     }
+    h += jyMetricTbl();
     h += `<div class="jybar">객체별
         <span class="seg">
           <button class="tag-btn xs${JY_MODE === "tl" ? " on" : ""}" id="jyModeTl"
@@ -1467,6 +1469,76 @@ const Session = (() => {
       </div>`;
     h += JY_MODE === "pr" ? jyPersonTbl() : jyTrackletTbl();
     return h;
+  }
+
+  /** 트랙렛 단위 person_metrics(EPFI·이탈)를 사람 단위로 접는다.
+   *  엔진이 계산한 값을 그대로 쓰고 관측 수로 가중평균한다 — 여기서 EPFI 를
+   *  다시 계산하면 엔진과 따로 놀아 두 화면의 숫자가 어긋난다. */
+  function jyFoldMetrics(person, pmByKey) {
+    let wsum = 0, epfi = 0, dev = 0, devMax = null;
+    const routes = {};
+    (person.segments || []).forEach((s) => {
+      const m = pmByKey[s.key];
+      if (!m) return;
+      const w = s.n || 1;
+      if (m.epfi != null) { epfi += m.epfi * w; wsum += w; }
+      if (m.mean_deviation_m != null) dev += m.mean_deviation_m * w;
+      if (m.max_deviation_m != null) devMax = Math.max(devMax == null ? -1 : devMax, m.max_deviation_m);
+      if (m.assigned_route_id) routes[m.assigned_route_id] = (routes[m.assigned_route_id] || 0) + w;
+    });
+    const route = Object.entries(routes).sort((a, b) => b[1] - a[1])[0];
+    return {
+      epfi: wsum ? epfi / wsum : null,
+      dev: wsum ? dev / wsum : null,
+      devMax,
+      route: route ? route[0] : null,
+      // 배정 경로가 조각마다 갈리면 경로를 오갔다는 뜻 — EPFI 해석의 단서
+      routeSplit: Object.keys(routes).length > 1,
+    };
+  }
+
+  /** 사람별 4대지표·운동 지표 표 — 재구성이 만든 '사람' 단위로 본 결과.
+   *  ④ 리플레이 사이드바의 표는 트랙렛(조각) 단위라 한 사람이 여러 줄로 나온다. */
+  function jyMetricTbl() {
+    const ps = (JY.persons || []).filter((p) => !p.fragment);
+    if (!ps.length) return "";
+    const pm = {};
+    (JY_PM || []).forEach((m) => { if (m.global_track_id) pm[m.global_track_id] = m; });
+    const f = (v, d) => v == null ? "—" : (+v).toFixed(d);
+    const rows = ps.map((p) => {
+      const m = jyFoldMetrics(p, pm);
+      const exits = Object.entries(p.exit_at || {});
+      const bad = m.epfi != null && m.epfi < 60;
+      return `<tr>
+        <td><span class="jydot" style="background:${jyColor(p.person_id)}"></span>
+            <b>${p.person_id}</b></td>
+        <td class="t-num${bad ? " bad" : ""}">${f(m.epfi, 0)}</td>
+        <td class="t-num">${f(m.dev, 2)}</td>
+        <td class="t-num">${f(m.devMax, 2)}</td>
+        <td class="t-num">${f(p.dist_m, 1)}</td>
+        <td class="t-num">${f(p.speed_avg, 2)}</td>
+        <td class="t-num">${f(p.speed_p95, 2)}</td>
+        <td class="t-num">${f(p.accel_p95, 2)}</td>
+        <td class="t-num">${exits.length ? exits.map(([k, v]) => `${v}s`).join(" ") : "—"}</td>
+        <td class="t-num">${f(p.t1 - p.t0, 1)}</td>
+        <td>${m.route ? m.route.replace("auto-evac-", "ae") : "—"}${m.routeSplit ? ' <i title="조각마다 배정 경로가 달랐다 — 경로를 오갔을 수 있음">↔</i>' : ""}</td>
+      </tr>`;
+    }).join("");
+    return `<div class="jybar">사람별 지표 <i>재구성된 ${ps.length}명 기준 · EPFI·이탈은 조각값을 관측 수로 가중평균</i></div>
+      <div class="jymwrap"><table class="reptbl jymtbl">
+        <thead><tr>
+          <th>사람</th>
+          <th title="경로 충실도 0~100 — 높을수록 권장 경로를 따름">EPFI</th>
+          <th title="권장 경로에서 평균 얼마나 벗어났나">이탈 평균 m</th>
+          <th title="가장 크게 벗어난 순간">최대 m</th>
+          <th title="관측된 구간의 이동 거리 합">이동 m</th>
+          <th title="이동거리 / 관측 구간 시간">평균 m/s</th>
+          <th title="1초 창 속도의 상위 5% — 단발 이상치에 흔들리지 않게">빠른 구간 m/s</th>
+          <th title="속도 변화율의 상위 5%">가속 m/s²</th>
+          <th title="경보 이후 출구 통과까지 걸린 시간">출구 통과</th>
+          <th title="처음 보인 때부터 마지막까지">추적 s</th>
+          <th title="가장 많이 배정된 대피 경로">경로</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
   function jyPersonTbl() {
@@ -1717,7 +1789,10 @@ const Session = (() => {
       + REP_NOTE;
     // 여정 재구성은 성격이 달라(후처리 진단) 종합 리포트에 이어 붙이면 읽기가
     // 어렵다 — 탭으로 분리하고 기본은 [종합](기존 리포트 그대로).
-    mountRepTabs(roll.session_id, roll.jy_floor);
+    // 사람별 지표는 그 층의 트랙렛 지표를 접어서 만든다 — 층을 못 찾으면 전 층.
+    const jyPf = (roll.per_floor || []).find((x) => x.floor_id === roll.jy_floor);
+    mountRepTabs(roll.session_id, roll.jy_floor,
+                 (jyPf && jyPf.result && jyPf.result.person_metrics) || persons);
     $("resultModal").classList.remove("hidden");
   }
 

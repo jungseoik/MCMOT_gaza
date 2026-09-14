@@ -154,6 +154,111 @@ def _rerank(S: np.ndarray, k1: int = 20, k2: int = 6, lam: float = 0.3) -> np.nd
     return jac * (1 - lam) + orig * lam
 
 
+
+
+def _merge_path(path: list, bin_sec: float = 0.2) -> list:
+    """여러 조각의 관측을 하나의 궤적으로 합친다 — **같은 시각은 평균**.
+
+    시야가 겹치는 카메라 두 대가 같은 순간을 동시에 보면, 단순히 이어 붙일 경우
+    두 카메라의 투영 좌표를 왕복하며 지그재그가 생겨 이동거리가 몇 배로 부풀고
+    속도가 사람 한계를 넘는다(실측: 조각 10개짜리에서 235m·평균 6.6m/s).
+    한 사람은 한 순간에 한 곳에 있으므로 같은 시간 구간의 관측은 평균이 맞다.
+    """
+    if not path:
+        return []
+    acc = defaultdict(list)
+    for ts, p in path:
+        acc[round(float(ts) / bin_sec)].append(p)
+    out = []
+    for k in sorted(acc):
+        ps = acc[k]
+        out.append((k * bin_sec,
+                    (sum(q[0] for q in ps) / len(ps), sum(q[1] for q in ps) / len(ps))))
+    # 카메라가 붙고 떨어지는 순간 평균 좌표가 계단처럼 튄다(매핑 오차가 카메라마다
+    # 달라서). 3점 이동평균으로 그 계단만 눕힌다 — 보행 궤적은 거의 그대로다.
+    if len(out) >= 3:
+        sm = [out[0]]
+        for i in range(1, len(out) - 1):
+            w = [out[i - 1][1], out[i][1], out[i + 1][1]]
+            sm.append((out[i][0], (sum(q[0] for q in w) / 3.0, sum(q[1] for q in w) / 3.0)))
+        sm.append(out[-1])
+        out = sm
+    return out
+
+
+def _seg_cross_ts(path: list, line, inside) -> float | None:
+    """궤적이 통과선을 '안 → 밖' 으로 넘은 시각. 못 넘었으면 None.
+
+    출입구 통과 시각용. 엔진의 DirectionalLine 과 같은 부호 규칙을 쓴다 —
+    inside 점이 있는 쪽이 양(+), 반대쪽으로 넘어가면 통과.
+    """
+    if not line or len(line) < 2 or not inside or len(path) < 2:
+        return None
+    (x1, y1), (x2, y2) = line[0], line[1]
+    def side(p):
+        return (x2 - x1) * (p[1] - y1) - (y2 - y1) * (p[0] - x1)
+    s_in = side(inside)
+    if abs(s_in) < 1e-9:
+        return None
+    prev = None
+    for ts, p in path:
+        s = side(p) * (1.0 if s_in > 0 else -1.0)
+        if prev is not None and prev > 0 >= s:
+            return float(ts)
+        prev = s
+    return None
+
+
+def _kinematics(path: list, mps_cap: float = 12.0) -> dict:
+    """궤적(초, (x,y) m) → 이동거리·속도·가속도.
+
+    순간값은 검출 흔들림에 매우 민감해 그대로 쓰면 최고속도가 사람 한계를
+    넘는다. 1초 창으로 묶어 계산하고, 물리적으로 불가능한 구간(mps_cap)은
+    센서 오차로 보고 버린다.
+    """
+    if len(path) < 2:
+        return {"dist_m": 0.0, "speed_avg": None, "speed_p95": None, "accel_p95": None}
+    dist = 0.0
+    for i in range(1, len(path)):
+        dist += math.dist(path[i - 1][1], path[i][1])
+    # 1초 창 속도열
+    vs = []
+    j = 0
+    for i in range(len(path)):
+        while path[i][0] - path[j][0] > 1.0:
+            j += 1
+        dt = path[i][0] - path[j][0]
+        if dt >= 0.5:
+            v = math.dist(path[j][1], path[i][1]) / dt
+            if v <= mps_cap:
+                vs.append((path[i][0], v))
+    if not vs:
+        span = path[-1][0] - path[0][0]
+        return {"dist_m": round(dist, 2),
+                "speed_avg": round(dist / span, 2) if span > 0 else None,
+                "speed_p95": None, "accel_p95": None}
+    acc = []
+    for i in range(1, len(vs)):
+        dt = vs[i][0] - vs[i - 1][0]
+        if dt > 0.2:
+            acc.append(abs(vs[i][1] - vs[i - 1][1]) / dt)
+    span = path[-1][0] - path[0][0]
+    # 최댓값은 5fps 검출의 단발 이상치를 그대로 집는다(실측 10.5m/s). 분포의
+    # 상위 5% 분위를 쓰면 "빠르게 움직인 구간" 이라는 의미는 지키면서 한 프레임
+    # 튐에는 흔들리지 않는다.
+    def p95(a):
+        if not a:
+            return None
+        b = sorted(a)
+        return round(b[min(len(b) - 1, int(round(0.95 * (len(b) - 1))))], 2)
+    return {
+        "dist_m": round(dist, 2),
+        "speed_avg": round(dist / span, 2) if span > 0 else None,
+        "speed_p95": p95([v for _, v in vs]),
+        "accel_p95": p95(acc),
+    }
+
+
 def _roi_of(cam: dict):
     """카메라의 유효영역 polygon (맵 투영과 같은 규칙, spatial/projector 와 동일).
 
@@ -225,10 +330,13 @@ def _tracklets(db_path: Path, min_obs: int = MIN_OBS) -> tuple[list[dict], dict]
             if abs(p[2]) < 1e-9:
                 return None
             return (float(p[0] / p[2]) * mpp, float(p[1] / p[2]) * mpp)
+        # 궤적(맵 m) — 사람 단위 이동거리·속도·가속도 산출용. 투영 실패는 버린다.
+        path = [(ts, q) for ts, u, v in obs if (q := xy(u, v)) is not None]
         out.append({
             "key": f"{cam}:{lid}", "cam": cam, "local_id": lid,
             "t0": obs[0][0], "t1": obs[-1][0], "n": len(obs),
             "p0": xy(obs[0][1], obs[0][2]), "p1": xy(obs[-1][1], obs[-1][2]),
+            "path": path,
             "protos": P,
         })
     out.sort(key=lambda d: (d["t0"], d["cam"]))
@@ -355,6 +463,17 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
     for i in range(n):
         groups[find(i)].append(i)
 
+    # 출입구 통과선(맵 px → m) — 통과 시각 산출용
+    mpp = float(((meta.get("site_view") or {}).get("map") or {}).get("m_per_px") or 0)
+    alarm_ts = meta.get("alarm_ts")
+    exgeo = {}
+    for e in ((meta.get("site_view") or {}).get("exits") or []):
+        ln, ins = e.get("line"), e.get("inside")
+        if ln and len(ln) >= 2 and ins and mpp:
+            exgeo[e.get("id") or e.get("name")] = (
+                [(p[0] * mpp, p[1] * mpp) for p in ln[:2]],
+                (ins[0] * mpp, ins[1] * mpp))
+
     persons = []
     for gi, (_, idxs) in enumerate(sorted(groups.items(),
                                           key=lambda kv: min(tls[i]["t0"] for i in kv[1])), 1):
@@ -362,6 +481,18 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
         segs = [{"key": tls[i]["key"], "cam": tls[i]["cam"],
                  "t0": tls[i]["t0"], "t1": tls[i]["t1"], "n": tls[i]["n"]} for i in idxs]
         obs_n = sum(s["n"] for s in segs)
+        # 사람 단위 궤적 — 조각을 시간순으로 이어 붙인다. 조각 사이 공백은 잇지
+        # 않는다(안 보이던 구간을 직선으로 메우면 이동거리가 부풀려진다).
+        path = []
+        for i in idxs:
+            path.extend(tls[i].get("path") or [])
+        path = _merge_path(path)
+        kin = _kinematics(path)
+        exits = {}
+        for eid, (line, inside) in exgeo.items():
+            ts = _seg_cross_ts(path, line, inside)
+            if ts is not None:
+                exits[eid] = round(ts - (alarm_ts or path[0][0]), 1)
         persons.append({
             "person_id": f"p{gi}",
             "fragment": obs_n < pr.fragment_obs,
@@ -370,6 +501,9 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
             "cams": sorted({s["cam"] for s in segs}),
             "obs": sum(s["n"] for s in segs),
             "segments": segs,
+            **kin,
+            # 경보 이후 몇 초에 나갔나 (출구별). 안 나갔으면 키 없음.
+            "exit_at": exits,
         })
     persons.sort(key=lambda x: (x["fragment"], -x["obs"]))
     main = [x for x in persons if not x["fragment"]]
