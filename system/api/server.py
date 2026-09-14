@@ -1403,7 +1403,8 @@ async def drill_journey(session_id: str, request: Request):
     끝난 뒤에는 전 구간이 기록에 남아 있어 양방향·전역으로 다시 묶을 수 있다.
 
     body(모두 선택): journey.Params 의 필드 전부(cos_th·rerank·rerank_th·
-      max_speed_mps·slack_m·fragment_obs·min_obs·link_tol) + viz(산점도·
+      max_speed_mps·slack_m·fragment_obs·min_obs·link_tol·exit_unique)
+      + refine(정밀 재구성 — crop 재임베딩, GPU 사용) + viz(산점도·
       유사도행렬 동봉, 기본 true) + floor(층 — 드릴은 층별 db).
       지정하지 않은 값은 기본값. 응답의 params/defaults 로 무엇이 쓰였는지 돌려준다.
     """
@@ -1426,7 +1427,10 @@ async def drill_journey(session_id: str, request: Request):
             out[fid] = await anyio.to_thread.run_sync(
                 lambda p=db: _journey.reconstruct(
                     p, _journey.Params.from_dict(body),
-                    viz=bool(body.get("viz", True))))
+                    viz=bool(body.get("viz", True)),
+                    # 정밀: 저장 crop 을 ReID 로 다시 임베딩(GPU) + 트랙 내부 분할.
+                    # 녹화 EMA 는 트랙 안쪽 뒤바뀜을 뭉갠다.
+                    refine=bool(body.get("refine", False))))
         except Exception as e:                     # 재구성 실패가 리플레이를 막지 않게
             logger.exception("여정 재구성 실패: %s/%s", session_id, fid)
             out[fid] = {"ok": False, "reason": f"{type(e).__name__}: {e}"}

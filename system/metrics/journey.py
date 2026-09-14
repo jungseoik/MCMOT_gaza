@@ -191,6 +191,75 @@ def _merge_path(path: list, bin_sec: float = 0.2) -> list:
     return out
 
 
+
+SPLIT_TH = 0.30            # 트랙렛 내부 교차 유사도가 이보다 낮으면 뒤바뀜으로 보고 쪼갠다.
+                           # 0.75 로 잡으면 시점 변화(앉음→뒷모습)까지 잘라 과분할된다.
+
+
+def refine_features(db_path: Path, split_th: float = SPLIT_TH) -> tuple[dict, dict]:
+    """저장된 crop 을 ReID 로 다시 임베딩 → (임베딩 override, 분할점).
+
+    녹화 임베딩은 트래커의 EMA(α=0.9)라 트랙 **안쪽**에서 박스가 다른 사람에게
+    옮겨가도 서서히 섞여 안 보인다(실측 내부 교차 유사도 EMA 중앙 0.977 vs
+    crop 재임베딩 0.632). crop 은 프레임별 원본이라 그대로 드러난다.
+
+    분할과 특징 교체는 **같이** 가야 한다 — 쪼개기만 하고 EMA 를 그대로 쓰면
+    나뉜 조각이 다시 같은 사람으로 묶인다(실측 cam09:15 두 조각이 눈으로
+    명백히 다른 사람인데 둘 다 p5).
+
+    GPU 를 쓴다. 엔진이 없거나 썸네일이 없는 녹화(schema ≤4)면 ({}, {}).
+    """
+    import cv2
+    import torch
+    import model_zoo
+
+    thumbs = recorder.load_track_thumbs(db_path)
+    if not thumbs:
+        return {}, {}
+    keys, crops, spans = [], [], []
+    for (cam, lid), lst in thumbs.items():
+        ims = [(ts, cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_COLOR))
+               for ts, b in lst]
+        ims = [(ts, im) for ts, im in ims if im is not None]
+        if len(ims) < 2:
+            continue
+        keys.append((cam, lid)); spans.append([ts for ts, _ in ims])
+        crops.append([im for _, im in ims])
+    if not keys:
+        return {}, {}
+
+    prof = model_zoo.resolve(None)
+    reid, crop = model_zoo.build_reid(prof)
+    W, H = crop
+    batch = [cv2.cvtColor(cv2.resize(im, (W, H), interpolation=cv2.INTER_LINEAR),
+                          cv2.COLOR_BGR2RGB).transpose(2, 0, 1)
+             for c in crops for im in c]
+    x = torch.from_numpy(np.stack(batch)).float().cuda()
+    outs = []
+    with torch.no_grad():
+        for i in range(0, len(x), 128):
+            outs.append(reid(x[i:i + 128]).float().cpu().numpy())
+    V = np.concatenate(outs)
+    V = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
+
+    ovr, splits, off = {}, {}, 0
+    for (cam, lid), c, sp in zip(keys, crops, spans):
+        P = V[off:off + len(c)]; off += len(c)
+        ovr[(cam, lid)] = [(ts, P[i]) for i, ts in enumerate(sp)]
+        if len(P) < 4:
+            continue
+        S = P @ P.T
+        best = (1.0, -1)
+        for k in range(1, len(P)):                 # 앞/뒤가 가장 안 닮는 지점
+            cross = float(S[:k, k:].mean())
+            if cross < best[0]:
+                best = (cross, k)
+        if best[0] < split_th and 0 < best[1] < len(sp):
+            splits[f"{cam}:{lid}"] = [(sp[best[1] - 1] + sp[best[1]]) / 2.0]
+    logger.info("refine: 트랙렛 %d · crop %d · 분할 %d곳", len(ovr), len(V), len(splits))
+    return ovr, splits
+
+
 def _run_gates(db_path: Path, meta: dict) -> dict:
     """엔진과 같은 판정기로 출구 게이트를 재생 → {(트랙렛키, exit_id): 최초 out ts}.
 
@@ -533,7 +602,8 @@ def _project2d(P: np.ndarray) -> np.ndarray:
 
 def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
                 viz: bool = False, splits: "dict | None" = None,
-                embs_override: "dict | None" = None, **kw) -> dict:
+                embs_override: "dict | None" = None, refine: bool = False,
+                **kw) -> dict:
     """트랙렛 → 사람 클러스터. UI/API 가 그대로 쓰는 dict 를 돌려준다.
 
     params 로 한 번에 주거나 키워드로 낱개 지정(cos_th=…, rerank=…)해도 된다.
@@ -541,6 +611,17 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
     pr = params if isinstance(params, Params) else Params.from_dict(
         {**(params or {}), **{k: v for k, v in kw.items() if v is not None}})
     db_path = Path(db_path)
+    refined = False
+    if refine and embs_override is None:
+        try:
+            embs_override, auto = refine_features(db_path)
+            if embs_override:
+                refined = True
+                if splits is None:
+                    splits = auto
+        except Exception:
+            logger.exception("정밀 재구성(crop 재임베딩) 실패 — 녹화 EMA 로 진행")
+            embs_override = None
     tls, meta = _tracklets(db_path, min_obs=pr.min_obs, splits=splits,
                            embs_override=embs_override)
     if not tls:
@@ -677,6 +758,7 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
         # 있고, 그 차이 자체가 품질 신호다(한 사람이 여러 번 = 과병합 의심,
         # 미귀속 = 재구성에서 빠진 조각이 문을 통과).
         "exit_summary": exinfo,
+        "refined": refined,      # crop 재임베딩을 썼는가
         "params": asdict(pr),                       # 무엇으로 계산했는지 그대로 반환
         "defaults": asdict(Params()),               # UI 가 "기본값으로" 를 그릴 수 있게
         "cos_th": pr.cos_th, "rerank": pr.rerank, "viz": vizdata,

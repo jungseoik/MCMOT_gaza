@@ -1376,6 +1376,7 @@ const Session = (() => {
   let JY_BUSY = false;
   let JY_TL = [];       // 재구성 전 트랙렛 목록 (segments 를 펼쳐 만든다)
   let JY_PM = [];       // 그 층의 person_metrics (트랙렛 단위 EPFI·이탈)
+  let JY_REFINE = false; // 정밀 재구성(crop 재임베딩) 사용 여부
 
   const JY_FIELDS = { jyCosTh: "cos_th", jyRrTh: "rerank_th", jyLinkTol: "link_tol",
                       jySpeed: "max_speed_mps", jySlack: "slack_m", jyFragObs: "fragment_obs" };
@@ -1408,7 +1409,8 @@ const Session = (() => {
   }
 
   function jySection() {
-    if (JY_BUSY) return `<div class="repsec-h">여정 재구성</div><div class="mnote">재구성 중…</div>`;
+    if (JY_BUSY) return `<div class="repsec-h">여정 재구성</div>`
+      + `<div class="mnote">${JY_REFINE ? "정밀 재구성 중 — crop 재임베딩(GPU)…" : "재구성 중…"}</div>`;
     if (!JY || !JY.ok) {
       return `<div class="repsec-h">여정 재구성</div>`
         + `<div class="mnote">${(JY && JY.reason) || "재구성 결과 없음"}</div>`;
@@ -1422,6 +1424,9 @@ const Session = (() => {
       + repRow("병합 문턱", `코사인 ${JY.params.cos_th}`
                + (JY.params.rerank ? ` · 재랭킹 ${JY.params.rerank_th} (k-reciprocal, CVPR 2017)` : " · 재랭킹 없음"))
       + repRow("파편 기준", `관측 ${JY.fragment_obs_th} 미만 — 오탐·스침으로 분리`)
+      + repRow("특징", JY.refined
+          ? `crop 재임베딩 <b>(정밀)</b> — 트랙 안쪽 뒤바뀜까지 분리`
+          : `녹화 EMA — 트랙 <b>안쪽</b>의 뒤바뀜은 못 본다 (⚙ 정밀 재구성)`)
       + repRow("물리 제약", `보행 ${JY.params.max_speed_mps}m/s · 매핑 여유 ${JY.params.slack_m}m`
                + ` · 제약 완화 ${JY.params.link_tol}`)
       + `</div>`
@@ -1441,6 +1446,10 @@ const Session = (() => {
               <input type="number" id="jyFragObs" step="10" min="0"></label>
             <label title="끄면 원본 코사인만으로 묶는다">재랭킹
               <input type="checkbox" id="jyRerank"></label>
+            <label title="같은 출구를 두 번 나갈 수 없다는 물리 제약">출구 유일성
+              <input type="checkbox" id="jyExitUniq"></label>
+            <label title="저장된 crop 을 ReID 로 다시 임베딩해 트랙 안쪽 뒤바뀜까지 잡는다 (GPU·수십 초)">정밀 재구성
+              <input type="checkbox" id="jyRefine"></label>
           </div>
           <div class="jycfg-b">
             <button class="tag-btn" id="jyReset">기본값</button>
@@ -1601,7 +1610,7 @@ const Session = (() => {
     JY_BUSY = true; jyPaint();
     try {
       const r = await API.drillJourney(JY_SID,
-        { floor: JY_FLOOR, viz: true, ...(JY_PARAMS || {}) });
+        { floor: JY_FLOOR, viz: true, refine: JY_REFINE, ...(JY_PARAMS || {}) });
       const by = r.by_floor || {};
       JY = by[JY_FLOOR] || Object.values(by).find((x) => x && x.ok) || Object.values(by)[0] || null;
       if (JY && JY.ok && JY.floor_id) JY_FLOOR = JY.floor_id;   // 썸네일 URL 이 맞도록
@@ -1619,7 +1628,8 @@ const Session = (() => {
     // 사람별 지표는 [종합] 탭에 산다 — 결과이지 재구성 진단이 아니다.
     const mt = document.getElementById("repPersonTbl");
     if (mt) {
-      mt.innerHTML = JY_BUSY ? `<div class="mnote">ReID 재구성 중…</div>`
+      mt.innerHTML = JY_BUSY
+        ? `<div class="mnote">${JY_REFINE ? "정밀 재구성 중 — crop 재임베딩(GPU)…" : "ReID 재구성 중…"}</div>`
         : (JY && JY.ok) ? jyMetricTbl(JY)
         : `<div class="mnote">${(JY && JY.reason) || "재구성 결과 없음"}</div>`;
     }
@@ -1641,6 +1651,10 @@ const Session = (() => {
     });
     const rr = document.getElementById("jyRerank");
     if (rr && src.rerank != null) rr.checked = !!src.rerank;
+    const eu = document.getElementById("jyExitUniq");
+    if (eu && src.exit_unique != null) eu.checked = !!src.exit_unique;
+    const rf = document.getElementById("jyRefine");
+    if (rf) rf.checked = !!JY_REFINE;
   }
 
   function jyCfgRead() {
@@ -1651,6 +1665,9 @@ const Session = (() => {
     });
     const rr = document.getElementById("jyRerank");
     out.rerank = !!(rr && rr.checked);
+    const eu = document.getElementById("jyExitUniq");
+    out.exit_unique = !!(eu && eu.checked);
+    JY_REFINE = !!document.getElementById("jyRefine")?.checked;
     return out;
   }
 
