@@ -1095,6 +1095,19 @@ def _attach_recorder(eng, floor_id: str, live) -> None:
     }
     rec = SessionRecorder(_session_db_path(live.session_id, floor_id), meta)
     eng.attach_recorder(rec)
+    _set_want_crops(True)
+
+
+def _set_want_crops(on: bool) -> None:
+    """녹화 중일 때만 analyzer 가 썸네일 crop 을 만들게 한다 (v1.15).
+
+    여정 재구성 진단용이라 녹화본에만 필요하다. 상시 켜두면 트랙마다 매
+    프레임 resize 비용이 들어간다. DS 컨테이너 경로는 임베딩 자체가 더미라
+    crop 도 만들지 않는다(analyzer 를 안 거친다).
+    """
+    for a in (getattr(rt, "analyzer", None), getattr(rt, "_file_analyzer", None)):
+        if a is not None:
+            a.want_crops = on
 
 
 def _save_session(result, timeline, person_series=None,
@@ -1129,6 +1142,7 @@ def session_stop(floor: str = DEFAULT_FLOOR_ID):
         raise HTTPException(404, "진행 중 세션 없음")
     result = eng.stop_session()
     rec = eng.detach_recorder()            # 녹화 마감 (계약 v1.10)
+    _set_want_crops(False)
     if rec is not None:
         try:
             rec.close()
@@ -1288,6 +1302,7 @@ def _stop_live_drill(floors: list[str] | None = None) -> str | None:
             continue
         result = eng.stop_session()
         rec = eng.detach_recorder()
+        _set_want_crops(False)
         if rec is not None:
             try:
                 rec.close()
@@ -1387,8 +1402,10 @@ async def drill_journey(session_id: str, request: Request):
     한 사람이 여러 조각으로 갈린다(실측: 실제 10명 → 트랙렛 109개). 세션이
     끝난 뒤에는 전 구간이 기록에 남아 있어 양방향·전역으로 다시 묶을 수 있다.
 
-    body(모두 선택): {cos_th(병합 문턱), rerank(k-reciprocal, 기본 true),
-      viz(산점도·유사도행렬 동봉, 기본 true), floor(층 — 드릴은 층별 db)}
+    body(모두 선택): journey.Params 의 필드 전부(cos_th·rerank·rerank_th·
+      max_speed_mps·slack_m·fragment_obs·min_obs·link_tol) + viz(산점도·
+      유사도행렬 동봉, 기본 true) + floor(층 — 드릴은 층별 db).
+      지정하지 않은 값은 기본값. 응답의 params/defaults 로 무엇이 쓰였는지 돌려준다.
     """
     import anyio
     from system.metrics import journey as _journey
@@ -1408,13 +1425,40 @@ async def drill_journey(session_id: str, request: Request):
         try:
             out[fid] = await anyio.to_thread.run_sync(
                 lambda p=db: _journey.reconstruct(
-                    p, cos_th=float(body.get("cos_th") or _journey.DEFAULT_COS_TH),
-                    rerank=bool(body.get("rerank", True)),
+                    p, _journey.Params.from_dict(body),
                     viz=bool(body.get("viz", True))))
         except Exception as e:                     # 재구성 실패가 리플레이를 막지 않게
             logger.exception("여정 재구성 실패: %s/%s", session_id, fid)
             out[fid] = {"ok": False, "reason": f"{type(e).__name__}: {e}"}
     return {"session_id": session_id, "by_floor": out}
+
+
+@app.get("/api/drill/{session_id}/thumb")
+async def drill_thumb(session_id: str, cam: str, lid: int,
+                      floor: str = "", i: int = 0):
+    """트랙렛 대표 프레임 JPEG — 여정 재구성이 왜 그렇게 묶였는지 눈으로 보라고.
+
+    임베딩과 **같은 프레임**에서 뽑은 crop 이라, 유사도 계산에 실제로 들어간
+    외형을 그대로 보여준다. i 는 그 트랙렛의 몇 번째 대표 프레임인가(0부터).
+    thumb 열이 없는 옛 녹화(schema ≤4)는 404.
+    """
+    import anyio
+    from fastapi.responses import Response
+    from system.metrics import recorder as _rec
+    rec = _drill_meta(session_id)
+    floors = [floor] if floor else ((rec or {}).get("floors") or [rt.resolve_floor("")])
+    for fid in floors:
+        db = _session_db_path(session_id, fid)
+        if not db.is_file():
+            continue
+        thumbs = await anyio.to_thread.run_sync(
+            lambda p=db: _rec.load_track_thumbs(p, [(cam, int(lid))]))
+        lst = thumbs.get((cam, int(lid))) or []
+        if lst:
+            _, jpg = lst[max(0, min(int(i), len(lst) - 1))]
+            return Response(content=jpg, media_type="image/jpeg",
+                            headers={"Cache-Control": "public, max-age=86400"})
+    raise HTTPException(status_code=404, detail="썸네일 없음 (녹화 schema ≤4 이거나 트랙렛 미존재)")
 
 
 @app.post("/api/drill/{session_id}/replay")

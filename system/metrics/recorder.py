@@ -42,12 +42,29 @@ from system.contracts import TrackedObject
 
 logger = logging.getLogger("system.metrics.recorder")
 
-SCHEMA_VERSION = "4"         # 2: bbox 4열 (v1.12) · 3: gid 열 (v1.13)
+SCHEMA_VERSION = "5"         # 2: bbox 4열 (v1.12) · 3: gid 열 (v1.13)
                              # 4: track_embs 테이블 — 트랙렛 ReID 임베딩 (v1.14)
+                             # 5: track_embs.thumb — 대표 프레임 JPEG (v1.15)
 EMB_PER_TRACK = 8            # 트랙당 남길 대표 임베딩 수 (시간 균등 — 시점 변화 포착)
 _COMMIT_EVERY = 200          # 이만큼 on_tracks 호출마다 commit (I/O 완충)
 _BUFFER_FLUSH = 500          # 버퍼 행이 이만큼 쌓이면 executemany
 
+
+
+def _jpeg(crop, q: int = 78) -> bytes | None:
+    """썸네일 BGR → JPEG 바이트. crop 이 None 이거나 인코딩 실패면 None.
+
+    64x128 기준 개당 약 2KB — 트랙 1,200개 × 8장이면 20MB 남짓이라 임베딩
+    (768d fp16 = 1.5KB) 과 비슷한 무게다.
+    """
+    if crop is None:
+        return None
+    try:
+        import cv2
+        ok, buf = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), q])
+        return buf.tobytes() if ok else None
+    except Exception:
+        return None
 
 class SessionRecorder:
     """세션 1회의 입력 트랙을 <session_id>.db로 녹화."""
@@ -84,7 +101,8 @@ class SessionRecorder:
               local_id INTEGER NOT NULL,
               ts       REAL    NOT NULL,
               dim      INTEGER NOT NULL,
-              emb      BLOB    NOT NULL      -- float16 정규화 벡터
+              emb      BLOB    NOT NULL,     -- float16 정규화 벡터
+              thumb    BLOB                  -- 64x128 JPEG (없으면 NULL)
             );
             """
         )
@@ -118,13 +136,15 @@ class SessionRecorder:
                               float(u), float(v), float(tr.conf),
                               float(x1), float(y1), float(x2), float(y2),
                               (gids[i] if gids else None)))
-            self._note_emb(cam_id, int(tr.local_track_id), float(ts), tr.emb)
+            self._note_emb(cam_id, int(tr.local_track_id), float(ts), tr.emb,
+                           getattr(tr, "crop_bgr", None))
         if len(self._buf) >= _BUFFER_FLUSH:
             self._flush()
         if seq % _COMMIT_EVERY == 0:
             self._con.commit()
 
-    def _note_emb(self, cam_id: str, local_id: int, ts: float, emb) -> None:
+    def _note_emb(self, cam_id: str, local_id: int, ts: float, emb,
+                  crop=None) -> None:
         """트랙렛별 임베딩을 **시간 균등**으로 EMB_PER_TRACK 개만 유지.
 
         앞부분만 담으면 그 사람의 초기 시점(각도·조명)만 남아 재구성 때
@@ -145,7 +165,7 @@ class SessionRecorder:
         v = (v / n).astype(np.float16)
         key = (cam_id, local_id)
         slot = self._embs.setdefault(key, [])
-        slot.append((ts, v))
+        slot.append((ts, v, _jpeg(crop)))
         if len(slot) <= EMB_PER_TRACK:
             return
         # 이웃 간 시간 간격이 가장 작은 지점을 하나 제거 → 균등 유지
@@ -155,15 +175,15 @@ class SessionRecorder:
 
     def _flush(self) -> None:
         if self._embs:
-            rows = [(cam, lid, ts, int(v.size), v.tobytes())
-                    for (cam, lid), slot in self._embs.items() for ts, v in slot]
+            rows = [(cam, lid, ts, int(v.size), v.tobytes(), th)
+                    for (cam, lid), slot in self._embs.items() for ts, v, th in slot]
             # 트랙별 최신 상태로 통째 교체 — 중복 없이 마지막 선택본만 남는다
             self._con.executemany(
                 "DELETE FROM track_embs WHERE cam_id=? AND local_id=?",
                 list(self._embs.keys()))
             self._con.executemany(
-                "INSERT INTO track_embs(cam_id, local_id, ts, dim, emb)"
-                " VALUES(?,?,?,?,?)", rows)
+                "INSERT INTO track_embs(cam_id, local_id, ts, dim, emb, thumb)"
+                " VALUES(?,?,?,?,?,?)", rows)
         if not self._buf:
             return
         self._con.executemany(
@@ -233,6 +253,36 @@ def load_track_embs(db_path: str | Path) -> dict[tuple[str, int], list[tuple[flo
             if v.size != dim:
                 continue
             out.setdefault((cam, int(lid)), []).append((float(ts), v))
+        return out
+    finally:
+        con.close()
+
+
+def load_track_thumbs(db_path: str | Path,
+                      keys: "list[tuple[str, int]] | None" = None) -> dict:
+    """트랙렛별 대표 썸네일 — {(cam_id, local_id): [(ts, jpeg bytes), ...]}.
+
+    임베딩과 같은 프레임에서 뽑은 것이라 "이 벡터가 어떤 사람이었나" 를 그대로
+    보여준다. thumb 열이 없는 옛 녹화(schema ≤4)는 빈 dict.
+    """
+    con = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
+    try:
+        names = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if "track_embs" not in names:
+            return {}
+        cols = {r[1] for r in con.execute("PRAGMA table_info(track_embs)")}
+        if "thumb" not in cols:
+            return {}
+        want = set(keys) if keys else None
+        out: dict[tuple[str, int], list] = {}
+        for cam, lid, ts, blob in con.execute(
+                "SELECT cam_id, local_id, ts, thumb FROM track_embs"
+                " WHERE thumb IS NOT NULL ORDER BY cam_id, local_id, ts"):
+            k = (cam, int(lid))
+            if want is not None and k not in want:
+                continue
+            out.setdefault(k, []).append((float(ts), bytes(blob)))
         return out
     finally:
         con.close()

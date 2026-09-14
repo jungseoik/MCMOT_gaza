@@ -770,3 +770,23 @@ body.rehearsing .rhbanner{ display:block; }
   border-bottom:1px solid var(--stroke-1); padding-bottom:10px; }
 .reptabs .tag-btn i{ font-style:normal; opacity:.75; margin-left:4px; font-size:10px; }
 .reppane.hidden{ display:none; }
+
+/* 트랙렛 썸네일 — 임베딩과 같은 프레임의 crop (v1.15) */
+.rpthumb{ width:12px; height:24px; object-fit:cover; border-radius:2px;
+  vertical-align:-7px; margin-right:4px; background:var(--bg-1);
+  border:1px solid var(--stroke-1); }
+.rpobjseg .rpthumb{ width:10px; height:20px; vertical-align:-6px; }
+.rpobj-row:hover .rpthumb, .rpobj-row.sel .rpthumb{ border-color:var(--pia-cyan); }
+
+/* 재구성 인자 패널 */
+.jycfg{ background:var(--bg-2); border:1px solid var(--stroke-1);
+  border-radius:var(--r-sm); padding:6px 8px; margin-bottom:6px; }
+.jycfg.hidden{ display:none; }
+.jycfg-r label{ display:flex; align-items:center; justify-content:space-between;
+  gap:6px; font-size:10.5px; color:var(--text-3); padding:2px 0; }
+.jycfg-r input[type=number]{ width:62px; text-align:right; font-family:var(--font-num);
+  font-size:10.5px; padding:2px 4px; background:var(--bg-1);
+  border:1px solid var(--stroke-2); border-radius:3px; color:var(--text-1); }
+.jycfg-b{ display:flex; gap:4px; justify-content:flex-end; margin-top:6px;
+  border-top:1px solid var(--stroke-1); padding-top:6px; }
+.btn.primary.xs{ height:22px; padding:0 10px; font-size:10px; }

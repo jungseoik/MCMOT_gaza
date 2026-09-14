@@ -39,6 +39,11 @@ class TrackedObject:
     # --- 글로벌 ID (v1.13, 선택) ---
     emb: Any | None = None             # 트랙 EMA 외형 특징(np, 정규화 전) — 글로벌 매칭용
     gid_hint: str | None = None        # 리플레이: 녹화된 확정 global_id (결정성 유지)
+    # --- 여정 재구성 진단 (v1.15, 선택) ---
+    # 임베딩만 남기면 두 트랙렛이 왜 (안) 묶였는지 사람이 판정할 수 없다. 녹화 중일
+    # 때만 analyzer 가 작은 BGR crop 을 실어 보내고, recorder 가 대표 프레임만
+    # JPEG 로 남긴다. 녹화가 꺼져 있으면 항상 None — 상시 비용 0.
+    crop_bgr: Any | None = None
 
 
 # --------------------------------------------------------- MapState (B→C, SSE)

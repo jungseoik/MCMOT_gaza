@@ -89,6 +89,10 @@ const API = {
   drillReplay: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/replay`, body || {}),
   // 여정 재구성 — 끝난 세션의 트랙 조각을 ReID 로 사람 단위로 다시 묶는다
   drillJourney: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/journey`, body || {}),
+  // 트랙렛 대표 프레임 JPEG — 임베딩과 같은 프레임의 crop
+  drillThumbUrl: (id, cam, lid, floor, i) =>
+    `/api/drill/${encodeURIComponent(id)}/thumb?cam=${encodeURIComponent(cam)}`
+    + `&lid=${lid}&floor=${encodeURIComponent(floor || "")}&i=${i || 0}`,
   drillExportUrl: (id, format) =>
     `/api/drill/${encodeURIComponent(id)}/export?format=${format || "json"}`,
   getSession: (floor) => API._j("/api/session?" + API._fq(floor)),

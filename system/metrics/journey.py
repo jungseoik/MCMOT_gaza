@@ -35,6 +35,7 @@ import logging
 import math
 import sqlite3
 from collections import defaultdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -43,9 +44,13 @@ from system.metrics import recorder
 
 logger = logging.getLogger("system.metrics.journey")
 
-# 병합 문턱 — 이보다 유사하면 같은 사람 후보. 실측 분리도(0.995 vs 0.299)에서
-# 넉넉히 잡아도 오매칭이 거의 없다. 재랭킹 거리는 [0,1] 이라 1-dist 로 환산해 쓴다.
-DEFAULT_COS_TH = 0.62
+# 문턱은 **두 개**다. 재랭킹을 켜면 유사도 분포가 통째로 옮겨가기 때문이다 —
+# 실측(AI hub 3F scenario_01): 원본 코사인 중앙 0.443 / 재랭킹 후 중앙 0.185.
+# 하나의 값으로 둘 다 걸면 "0.62" 가 무엇을 뜻하는지가 재랭킹 on/off 에 따라
+# 달라져 해석이 불가능해진다. 그래서 cos_th 는 **항상 원본 코사인**에 걸고,
+# rerank_th 는 재랭킹 유사도에 따로 건다.
+DEFAULT_COS_TH = 0.50      # 원본 코사인 하한 (재랭킹과 무관하게 의미 고정)
+DEFAULT_RERANK_TH = 0.62   # 재랭킹 유사도 하한 (rerank=True 일 때만 추가로 적용)
 MAX_SPEED_MPS = 3.0        # 사람 보행 상한 — 이보다 빠른 재등장은 타인
 SLACK_M = 3.0              # 카메라 간 매핑 오프셋 여유 — 이 거리 안은 속도 판정 생략
 MIN_OBS = 2                # 이만큼 미만 관측 트랙렛은 노이즈로 제외
@@ -53,6 +58,48 @@ MIN_OBS = 2                # 이만큼 미만 관측 트랙렛은 노이즈로 �
 # 실측(AI hub 3F scenario_01): 22 클러스터 중 관측 50+ 가 14개로 전체 관측의 96%,
 # 나머지 8개는 4~30 관측(0.6~9초)짜리 오탐·스침이었다. 분포가 뚜렷하게 갈린다.
 FRAGMENT_OBS = 50
+LINK_TOL = 0.0             # 군집 간 허용 금지쌍 비율 (0 = 순수 complete-link)
+
+
+@dataclass(frozen=True)
+class Params:
+    """재구성 파라미터 — 전부 기본값이 있고, 리플레이 UI 에서 덮어쓸 수 있다.
+
+    실측상 **결과를 실제로 바꾸는 것**은 link_tol · max_speed_mps · fragment_obs
+    쪽이다. 문턱만 0.50~0.70 으로 흔들면 사람 수는 그대로고 파편 분류만 바뀐다
+    (구속하는 것이 문턱이 아니라 cannot-link + complete-link 이기 때문).
+    """
+    cos_th: float = DEFAULT_COS_TH
+    rerank: bool = True
+    rerank_th: float = DEFAULT_RERANK_TH
+    max_speed_mps: float = MAX_SPEED_MPS
+    slack_m: float = SLACK_M
+    fragment_obs: int = FRAGMENT_OBS
+    min_obs: int = MIN_OBS
+    link_tol: float = LINK_TOL
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "Params":
+        """UI/API 의 부분 지정을 받아 기본값 위에 얹는다. 범위를 넘으면 자른다."""
+        d = d or {}
+        def num(k, lo, hi, cast=float):
+            v = d.get(k)
+            if v is None or v == "":
+                return getattr(cls, k)
+            try:
+                return max(lo, min(hi, cast(v)))
+            except Exception:
+                return getattr(cls, k)
+        return cls(
+            cos_th=num("cos_th", 0.0, 0.99),
+            rerank=bool(d.get("rerank", True)),
+            rerank_th=num("rerank_th", 0.0, 0.99),
+            max_speed_mps=num("max_speed_mps", 0.5, 20.0),
+            slack_m=num("slack_m", 0.0, 30.0),
+            fragment_obs=num("fragment_obs", 0, 10000, int),
+            min_obs=num("min_obs", 1, 1000, int),
+            link_tol=num("link_tol", 0.0, 1.0),
+        )
 
 
 def _rerank(S: np.ndarray, k1: int = 20, k2: int = 6, lam: float = 0.3) -> np.ndarray:
@@ -99,7 +146,7 @@ def _rerank(S: np.ndarray, k1: int = 20, k2: int = 6, lam: float = 0.3) -> np.nd
     return jac * (1 - lam) + orig * lam
 
 
-def _tracklets(db_path: Path) -> tuple[list[dict], dict]:
+def _tracklets(db_path: Path, min_obs: int = MIN_OBS) -> tuple[list[dict], dict]:
     """트랙렛 집계 — (cam_id, local_id) 별 시각·맵위치(m)·임베딩."""
     meta = recorder.load_meta(db_path)
     mpp = float(((meta.get("site_view") or {}).get("map") or {}).get("m_per_px") or 0) or None
@@ -124,7 +171,7 @@ def _tracklets(db_path: Path) -> tuple[list[dict], dict]:
 
     out = []
     for (cam, lid), obs in agg.items():
-        if len(obs) < MIN_OBS:
+        if len(obs) < min_obs:
             continue
         E = embs.get((cam, lid)) or []
         if not E:
@@ -148,8 +195,9 @@ def _tracklets(db_path: Path) -> tuple[list[dict], dict]:
     return out, meta
 
 
-def _cannot_link(a: dict, b: dict) -> bool:
+def _cannot_link(a: dict, b: dict, pr: "Params | None" = None) -> bool:
     """물리적으로 같은 사람일 수 없는 쌍인가."""
+    pr = pr or Params()
     # ① 같은 카메라에서 시간이 겹친다 → 한 카메라에 같은 사람이 둘일 수 없다
     overlap = min(a["t1"], b["t1"]) - max(a["t0"], b["t0"])
     if a["cam"] == b["cam"] and overlap > 0:
@@ -160,7 +208,7 @@ def _cannot_link(a: dict, b: dict) -> bool:
         dt = second["t0"] - first["t1"]
         if dt > 0:
             d = math.dist(first["p1"], second["p0"])
-            if d > SLACK_M and d / dt > MAX_SPEED_MPS:
+            if d > pr.slack_m and d / dt > pr.max_speed_mps:
                 return True
     return False
 
@@ -199,11 +247,16 @@ def _project2d(P: np.ndarray) -> np.ndarray:
         return (U[:, :2] * S_[:2]).astype(np.float32)
 
 
-def reconstruct(db_path: str | Path, cos_th: float = DEFAULT_COS_TH,
-                rerank: bool = True, viz: bool = False) -> dict:
-    """트랙렛 → 사람 클러스터. UI/API 가 그대로 쓰는 dict 를 돌려준다."""
+def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
+                viz: bool = False, **kw) -> dict:
+    """트랙렛 → 사람 클러스터. UI/API 가 그대로 쓰는 dict 를 돌려준다.
+
+    params 로 한 번에 주거나 키워드로 낱개 지정(cos_th=…, rerank=…)해도 된다.
+    """
+    pr = params if isinstance(params, Params) else Params.from_dict(
+        {**(params or {}), **{k: v for k, v in kw.items() if v is not None}})
     db_path = Path(db_path)
-    tls, meta = _tracklets(db_path)
+    tls, meta = _tracklets(db_path, min_obs=pr.min_obs)
     if not tls:
         return {"ok": False, "reason": "임베딩이 없는 녹화(schema ≤3)이거나 트랙렛 없음",
                 "tracklets": 0, "persons": []}
@@ -218,14 +271,18 @@ def reconstruct(db_path: str | Path, cos_th: float = DEFAULT_COS_TH,
             S[i, j] = S[j, i] = c
     np.fill_diagonal(S, 1.0)
 
-    D = _rerank(S) if rerank and n >= 3 else (1.0 - S)
-    sim = 1.0 - D                                    # 재랭킹 후 유사도
+    use_rr = pr.rerank and n >= 3
+    sim = (1.0 - _rerank(S)) if use_rr else S        # 병합 순서용 유사도
+    # 문턱은 두 스케일에 각각 — cos_th 는 언제나 원본 코사인의 의미를 유지한다
+    ok_pair = S >= pr.cos_th
+    if use_rr:
+        ok_pair &= sim >= pr.rerank_th
 
     # cannot-link 사전 계산
     forbid = np.zeros((n, n), dtype=bool)
     for i in range(n):
         for j in range(i + 1, n):
-            if _cannot_link(tls[i], tls[j]):
+            if _cannot_link(tls[i], tls[j], pr):
                 forbid[i, j] = forbid[j, i] = True
 
     # 제약 병합 클러스터링 — 유사도 높은 쌍부터, cannot-link 를 어기면 건너뜀
@@ -237,14 +294,17 @@ def reconstruct(db_path: str | Path, cos_th: float = DEFAULT_COS_TH,
         return x
     members = {i: {i} for i in range(n)}
     pairs = [(sim[i, j], i, j) for i in range(n) for j in range(i + 1, n)
-             if not forbid[i, j] and sim[i, j] >= cos_th]
+             if not forbid[i, j] and ok_pair[i, j]]
     pairs.sort(reverse=True)
     for s, i, j in pairs:
         ri, rj = find(i), find(j)
         if ri == rj:
             continue
-        # 두 군집 사이에 금지 쌍이 하나라도 있으면 합치지 않는다 (complete-link 제약)
-        if any(forbid[a, b] for a in members[ri] for b in members[rj]):
+        # 두 군집 사이 금지 쌍 비율이 link_tol 을 넘으면 합치지 않는다.
+        # tol=0 이 순수 complete-link — 한 쌍만 금지여도 거부한다. 군집이 커질수록
+        # 이 규칙이 실질 구속이 된다(제약을 다 풀면 14명 → 7명으로 과병합).
+        bad = sum(1 for a in members[ri] for b in members[rj] if forbid[a, b])
+        if bad and bad > pr.link_tol * len(members[ri]) * len(members[rj]):
             continue
         parent[rj] = ri
         members[ri] |= members[rj]
@@ -263,7 +323,7 @@ def reconstruct(db_path: str | Path, cos_th: float = DEFAULT_COS_TH,
         obs_n = sum(s["n"] for s in segs)
         persons.append({
             "person_id": f"p{gi}",
-            "fragment": obs_n < FRAGMENT_OBS,
+            "fragment": obs_n < pr.fragment_obs,
             "n_tracklets": len(idxs),
             "t0": min(s["t0"] for s in segs), "t1": max(s["t1"] for s in segs),
             "cams": sorted({s["cam"] for s in segs}),
@@ -297,7 +357,9 @@ def reconstruct(db_path: str | Path, cos_th: float = DEFAULT_COS_TH,
         "ok": True, "tracklets": n, "persons": persons,
         "n_persons": len(main),                     # 파편 제외한 '사람' 수
         "n_fragments": len(persons) - len(main),
-        "fragment_obs_th": FRAGMENT_OBS,
-        "cos_th": cos_th, "rerank": rerank, "viz": vizdata,
+        "fragment_obs_th": pr.fragment_obs,
+        "params": asdict(pr),                       # 무엇으로 계산했는지 그대로 반환
+        "defaults": asdict(Params()),               # UI 가 "기본값으로" 를 그릴 수 있게
+        "cos_th": pr.cos_th, "rerank": pr.rerank, "viz": vizdata,
         "alarm_ts": meta.get("alarm_ts"), "floor_id": meta.get("floor_id"),
     }

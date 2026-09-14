@@ -25,6 +25,7 @@ import threading
 import time
 from collections.abc import Callable
 
+import cv2
 import numpy as np
 
 from default_settings import GeneralSettings
@@ -68,6 +69,8 @@ class AnalyzerThread(threading.Thread):
         super().__init__(daemon=True, name="analyzer")
         self.queue = frame_queue
         self.on_tracks = on_tracks
+        # 세션 녹화 중에만 켠다(server 가 토글) — 꺼져 있으면 crop 을 만들지 않는다
+        self.want_crops = False
         self.camera_fps = dict(camera_fps or {})
         self.default_fps = default_fps
         self.track_buffer_sec = track_buffer_sec
@@ -188,6 +191,7 @@ class AnalyzerThread(threading.Thread):
             x1, y1, x2, y2, tid = t[0], t[1], t[2], t[3], int(t[4])
             conf = self._matched_score(np.array([x1, y1, x2, y2], np.float64),
                                        det_xyxy, det_scores)
+            e = emb_by_tid.get(tid)
             tracks.append(TrackedObject(
                 cam_id=item.cam_id,
                 local_track_id=tid,
@@ -195,7 +199,10 @@ class AnalyzerThread(threading.Thread):
                 bbox_xyxy=(float(x1), float(y1), float(x2), float(y2)),
                 conf=conf,
                 ts=item.ts,
-                emb=emb_by_tid.get(tid),
+                emb=e,
+                # 임베딩이 없는 트랙은 재구성에 못 쓰므로 crop 도 만들지 않는다
+                crop_bgr=(self._crop(item.frame, x1, y1, x2, y2)
+                          if self.want_crops and e is not None else None),
             ))
 
         infer_ms = (time.perf_counter() - t0) * 1000.0
@@ -209,6 +216,23 @@ class AnalyzerThread(threading.Thread):
         self.on_tracks(item.cam_id, item.ts, tracks)
 
     # ------------------------------------------------------------ 내부
+    @staticmethod
+    def _crop(frame, x1, y1, x2, y2, w: int = 64, h: int = 128):
+        """트랙 박스를 ReID 비율(1:2)의 작은 BGR 썸네일로. 실패하면 None.
+
+        여기서는 resize 만 한다(수십 µs) — JPEG 인코딩은 recorder 가 실제로
+        남기기로 한 대표 프레임에만 건다. 프레임마다 인코딩하면 대부분 버려진다.
+        """
+        H, W = frame.shape[:2]
+        a, b = max(0, int(x1)), max(0, int(y1))
+        c, d = min(W, int(x2)), min(H, int(y2))
+        if c - a < 8 or d - b < 16:
+            return None
+        try:
+            return cv2.resize(frame[b:d, a:c], (w, h), interpolation=cv2.INTER_AREA)
+        except Exception:
+            return None
+
     @staticmethod
     def _frame_dets(pred, scale_r: float):
         """검출 결과 → (원본 px xyxy[N,4], 점수[N]). pred 없으면 빈 배열."""
