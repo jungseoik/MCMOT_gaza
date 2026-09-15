@@ -7,6 +7,11 @@ python tools/floor_live_viz.py --floor default --cams cam01 cam02 cam03 \
        --sec 180 --out results/floor_viz/17F_cam01-03_3min.mp4
 ```
 
+`--fps` 는 **출력 영상 fps**(기본 24 = 원본), `--state-hz` 는 지표·추적점 갱신
+주기(기본 5 = analyze_fps)다. 시각화가 목적이라 **우측 카메라는 원본만큼 부드럽게**
+흐르고, 좌측 도면·지표는 분석 주기로 갱신되어 그 사이에는 유지된다.
+분석이 5fps 라 지표를 그보다 빨리 받아도 같은 값이므로 낭비다.
+
 ## 화면 보는 법
 
 | 위치 | 내용 |
@@ -36,7 +41,7 @@ python tools/floor_live_viz.py --floor default --cams cam01 cam02 cam03 \
 
 | 파일 | 층 | 카메라 | 길이 | 세션 종료값 |
 |---|---|---|---|---|
-| `17F_cam01-03_3min.mp4` | 17F(default) | cam01·cam02·cam03 | 180s · 1620x852 @5fps · 34MB | SEI 97.8 · EPFI 95.0 · CBS 12.59 · IDR 0/3 |
+| `17F_cam01-03_3min.mp4` | 17F(default) | cam01·cam02·cam03 | 180s · 1620x852 @**24fps** · H.264 13MB | SEI 97.1 · EPFI 95.0 · CBS 11.32 · IDR 0/3 |
 
 촬영 2026-09-15. 17F 는 상시 RTSP(`rtsp://127.0.0.1:8554/{1,2,3}_v1`) 로 사람이
 오가는 실제 사무 공간이라, 경보 없이 이동하는 인원이 잡힌다 — IDR 0/3 은 그래서

@@ -126,7 +126,10 @@ def main() -> int:
     ap.add_argument("--floor", default="default")
     ap.add_argument("--cams", nargs="+", required=True)
     ap.add_argument("--sec", type=float, default=180.0)
-    ap.add_argument("--fps", type=float, default=5.0, help="출력 영상 fps")
+    ap.add_argument("--fps", type=float, default=24.0,
+                    help="출력 영상 fps — 우측 카메라를 원본만큼 부드럽게 보여준다")
+    ap.add_argument("--state-hz", type=float, default=5.0,
+                    help="지표·추적점 갱신 주기(Hz). 분석이 5fps 라 그보다 빨리 받아도 같은 값이다")
     ap.add_argument("--out", default="results/floor_viz/live.mp4")
     ap.add_argument("--session", action="store_true", default=True,
                     help="녹화 동안 경보 세션을 켠다 (4대지표 산출)")
@@ -181,7 +184,10 @@ def main() -> int:
     OW, OH = LEFT_W + RIGHT_W, PANE_H + BAR_H
     out_path = ROOT / a.out
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    vw = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), a.fps, (OW, OH))
+    vw = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"avc1"), a.fps, (OW, OH))
+    if not vw.isOpened():                      # avc1 미지원 빌드면 mp4v 로 (파일이 커진다)
+        vw = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), a.fps, (OW, OH))
+        print("[viz] avc1 미지원 — mp4v 로 저장(용량 큼)")
 
     grabs = {c["cam_id"]: Grab(c["rtsp"]) for c in picked}
     for g in grabs.values(): g.start()
@@ -199,8 +205,13 @@ def main() -> int:
         except Exception as e:
             print(f"[viz] 세션 시작 실패(지표 없이 진행): {e}")
 
-    trails = defaultdict(lambda: deque(maxlen=int(2 * a.fps)))
+    # 궤적은 **상태 갱신** 기준 2초치 — 출력 fps 를 올려도 길이가 안 변한다
+    trails = defaultdict(lambda: deque(maxlen=max(2, int(2 * a.state_hz))))
     ex_base = None            # 출구 카운트는 서버 누적치라 녹화 시작값을 빼서 구간 증분으로 쓴다
+    st = {}                   # 마지막으로 받은 상태 — 프레임마다 다시 받지 않는다
+    left = None               # 마지막으로 그린 도면 패널 (상태가 안 바뀌면 재사용)
+    bar = None
+    every = max(1, int(round(a.fps / max(a.state_hz, 0.1))))   # 몇 프레임마다 상태를 받나
     cols = {c: CAMCOL[i % len(CAMCOL)] for i, c in enumerate(a.cams)}
     n_frames = int(a.sec * a.fps)
     t0 = time.time()
@@ -208,48 +219,53 @@ def main() -> int:
         for k in range(n_frames):
             due = t0 + k / a.fps
             if (w := due - time.time()) > 0: time.sleep(w)
-            try:
-                st = api(f"/api/map/state?floor={a.floor}", timeout=5)
-            except Exception:
-                st = {}
+            fresh = (k % every == 0)
+            if fresh:
+                try:
+                    st = api(f"/api/map/state?floor={a.floor}", timeout=5)
+                except Exception:
+                    pass
             objs = [o for o in (st.get("objects") or []) if o.get("cam_id") in cols]
 
-            # ── 좌: 도면
-            m = crop.copy()
-            sx = LEFT_W / m.shape[1]; sy = PANE_H / m.shape[0]; s = min(sx, sy)
-            def MP(x, y):
-                return int((x - x0) * s), int((y - y0) * s)
-            mm = cv2.resize(m, (int(m.shape[1]*s), int(m.shape[0]*s)))
-            left = np.zeros((PANE_H, LEFT_W, 3), np.uint8)
-            left[:mm.shape[0], :mm.shape[1]] = mm
-            for z in (site.get("zones") or []):
-                pp = np.array([MP(*p) for p in z["polygon"]], np.int32)
-                cv2.polylines(left, [pp], True, (90, 200, 255), 2)
-            for bn in (site.get("bottlenecks") or []):
-                pp = np.array([MP(*p) for p in bn["polygon"]], np.int32)
-                cv2.polylines(left, [pp], True, (80, 140, 255), 2)
-            for r in (site.get("routes") or []):
-                pp = [MP(*p) for p in (r.get("points") or [])]
-                for i in range(len(pp)-1): cv2.line(left, pp[i], pp[i+1], (120, 255, 160), 2)
-            for e in (site.get("exits") or []):
-                ln = e.get("line") or []
-                if len(ln) >= 2: cv2.line(left, MP(*ln[0]), MP(*ln[1]), (60, 90, 255), 3)
-            for o in objs:
-                p = MP(o["x"], o["y"]); c = cols[o["cam_id"]]
-                trails[f'{o["cam_id"]}:{o["id"]}'].append(p)
-                tr = list(trails[f'{o["cam_id"]}:{o["id"]}'])
-                for i in range(len(tr)-1): cv2.line(left, tr[i], tr[i+1], c, 1)
-                cv2.circle(left, p, 5, c, -1); cv2.circle(left, p, 5, (20,20,20), 1)
-                if o.get("speed_mps") is not None:
-                    put(left, f'{o["speed_mps"]:.1f}', (p[0]+8, p[1]-6), .38, c)
-            fname = next((f.get("name") for f in (site.get("floors") or [])
-                          if f.get("id") == a.floor), a.floor)
-            put(left, f"{fname} 도면 — {' · '.join(a.cams)} 구역", (12, 26), .58, (240,240,240), 2)
-            for i,(lb,c) in enumerate([("구역",(90,200,255)),("병목",(80,140,255)),
-                                       ("경로",(120,255,160)),("출구",(60,90,255))]):
-                x = 12 + i*66
-                cv2.rectangle(left, (x, 40), (x+11, 50), c, -1)
-                put(left, lb, (x+16, 50), .40, (190,190,190))
+            # ── 좌: 도면 (상태가 갱신된 프레임에만 다시 그린다)
+            if not fresh and left is not None:
+                pass
+            else:
+                m = crop.copy()
+                sx = LEFT_W / m.shape[1]; sy = PANE_H / m.shape[0]; s = min(sx, sy)
+                def MP(x, y):
+                    return int((x - x0) * s), int((y - y0) * s)
+                mm = cv2.resize(m, (int(m.shape[1]*s), int(m.shape[0]*s)))
+                left = np.zeros((PANE_H, LEFT_W, 3), np.uint8)
+                left[:mm.shape[0], :mm.shape[1]] = mm
+                for z in (site.get("zones") or []):
+                    pp = np.array([MP(*p) for p in z["polygon"]], np.int32)
+                    cv2.polylines(left, [pp], True, (90, 200, 255), 2)
+                for bn in (site.get("bottlenecks") or []):
+                    pp = np.array([MP(*p) for p in bn["polygon"]], np.int32)
+                    cv2.polylines(left, [pp], True, (80, 140, 255), 2)
+                for r in (site.get("routes") or []):
+                    pp = [MP(*p) for p in (r.get("points") or [])]
+                    for i in range(len(pp)-1): cv2.line(left, pp[i], pp[i+1], (120, 255, 160), 2)
+                for e in (site.get("exits") or []):
+                    ln = e.get("line") or []
+                    if len(ln) >= 2: cv2.line(left, MP(*ln[0]), MP(*ln[1]), (60, 90, 255), 3)
+                for o in objs:
+                    p = MP(o["x"], o["y"]); c = cols[o["cam_id"]]
+                    trails[f'{o["cam_id"]}:{o["id"]}'].append(p)
+                    tr = list(trails[f'{o["cam_id"]}:{o["id"]}'])
+                    for i in range(len(tr)-1): cv2.line(left, tr[i], tr[i+1], c, 1)
+                    cv2.circle(left, p, 5, c, -1); cv2.circle(left, p, 5, (20,20,20), 1)
+                    if o.get("speed_mps") is not None:
+                        put(left, f'{o["speed_mps"]:.1f}', (p[0]+8, p[1]-6), .38, c)
+                fname = next((f.get("name") for f in (site.get("floors") or [])
+                              if f.get("id") == a.floor), a.floor)
+                put(left, f"{fname} 도면 — {' · '.join(a.cams)} 구역", (12, 26), .58, (240,240,240), 2)
+                for i,(lb,c) in enumerate([("구역",(90,200,255)),("병목",(80,140,255)),
+                                           ("경로",(120,255,160)),("출구",(60,90,255))]):
+                    x = 12 + i*66
+                    cv2.rectangle(left, (x, 40), (x+11, 50), c, -1)
+                    put(left, lb, (x+16, 50), .40, (190,190,190))
 
             # ── 우: 카메라 그리드
             right = np.zeros((PANE_H, RIGHT_W, 3), np.uint8)
@@ -271,34 +287,35 @@ def main() -> int:
                 ry, rx = (i // 2) * ch, (i % 2) * cw
                 right[ry:ry+ch, rx:rx+cw] = cell
 
-            # ── 하: 지표
-            bar = np.full((BAR_H, OW, 3), 18, np.uint8)
-            ss = st.get("session") or {}
-            spd = [o["speed_mps"] for o in objs if o.get("speed_mps") is not None]
-            zs = st.get("zones") or []
-            started = sum(1 for z in zs if z.get("status") == "started")
-            ex_now = sum((e.get("out_count") or 0) for e in (st.get("exits") or []))
-            if ex_base is None: ex_base = ex_now
-            ex_tot = max(0, ex_now - ex_base)
-            f1 = lambda v, d=1: "—" if v is None else f"{v:.{d}f}"
-            put(bar, "4대 지표", (16, 26), .52, (150,150,150))
-            for i,(lab,val,col) in enumerate([
-                    ("SEI 출구효율", f1(ss.get("sei"), 0), (120,255,190)),
-                    ("EPFI 경로충실", f1(ss.get("epfi_avg"), 0), (120,220,255)),
-                    ("CBS 병목누적", f1(ss.get("cbs_total"), 2), (120,170,255)),
-                    ("IDR 개시구역", f"{started}/{len(zs)}", (200,180,255))]):
-                x = 16 + i*210
-                put(bar, lab, (x, 52), .42, (160,160,160))
-                put(bar, val, (x, 84), .82, col, 2)
-            put(bar, "실시간", (880, 26), .52, (150,150,150))
-            for i,(lab,val) in enumerate([
-                    ("추적 인원", f"{len(objs)}명"),
-                    ("평균 속도", f"{np.mean(spd):.2f} m/s" if spd else "—"),
-                    ("출구 통과", f"{ex_tot}명"),
-                    ("경과", f"{k/a.fps:.0f}s / {a.sec:.0f}s")]):
-                x = 880 + i*190
-                put(bar, lab, (x, 52), .42, (160,160,160))
-                put(bar, val, (x, 84), .62, (235,235,235), 2)
+            # ── 하: 지표 (상태 갱신 프레임에만)
+            if fresh or bar is None:
+                bar = np.full((BAR_H, OW, 3), 18, np.uint8)
+                ss = st.get("session") or {}
+                spd = [o["speed_mps"] for o in objs if o.get("speed_mps") is not None]
+                zs = st.get("zones") or []
+                started = sum(1 for z in zs if z.get("status") == "started")
+                ex_now = sum((e.get("out_count") or 0) for e in (st.get("exits") or []))
+                if ex_base is None: ex_base = ex_now
+                ex_tot = max(0, ex_now - ex_base)
+                f1 = lambda v, d=1: "—" if v is None else f"{v:.{d}f}"
+                put(bar, "4대 지표", (16, 26), .52, (150,150,150))
+                for i,(lab,val,col) in enumerate([
+                        ("SEI 출구효율", f1(ss.get("sei"), 0), (120,255,190)),
+                        ("EPFI 경로충실", f1(ss.get("epfi_avg"), 0), (120,220,255)),
+                        ("CBS 병목누적", f1(ss.get("cbs_total"), 2), (120,170,255)),
+                        ("IDR 개시구역", f"{started}/{len(zs)}", (200,180,255))]):
+                    x = 16 + i*210
+                    put(bar, lab, (x, 52), .42, (160,160,160))
+                    put(bar, val, (x, 84), .82, col, 2)
+                put(bar, "실시간", (880, 26), .52, (150,150,150))
+                for i,(lab,val) in enumerate([
+                        ("추적 인원", f"{len(objs)}명"),
+                        ("평균 속도", f"{np.mean(spd):.2f} m/s" if spd else "—"),
+                        ("출구 통과", f"{ex_tot}명"),
+                        ("경과", f"{k/a.fps:.0f}s / {a.sec:.0f}s")]):
+                    x = 880 + i*190
+                    put(bar, lab, (x, 52), .42, (160,160,160))
+                    put(bar, val, (x, 84), .62, (235,235,235), 2)
 
             frame = np.zeros((OH, OW, 3), np.uint8)
             frame[:PANE_H, :LEFT_W] = left
@@ -306,7 +323,7 @@ def main() -> int:
             frame[PANE_H:] = bar
             cv2.line(frame, (LEFT_W, 0), (LEFT_W, PANE_H), (60,60,60), 1)
             vw.write(frame)
-            if k % int(a.fps * 15) == 0:
+            if k % max(1, int(a.fps * 15)) == 0:
                 print(f"  {k/a.fps:5.0f}s / {a.sec:.0f}s · 객체 {len(objs)} · SEI {f1(ss.get('sei'),0)}", flush=True)
     finally:
         vw.release()
@@ -317,6 +334,21 @@ def main() -> int:
                 print(f"[viz] 세션 종료 — SEI {r.get('sei')} · EPFI {r.get('epfi_avg')} · CBS {r.get('cbs_total')}")
             except Exception as e:
                 print(f"[viz] 세션 종료 실패: {e}")
+    # OpenCV 빌드에 avc1 이 없으면 mpeg4 로 떨어져 파일이 3~4배 커진다.
+    # ffmpeg 가 있으면 H.264 로 다시 인코딩한다(무손실 아님 — 시각화용이라 충분).
+    import shutil, subprocess
+    if shutil.which("ffmpeg"):
+        tmp = out_path.with_suffix(".h264.mp4")
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(out_path),
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+             "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(tmp)])
+        if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
+            before = out_path.stat().st_size
+            tmp.replace(out_path)
+            print(f"[viz] H.264 재인코딩 — {before/1e6:.0f}MB → {out_path.stat().st_size/1e6:.0f}MB")
+        else:
+            tmp.unlink(missing_ok=True)
     print(f"[viz] 저장 → {out_path} ({OW}x{OH} @ {a.fps:.0f}fps)")
     return 0
 
