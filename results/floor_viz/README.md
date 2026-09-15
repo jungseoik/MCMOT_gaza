@@ -26,11 +26,17 @@ python tools/floor_live_viz.py --floor default --cams cam01 cam02 cam03 \
 
 출구 통과는 서버 누적치라 **녹화 시작 시점을 빼서 구간 증분**으로 보여준다.
 
+## 층 도면은 floors[] 에서 뽑는다
+
+`/api/site` 는 **사이트 최상위** map·zones·exits 를 돌려준다(legacy 전역값).
+층의 실제 도면·공간요소는 `floors[]` 안에 있다 — 최상위를 쓰면 엉뚱한 층 도면
+위에 다른 층 구역을 그리게 된다(실제로 17F 에 AI hub 1층 도면이 깔린 적 있다).
+
 ## 기록
 
 | 파일 | 층 | 카메라 | 길이 | 세션 종료값 |
 |---|---|---|---|---|
-| `17F_cam01-03_3min.mp4` | 17F(default) | cam01·cam02·cam03 | 180s · 1620x852 @5fps · 25MB | SEI 97.7 · EPFI 95.1 · CBS 12.85 · IDR 0/3 |
+| `17F_cam01-03_3min.mp4` | 17F(default) | cam01·cam02·cam03 | 180s · 1620x852 @5fps · 34MB | SEI 97.8 · EPFI 95.0 · CBS 12.59 · IDR 0/3 |
 
 촬영 2026-09-15. 17F 는 상시 RTSP(`rtsp://127.0.0.1:8554/{1,2,3}_v1`) 로 사람이
 오가는 실제 사무 공간이라, 경보 없이 이동하는 인원이 잡힌다 — IDR 0/3 은 그래서

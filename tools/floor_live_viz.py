@@ -134,7 +134,15 @@ def main() -> int:
     ap.add_argument("--pad", type=float, default=0.12, help="줌 영역 여백 비율")
     a = ap.parse_args()
 
-    site = api(f"/api/site?floor={a.floor}")
+    _site = api(f"/api/site?floor={a.floor}")
+    # /api/site 는 **사이트 최상위** 값을 돌려준다(map·zones·exits 가 legacy 전역값).
+    # 층의 실제 도면·공간요소는 floors[] 안에 있다 — 여기서 뽑지 않으면 엉뚱한 층
+    # 도면 위에 다른 층 구역을 그리게 된다(실제로 17F 에 AI hub 1층 도면이 깔렸다).
+    site = next((f for f in (_site.get("floors") or []) if f.get("id") == a.floor), None)
+    if site is None:
+        raise SystemExit(f"층 없음: {a.floor} — 있는 층 "
+                         + str([f.get("id") for f in (_site.get("floors") or [])]))
+    site["floors"] = _site.get("floors") or []          # 층 이름 조회용
     _cl = api("/api/cameras")
     cams = {c["cam_id"]: c for c in (_cl["cameras"] if isinstance(_cl, dict) else _cl)}
     picked = [cams[c] for c in a.cams if c in cams]
