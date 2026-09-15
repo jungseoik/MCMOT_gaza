@@ -1,0 +1,5 @@
+name,start_mmss,end_mmss,sync_start,dur,cams
+trace_senario1,04:22,05:56,262,94,cam31 cam32 cam33 cam38
+trace_senario2,06:33,07:50,393,77,cam31 cam32 cam33 cam38
+ssave_senario3,09:22,10:07,562,45,cam31 cam32 cam33 cam38
+ssave_senario4,10:07,10:40,607,33,cam31 cam32 cam33 cam38

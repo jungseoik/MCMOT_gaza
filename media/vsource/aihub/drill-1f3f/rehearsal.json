@@ -323,7 +323,53 @@
         ]
       },
       "cams_expected": 9,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "scenario_01/cam5.mp4",
+          "duration_sec": 38.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_01/cam8.mp4",
+          "duration_sec": 38.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_01/cam9.mp4",
+          "duration_sec": 38.0
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_01/cam10.mp4",
+          "duration_sec": 38.0
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_01/cam11.mp4",
+          "duration_sec": 38.0
+        },
+        {
+          "cam": "cam14",
+          "file": "scenario_01/cam14.mp4",
+          "duration_sec": 38.0
+        },
+        {
+          "cam": "cam16",
+          "file": "scenario_01/cam16.mp4",
+          "duration_sec": 38.0
+        },
+        {
+          "cam": "cam17",
+          "file": "scenario_01/cam17.mp4",
+          "duration_sec": 38.0
+        },
+        {
+          "cam": "cam18",
+          "file": "scenario_01/cam18.mp4",
+          "duration_sec": 38.0
+        }
+      ]
     },
     {
       "id": "scenario_02",
@@ -346,7 +392,48 @@
         ]
       },
       "cams_expected": 8,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "scenario_02/cam5.mp4",
+          "duration_sec": 49.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_02/cam8.mp4",
+          "duration_sec": 49.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_02/cam9.mp4",
+          "duration_sec": 49.0
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_02/cam10.mp4",
+          "duration_sec": 49.0
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_02/cam11.mp4",
+          "duration_sec": 49.0
+        },
+        {
+          "cam": "cam16",
+          "file": "scenario_02/cam16.mp4",
+          "duration_sec": 49.0
+        },
+        {
+          "cam": "cam17",
+          "file": "scenario_02/cam17.mp4",
+          "duration_sec": 49.0
+        },
+        {
+          "cam": "cam18",
+          "file": "scenario_02/cam18.mp4",
+          "duration_sec": 49.0
+        }
+      ]
     },
     {
       "id": "scenario_03",
@@ -369,7 +456,48 @@
         ]
       },
       "cams_expected": 8,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "scenario_03/cam5.mp4",
+          "duration_sec": 81.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_03/cam8.mp4",
+          "duration_sec": 81.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_03/cam9.mp4",
+          "duration_sec": 81.0
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_03/cam10.mp4",
+          "duration_sec": 81.0
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_03/cam11.mp4",
+          "duration_sec": 81.0
+        },
+        {
+          "cam": "cam16",
+          "file": "scenario_03/cam16.mp4",
+          "duration_sec": 81.0
+        },
+        {
+          "cam": "cam17",
+          "file": "scenario_03/cam17.mp4",
+          "duration_sec": 81.0
+        },
+        {
+          "cam": "cam18",
+          "file": "scenario_03/cam18.mp4",
+          "duration_sec": 81.0
+        }
+      ]
     },
     {
       "id": "scenario_04",
@@ -407,7 +535,73 @@
         ]
       },
       "cams_expected": 13,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "scenario_04/cam5.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam6",
+          "file": "scenario_04/cam6.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam7",
+          "file": "scenario_04/cam7.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_04/cam8.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_04/cam9.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_04/cam10.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_04/cam11.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam12",
+          "file": "scenario_04/cam12.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam13",
+          "file": "scenario_04/cam13.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam14",
+          "file": "scenario_04/cam14.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam16",
+          "file": "scenario_04/cam16.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam17",
+          "file": "scenario_04/cam17.mp4",
+          "duration_sec": 59.0
+        },
+        {
+          "cam": "cam18",
+          "file": "scenario_04/cam18.mp4",
+          "duration_sec": 59.0
+        }
+      ]
     },
     {
       "id": "scenario_05",
@@ -450,7 +644,48 @@
         ]
       },
       "cams_expected": 8,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "scenario_05/cam5.mp4",
+          "duration_sec": 44.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_05/cam8.mp4",
+          "duration_sec": 44.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_05/cam9.mp4",
+          "duration_sec": 44.0
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_05/cam10.mp4",
+          "duration_sec": 44.0
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_05/cam11.mp4",
+          "duration_sec": 44.0
+        },
+        {
+          "cam": "cam16",
+          "file": "scenario_05/cam16.mp4",
+          "duration_sec": 44.0
+        },
+        {
+          "cam": "cam17",
+          "file": "scenario_05/cam17.mp4",
+          "duration_sec": 44.0
+        },
+        {
+          "cam": "cam18",
+          "file": "scenario_05/cam18.mp4",
+          "duration_sec": 44.0
+        }
+      ]
     },
     {
       "id": "scenario_06",
@@ -488,7 +723,73 @@
         ]
       },
       "cams_expected": 13,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "scenario_06/cam5.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam6",
+          "file": "scenario_06/cam6.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam7",
+          "file": "scenario_06/cam7.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_06/cam8.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_06/cam9.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_06/cam10.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_06/cam11.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam12",
+          "file": "scenario_06/cam12.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam13",
+          "file": "scenario_06/cam13.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam14",
+          "file": "scenario_06/cam14.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam16",
+          "file": "scenario_06/cam16.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam17",
+          "file": "scenario_06/cam17.mp4",
+          "duration_sec": 62.0
+        },
+        {
+          "cam": "cam18",
+          "file": "scenario_06/cam18.mp4",
+          "duration_sec": 62.0
+        }
+      ]
     },
     {
       "id": "scenario_07",
@@ -510,7 +811,43 @@
         ]
       },
       "cams_expected": 7,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "scenario_07/cam1.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam2",
+          "file": "scenario_07/cam2.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam3",
+          "file": "scenario_07/cam3.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam4",
+          "file": "scenario_07/cam4.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam5",
+          "file": "scenario_07/cam5.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_07/cam8.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_07/cam9.mp4",
+          "duration_sec": 45.0
+        }
+      ]
     },
     {
       "id": "scenario_08",
@@ -532,7 +869,43 @@
         ]
       },
       "cams_expected": 7,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "scenario_08/cam1.mp4",
+          "duration_sec": 61.0
+        },
+        {
+          "cam": "cam2",
+          "file": "scenario_08/cam2.mp4",
+          "duration_sec": 61.0
+        },
+        {
+          "cam": "cam3",
+          "file": "scenario_08/cam3.mp4",
+          "duration_sec": 61.0
+        },
+        {
+          "cam": "cam4",
+          "file": "scenario_08/cam4.mp4",
+          "duration_sec": 61.0
+        },
+        {
+          "cam": "cam5",
+          "file": "scenario_08/cam5.mp4",
+          "duration_sec": 61.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_08/cam8.mp4",
+          "duration_sec": 61.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_08/cam9.mp4",
+          "duration_sec": 61.0
+        }
+      ]
     },
     {
       "id": "scenario_09",
@@ -562,7 +935,43 @@
         ]
       },
       "cams_expected": 7,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "scenario_09/cam1.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam2",
+          "file": "scenario_09/cam2.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam3",
+          "file": "scenario_09/cam3.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam4",
+          "file": "scenario_09/cam4.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam5",
+          "file": "scenario_09/cam5.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_09/cam8.mp4",
+          "duration_sec": 45.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_09/cam9.mp4",
+          "duration_sec": 45.0
+        }
+      ]
     },
     {
       "id": "scenario_10",
@@ -596,7 +1005,68 @@
         ]
       },
       "cams_expected": 12,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "scenario_10/cam1.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam2",
+          "file": "scenario_10/cam2.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam3",
+          "file": "scenario_10/cam3.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam4",
+          "file": "scenario_10/cam4.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam5",
+          "file": "scenario_10/cam5.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam6",
+          "file": "scenario_10/cam6.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam7",
+          "file": "scenario_10/cam7.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_10/cam8.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_10/cam9.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam12",
+          "file": "scenario_10/cam12.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam13",
+          "file": "scenario_10/cam13.mp4",
+          "duration_sec": 79.0
+        },
+        {
+          "cam": "cam15",
+          "file": "scenario_10/cam15.mp4",
+          "duration_sec": 79.0
+        }
+      ]
     },
     {
       "id": "scenario_11",
@@ -640,7 +1110,88 @@
         ]
       },
       "cams_expected": 16,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "scenario_11/cam1.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam2",
+          "file": "scenario_11/cam2.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam3",
+          "file": "scenario_11/cam3.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam4",
+          "file": "scenario_11/cam4.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam5",
+          "file": "scenario_11/cam5.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam6",
+          "file": "scenario_11/cam6.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam7",
+          "file": "scenario_11/cam7.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam8",
+          "file": "scenario_11/cam8.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam9",
+          "file": "scenario_11/cam9.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam10",
+          "file": "scenario_11/cam10.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam11",
+          "file": "scenario_11/cam11.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam12",
+          "file": "scenario_11/cam12.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam13",
+          "file": "scenario_11/cam13.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam14",
+          "file": "scenario_11/cam14.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam15",
+          "file": "scenario_11/cam15.mp4",
+          "duration_sec": 115.0
+        },
+        {
+          "cam": "cam16",
+          "file": "scenario_11/cam16.mp4",
+          "duration_sec": 115.0
+        }
+      ]
     },
     {
       "id": "scenario_12",
@@ -663,7 +1214,48 @@
         ]
       },
       "cams_expected": 8,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam31",
+          "file": "scenario_12/cam31.mp4",
+          "duration_sec": 78.0
+        },
+        {
+          "cam": "cam32",
+          "file": "scenario_12/cam32.mp4",
+          "duration_sec": 78.0
+        },
+        {
+          "cam": "cam33",
+          "file": "scenario_12/cam33.mp4",
+          "duration_sec": 78.0
+        },
+        {
+          "cam": "cam34",
+          "file": "scenario_12/cam34.mp4",
+          "duration_sec": 78.0
+        },
+        {
+          "cam": "cam35",
+          "file": "scenario_12/cam35.mp4",
+          "duration_sec": 78.0
+        },
+        {
+          "cam": "cam36",
+          "file": "scenario_12/cam36.mp4",
+          "duration_sec": 78.0
+        },
+        {
+          "cam": "cam38",
+          "file": "scenario_12/cam38.mp4",
+          "duration_sec": 78.0
+        },
+        {
+          "cam": "cam39",
+          "file": "scenario_12/cam39.mp4",
+          "duration_sec": 78.0
+        }
+      ]
     },
     {
       "id": "scenario_13",
@@ -686,7 +1278,48 @@
         ]
       },
       "cams_expected": 8,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam31",
+          "file": "scenario_13/cam31.mp4",
+          "duration_sec": 68.0
+        },
+        {
+          "cam": "cam32",
+          "file": "scenario_13/cam32.mp4",
+          "duration_sec": 68.0
+        },
+        {
+          "cam": "cam33",
+          "file": "scenario_13/cam33.mp4",
+          "duration_sec": 68.0
+        },
+        {
+          "cam": "cam35",
+          "file": "scenario_13/cam35.mp4",
+          "duration_sec": 68.0
+        },
+        {
+          "cam": "cam36",
+          "file": "scenario_13/cam36.mp4",
+          "duration_sec": 68.0
+        },
+        {
+          "cam": "cam37",
+          "file": "scenario_13/cam37.mp4",
+          "duration_sec": 68.0
+        },
+        {
+          "cam": "cam38",
+          "file": "scenario_13/cam38.mp4",
+          "duration_sec": 68.0
+        },
+        {
+          "cam": "cam39",
+          "file": "scenario_13/cam39.mp4",
+          "duration_sec": 68.0
+        }
+      ]
     },
     {
       "id": "scenario_14",
@@ -719,18 +1352,63 @@
         ]
       },
       "cams_expected": 9,
-      "streams": []
+      "streams": [
+        {
+          "cam": "cam31",
+          "file": "scenario_14/cam31.mp4",
+          "duration_sec": 77.0
+        },
+        {
+          "cam": "cam32",
+          "file": "scenario_14/cam32.mp4",
+          "duration_sec": 77.0
+        },
+        {
+          "cam": "cam33",
+          "file": "scenario_14/cam33.mp4",
+          "duration_sec": 77.0
+        },
+        {
+          "cam": "cam34",
+          "file": "scenario_14/cam34.mp4",
+          "duration_sec": 77.0
+        },
+        {
+          "cam": "cam35",
+          "file": "scenario_14/cam35.mp4",
+          "duration_sec": 77.0
+        },
+        {
+          "cam": "cam36",
+          "file": "scenario_14/cam36.mp4",
+          "duration_sec": 77.0
+        },
+        {
+          "cam": "cam37",
+          "file": "scenario_14/cam37.mp4",
+          "duration_sec": 77.0
+        },
+        {
+          "cam": "cam38",
+          "file": "scenario_14/cam38.mp4",
+          "duration_sec": 77.0
+        },
+        {
+          "cam": "cam39",
+          "file": "scenario_14/cam39.mp4",
+          "duration_sec": 77.0
+        }
+      ]
     }
   ],
-  "source": {
+  "origin": {
     "hf_dataset": "PIA-SPACE/C-lab-AIHub-2026-09-11",
     "shot_at": "2026-09-11",
     "cameras_total": 27,
-    "scenarios": 14
+    "scenarios": 14,
+    "_주의": "source 는 입력경로(file|rtsp) 예약어라 출처는 origin 에 둔다"
   },
   "_TODO": [
-    "cameras[].mapping — ② 매핑에서 대응점 찍으면 H 가 생긴다 (현재 없음)",
-    "scenarios[].streams — 영상을 scenario_NN/ 에 두고 파일명을 채운다 (현재 없음)",
-    "cam 표기(cam1 vs cam01)는 **실제 파일명**을 보고 확정한다 — 기존 aihub 패키지는 2자리 패딩"
+    "cameras[].mapping — ② 매핑에서 대응점을 찍으면 H 가 생긴다 (현재 없음)"
   ]
 }

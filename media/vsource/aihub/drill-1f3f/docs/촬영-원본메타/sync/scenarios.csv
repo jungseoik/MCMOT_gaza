@@ -1,0 +1,15 @@
+name,start,end,sync_start,dur,cams
+scenario_01,00:11:59,00:12:37,719,38,cam16 cam17 cam18 cam10 cam11 cam14 cam9 cam5 cam8
+scenario_02,00:13:30,00:14:19,810,49,cam16 cam17 cam18 cam10 cam11 cam9 cam5 cam8
+scenario_03,00:15:09,00:16:30,909,81,cam16 cam17 cam18 cam10 cam11 cam9 cam5 cam8
+scenario_04,00:17:29,00:18:28,1049,59,cam16 cam17 cam18 cam10 cam14 cam11 cam12 cam13 cam7 cam6 cam5 cam9 cam8
+scenario_05,00:19:46,00:20:30,1186,44,cam16 cam17 cam18 cam10 cam11 cam9 cam5 cam8
+scenario_06,00:21:34,00:22:36,1294,62,cam16 cam17 cam18 cam10 cam14 cam11 cam12 cam13 cam7 cam6 cam5 cam9 cam8
+scenario_07,00:24:50,00:25:35,1490,45,cam3 cam1 cam2 cam4 cam5 cam9 cam8
+scenario_08,00:27:00,00:28:01,1620,61,cam3 cam1 cam2 cam4 cam5 cam9 cam8
+scenario_09,00:30:13,00:30:58,1813,45,cam3 cam1 cam2 cam4 cam5 cam9 cam8
+scenario_10,00:32:27,00:33:46,1947,79,cam3 cam1 cam2 cam4 cam5 cam9 cam8 cam6 cam7 cam13 cam12 cam15
+scenario_11,00:36:40,00:38:35,2200,115,cam3 cam1 cam2 cam4 cam5 cam9 cam8 cam6 cam7 cam13 cam12 cam15 cam11 cam14 cam10 cam16
+scenario_12,00:10:45,00:12:03,645,78,cam31 cam32 cam33 cam36 cam35 cam38 cam39 cam34
+scenario_13,00:15:07,00:16:15,907,68,cam31 cam32 cam33 cam36 cam35 cam38 cam39 cam37
+scenario_14,00:17:27,00:18:44,1047,77,cam31 cam32 cam33 cam36 cam35 cam38 cam39 cam34 cam37
