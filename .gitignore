@@ -225,3 +225,5 @@ results/reid_bench/
 results/rehearsal_sessions/
 tracking*.zip
 data/seed_versions/auto-*/
+# 트랙렛 순도 검사 몽타주 — 일회성 진단 산출물(근거는 커밋 메시지·문서에 수치로)
+results/tracklet_purity/
