@@ -213,6 +213,8 @@ wheels/
 # 코어덤프(root 소유) · 리허설 시각화 산출물(영상, 재생성 가능)
 /core
 results/rehearsal_viz/
+# 층 라이브 시각화 — 영상만 제외(README 의 기록표는 남긴다)
+results/floor_viz/*.mp4
 # AI hub 리허설 시각화 — 영상만 제외(README 의 실측표는 남긴다)
 results/rehearsal_viz_aihub/*.mp4
 # 글로벌ID 비교 하네스 산출물(영상·프레임) — 하네스 코드는 tools/gid_compare/
