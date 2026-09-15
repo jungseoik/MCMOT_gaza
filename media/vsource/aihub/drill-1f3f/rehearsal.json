@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "id": "aihub-drill-1f3f",
+  "name": "AI지원센터(AI hub) 1층·3층 합동 훈련",
+  "rtsp_prefix": "aihub2",
+  "_규칙": "stream path = <rtsp_prefix>_<cam> (예 aihub_cam05). 같은 cam 번호는 전 시나리오에서 같은 경로.",
+  "floors": [
+    {
+      "id": "floor4",
+      "name": "AI hub 3층",
+      "note": "사이트 층 빙의 — 도면·구역·출구·경로는 :8900 ① 맵설정 소관. 이 항목은 '이 층이 있어야 한다'는 선언."
+    },
+    {
+      "id": "floor5",
+      "name": "AI hub 1층",
+      "note": "사이트 층 빙의 — 동일."
+    }
+  ],
+  "note": "(기입) 촬영일·장비·인원·싱크 기준. 카메라 번호는 **도면 위치 번호**이고 실카메라 대응은 cameras[].physical_cam. 촬영 기록: docs/촬영기록-및-카메라-매핑.md",
+  "_TODO": [
+    "cameras[] — cam·name·floor(floor4|floor5)·physical_cam·concat_start·analyze_fps·mapping(H는 ② 매핑에서 생성)",
+    "scenarios[] — id·name·grid_span·groups·routes·streams[{cam,file,duration_sec}]",
+    "영상은 scenario_*/ 아래에 두고 HF 에 같은 경로로 올린다",
+    "촬영 결손이 있으면 scenarios[].data_gaps 에 카메라 목록을 넣는다(UI 경고)"
+  ],
+  "docs": "docs/",
+  "cameras": [],
+  "scenarios": []
+}
