@@ -1399,6 +1399,1567 @@
           "duration_sec": 77.0
         }
       ]
+    },
+    {
+      "id": "combo_01",
+      "name": "통합 — 피난 시나리오 1(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_01(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 116.0,
+      "segments": [
+        {
+          "scenario": "scenario_01",
+          "name": "피난 시나리오 1",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 38.0,
+          "cams": [
+            "cam5",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam14",
+            "cam16",
+            "cam17",
+            "cam18"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 38.0,
+          "end_sec": 116.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "combo_01/cam5.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_01/cam8.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_01/cam9.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam10",
+          "file": "combo_01/cam10.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam11",
+          "file": "combo_01/cam11.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam14",
+          "file": "combo_01/cam14.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam16",
+          "file": "combo_01/cam16.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam17",
+          "file": "combo_01/cam17.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam18",
+          "file": "combo_01/cam18.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_01/cam31.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_01/cam32.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_01/cam33.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_01/cam34.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_01/cam35.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_01/cam36.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_01/cam38.mp4",
+          "duration_sec": 116.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_01/cam39.mp4",
+          "duration_sec": 116.0
+        }
+      ]
+    },
+    {
+      "id": "combo_02",
+      "name": "통합 — 피난 시나리오 2(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_02(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 127.0,
+      "segments": [
+        {
+          "scenario": "scenario_02",
+          "name": "피난 시나리오 2",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 49.0,
+          "cams": [
+            "cam5",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam16",
+            "cam17",
+            "cam18"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 49.0,
+          "end_sec": 127.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "combo_02/cam5.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_02/cam8.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_02/cam9.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam10",
+          "file": "combo_02/cam10.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam11",
+          "file": "combo_02/cam11.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam16",
+          "file": "combo_02/cam16.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam17",
+          "file": "combo_02/cam17.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam18",
+          "file": "combo_02/cam18.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_02/cam31.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_02/cam32.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_02/cam33.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_02/cam34.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_02/cam35.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_02/cam36.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_02/cam38.mp4",
+          "duration_sec": 127.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_02/cam39.mp4",
+          "duration_sec": 127.0
+        }
+      ]
+    },
+    {
+      "id": "combo_03",
+      "name": "통합 — 피난 시나리오 3(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_03(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 159.0,
+      "segments": [
+        {
+          "scenario": "scenario_03",
+          "name": "피난 시나리오 3",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 81.0,
+          "cams": [
+            "cam5",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam16",
+            "cam17",
+            "cam18"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 81.0,
+          "end_sec": 159.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "combo_03/cam5.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_03/cam8.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_03/cam9.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam10",
+          "file": "combo_03/cam10.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam11",
+          "file": "combo_03/cam11.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam16",
+          "file": "combo_03/cam16.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam17",
+          "file": "combo_03/cam17.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam18",
+          "file": "combo_03/cam18.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_03/cam31.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_03/cam32.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_03/cam33.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_03/cam34.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_03/cam35.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_03/cam36.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_03/cam38.mp4",
+          "duration_sec": 159.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_03/cam39.mp4",
+          "duration_sec": 159.0
+        }
+      ]
+    },
+    {
+      "id": "combo_04",
+      "name": "통합 — 피난 시나리오 4(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_04(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 137.0,
+      "segments": [
+        {
+          "scenario": "scenario_04",
+          "name": "피난 시나리오 4",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 59.0,
+          "cams": [
+            "cam5",
+            "cam6",
+            "cam7",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam12",
+            "cam13",
+            "cam14",
+            "cam16",
+            "cam17",
+            "cam18"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 59.0,
+          "end_sec": 137.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "combo_04/cam5.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam6",
+          "file": "combo_04/cam6.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam7",
+          "file": "combo_04/cam7.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_04/cam8.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_04/cam9.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam10",
+          "file": "combo_04/cam10.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam11",
+          "file": "combo_04/cam11.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam12",
+          "file": "combo_04/cam12.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam13",
+          "file": "combo_04/cam13.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam14",
+          "file": "combo_04/cam14.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam16",
+          "file": "combo_04/cam16.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam17",
+          "file": "combo_04/cam17.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam18",
+          "file": "combo_04/cam18.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_04/cam31.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_04/cam32.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_04/cam33.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_04/cam34.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_04/cam35.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_04/cam36.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_04/cam38.mp4",
+          "duration_sec": 137.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_04/cam39.mp4",
+          "duration_sec": 137.0
+        }
+      ]
+    },
+    {
+      "id": "combo_05",
+      "name": "통합 — 피난 시나리오 5(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_05(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 122.0,
+      "segments": [
+        {
+          "scenario": "scenario_05",
+          "name": "피난 시나리오 5",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 44.0,
+          "cams": [
+            "cam5",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam16",
+            "cam17",
+            "cam18"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 44.0,
+          "end_sec": 122.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "combo_05/cam5.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_05/cam8.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_05/cam9.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam10",
+          "file": "combo_05/cam10.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam11",
+          "file": "combo_05/cam11.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam16",
+          "file": "combo_05/cam16.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam17",
+          "file": "combo_05/cam17.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam18",
+          "file": "combo_05/cam18.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_05/cam31.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_05/cam32.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_05/cam33.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_05/cam34.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_05/cam35.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_05/cam36.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_05/cam38.mp4",
+          "duration_sec": 122.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_05/cam39.mp4",
+          "duration_sec": 122.0
+        }
+      ]
+    },
+    {
+      "id": "combo_06",
+      "name": "통합 — 피난 시나리오 6(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_06(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 140.0,
+      "segments": [
+        {
+          "scenario": "scenario_06",
+          "name": "피난 시나리오 6",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 62.0,
+          "cams": [
+            "cam5",
+            "cam6",
+            "cam7",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam12",
+            "cam13",
+            "cam14",
+            "cam16",
+            "cam17",
+            "cam18"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 62.0,
+          "end_sec": 140.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam5",
+          "file": "combo_06/cam5.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam6",
+          "file": "combo_06/cam6.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam7",
+          "file": "combo_06/cam7.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_06/cam8.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_06/cam9.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam10",
+          "file": "combo_06/cam10.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam11",
+          "file": "combo_06/cam11.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam12",
+          "file": "combo_06/cam12.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam13",
+          "file": "combo_06/cam13.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam14",
+          "file": "combo_06/cam14.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam16",
+          "file": "combo_06/cam16.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam17",
+          "file": "combo_06/cam17.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam18",
+          "file": "combo_06/cam18.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_06/cam31.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_06/cam32.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_06/cam33.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_06/cam34.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_06/cam35.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_06/cam36.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_06/cam38.mp4",
+          "duration_sec": 140.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_06/cam39.mp4",
+          "duration_sec": 140.0
+        }
+      ]
+    },
+    {
+      "id": "combo_07",
+      "name": "통합 — 피난 시나리오 7(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_07(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 123.0,
+      "segments": [
+        {
+          "scenario": "scenario_07",
+          "name": "피난 시나리오 7",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 45.0,
+          "cams": [
+            "cam1",
+            "cam2",
+            "cam3",
+            "cam4",
+            "cam5",
+            "cam8",
+            "cam9"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 45.0,
+          "end_sec": 123.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "combo_07/cam1.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam2",
+          "file": "combo_07/cam2.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam3",
+          "file": "combo_07/cam3.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam4",
+          "file": "combo_07/cam4.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam5",
+          "file": "combo_07/cam5.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_07/cam8.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_07/cam9.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_07/cam31.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_07/cam32.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_07/cam33.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_07/cam34.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_07/cam35.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_07/cam36.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_07/cam38.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_07/cam39.mp4",
+          "duration_sec": 123.0
+        }
+      ]
+    },
+    {
+      "id": "combo_08",
+      "name": "통합 — 피난 시나리오 8(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_08(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 139.0,
+      "segments": [
+        {
+          "scenario": "scenario_08",
+          "name": "피난 시나리오 8",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 61.0,
+          "cams": [
+            "cam1",
+            "cam2",
+            "cam3",
+            "cam4",
+            "cam5",
+            "cam8",
+            "cam9"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 61.0,
+          "end_sec": 139.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "combo_08/cam1.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam2",
+          "file": "combo_08/cam2.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam3",
+          "file": "combo_08/cam3.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam4",
+          "file": "combo_08/cam4.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam5",
+          "file": "combo_08/cam5.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_08/cam8.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_08/cam9.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_08/cam31.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_08/cam32.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_08/cam33.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_08/cam34.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_08/cam35.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_08/cam36.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_08/cam38.mp4",
+          "duration_sec": 139.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_08/cam39.mp4",
+          "duration_sec": 139.0
+        }
+      ]
+    },
+    {
+      "id": "combo_09",
+      "name": "통합 — 피난 시나리오 9(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_09(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 123.0,
+      "segments": [
+        {
+          "scenario": "scenario_09",
+          "name": "피난 시나리오 9",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 45.0,
+          "cams": [
+            "cam1",
+            "cam2",
+            "cam3",
+            "cam4",
+            "cam5",
+            "cam8",
+            "cam9"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 45.0,
+          "end_sec": 123.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "combo_09/cam1.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam2",
+          "file": "combo_09/cam2.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam3",
+          "file": "combo_09/cam3.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam4",
+          "file": "combo_09/cam4.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam5",
+          "file": "combo_09/cam5.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_09/cam8.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_09/cam9.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_09/cam31.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_09/cam32.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_09/cam33.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_09/cam34.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_09/cam35.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_09/cam36.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_09/cam38.mp4",
+          "duration_sec": 123.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_09/cam39.mp4",
+          "duration_sec": 123.0
+        }
+      ]
+    },
+    {
+      "id": "combo_10",
+      "name": "통합 — 피난 시나리오 10(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_10(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 157.0,
+      "segments": [
+        {
+          "scenario": "scenario_10",
+          "name": "피난 시나리오 10",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 79.0,
+          "cams": [
+            "cam1",
+            "cam2",
+            "cam3",
+            "cam4",
+            "cam5",
+            "cam6",
+            "cam7",
+            "cam8",
+            "cam9",
+            "cam12",
+            "cam13",
+            "cam15"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 79.0,
+          "end_sec": 157.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "combo_10/cam1.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam2",
+          "file": "combo_10/cam2.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam3",
+          "file": "combo_10/cam3.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam4",
+          "file": "combo_10/cam4.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam5",
+          "file": "combo_10/cam5.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam6",
+          "file": "combo_10/cam6.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam7",
+          "file": "combo_10/cam7.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_10/cam8.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_10/cam9.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam12",
+          "file": "combo_10/cam12.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam13",
+          "file": "combo_10/cam13.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam15",
+          "file": "combo_10/cam15.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_10/cam31.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_10/cam32.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_10/cam33.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_10/cam34.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_10/cam35.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_10/cam36.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_10/cam38.mp4",
+          "duration_sec": 157.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_10/cam39.mp4",
+          "duration_sec": 157.0
+        }
+      ]
+    },
+    {
+      "id": "combo_11",
+      "name": "통합 — 피난 시나리오 11(3층) → 피난 시나리오 12(1층)",
+      "cycle_sec": 0,
+      "kind": "combo",
+      "note": "scenario_11(층 ['floor4']) 뒤에 scenario_12(층 ['floor5']) 를 이어 붙인 **합성** 시나리오. 두 조를 따로 촬영해 실제로 동시가 아니다 — 자기 구간이 아닌 카메라는 검정이라 검출 0 이 된다. 이음매 간격 0s.",
+      "gap_sec": 0.0,
+      "total_sec": 193.0,
+      "segments": [
+        {
+          "scenario": "scenario_11",
+          "name": "피난 시나리오 11",
+          "floors": [
+            "floor4"
+          ],
+          "start_sec": 0.0,
+          "end_sec": 115.0,
+          "cams": [
+            "cam1",
+            "cam2",
+            "cam3",
+            "cam4",
+            "cam5",
+            "cam6",
+            "cam7",
+            "cam8",
+            "cam9",
+            "cam10",
+            "cam11",
+            "cam12",
+            "cam13",
+            "cam14",
+            "cam15",
+            "cam16"
+          ]
+        },
+        {
+          "scenario": "scenario_12",
+          "name": "피난 시나리오 12",
+          "floors": [
+            "floor5"
+          ],
+          "start_sec": 115.0,
+          "end_sec": 193.0,
+          "cams": [
+            "cam31",
+            "cam32",
+            "cam33",
+            "cam34",
+            "cam35",
+            "cam36",
+            "cam38",
+            "cam39"
+          ]
+        }
+      ],
+      "streams": [
+        {
+          "cam": "cam1",
+          "file": "combo_11/cam1.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam2",
+          "file": "combo_11/cam2.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam3",
+          "file": "combo_11/cam3.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam4",
+          "file": "combo_11/cam4.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam5",
+          "file": "combo_11/cam5.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam6",
+          "file": "combo_11/cam6.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam7",
+          "file": "combo_11/cam7.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam8",
+          "file": "combo_11/cam8.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam9",
+          "file": "combo_11/cam9.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam10",
+          "file": "combo_11/cam10.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam11",
+          "file": "combo_11/cam11.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam12",
+          "file": "combo_11/cam12.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam13",
+          "file": "combo_11/cam13.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam14",
+          "file": "combo_11/cam14.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam15",
+          "file": "combo_11/cam15.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam16",
+          "file": "combo_11/cam16.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam31",
+          "file": "combo_11/cam31.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam32",
+          "file": "combo_11/cam32.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam33",
+          "file": "combo_11/cam33.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam34",
+          "file": "combo_11/cam34.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam35",
+          "file": "combo_11/cam35.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam36",
+          "file": "combo_11/cam36.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam38",
+          "file": "combo_11/cam38.mp4",
+          "duration_sec": 193.0
+        },
+        {
+          "cam": "cam39",
+          "file": "combo_11/cam39.mp4",
+          "duration_sec": 193.0
+        }
+      ]
     }
   ],
   "origin": {
