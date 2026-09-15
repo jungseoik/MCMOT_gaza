@@ -93,6 +93,20 @@ var VSource = (() => {
     sel.innerHTML = floors.map((f) =>
       `<option value="${f.id}"${f.id === want ? " selected" : ""}>${f.name || f.id}</option>`).join("")
       + (known || !want ? "" : `<option value="" selected>⚠ ${want} — 사이트에 없음 (① 맵설정에서 만들기)</option>`);
+    // 이 셀렉터는 **층을 하나로 고정하는 게 아니다** — 층이 안 정해진 카메라에만
+    // 채워 넣는 기본값이다. 툴팁에만 적어두니 "한 층만 고를 수 있다"로 읽혀서,
+    // 실제 층 구성을 옆에 항상 보이게 적는다(다층 패키지는 층별 대수까지).
+    const note = $("vsFloorNote");
+    if (note) {
+      const cnt = {};
+      (s.streams || []).forEach((x) => { if (x.cam_floor) cnt[x.cam_floor] = (cnt[x.cam_floor] || 0) + 1; });
+      const ks = Object.keys(cnt);
+      const nm = (f) => (App.floorName ? App.floorName(f) : f);
+      note.textContent = !ks.length ? "— 카메라에 층 미지정 (이 값으로 채워집니다)"
+        : ks.length === 1 ? `— 이 시나리오 카메라 ${cnt[ks[0]]}대 모두 ${nm(ks[0])} (채움값일 뿐, 지정된 층은 안 바뀝니다)`
+        : `— 실제 ${ks.length}개 층: ` + ks.map((f) => `${nm(f)} ${cnt[f]}대`).join(" · ")
+          + " (카메라별 층은 ② 매핑에서)";
+    }
   }
 
   function pickedFloor() {
