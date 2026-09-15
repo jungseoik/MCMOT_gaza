@@ -16,14 +16,721 @@
       "note": "사이트 층 빙의 — 동일."
     }
   ],
-  "note": "(기입) 촬영일·장비·인원·싱크 기준. 카메라 번호는 **도면 위치 번호**이고 실카메라 대응은 cameras[].physical_cam. 촬영 기록: docs/촬영기록-및-카메라-매핑.md",
-  "_TODO": [
-    "cameras[] — cam·name·floor(floor4|floor5)·physical_cam·concat_start·analyze_fps·mapping(H는 ② 매핑에서 생성)",
-    "scenarios[] — id·name·grid_span·groups·routes·streams[{cam,file,duration_sec}]",
-    "영상은 scenario_*/ 아래에 두고 HF 에 같은 경로로 올린다",
-    "촬영 결손이 있으면 scenarios[].data_gaps 에 카메라 목록을 넣는다(UI 경고)"
-  ],
+  "note": "액션캠 27대로 2026-09-11 촬영. **도면 번호 = 실제 카메라 번호**(일치하므로 physical_cam 불필요). 층이 상이해 **두 조로 분리 촬영** — cam1~18(3층, 13:59~15:20, 시나리오 01~11) · cam31~39(1층·계단, 14:47~15:09, 시나리오 12~14). 싱크는 슬레이트(손뼉) 접촉 프레임을 육안 판독해 확정(카메라 내장 시각은 수동 설정값이라 미채택). concat_start 는 02_concat 타임라인 기준 오프셋. 원본 163GB·시나리오본 15.6GB. 촬영 기록: docs/촬영기록-및-카메라-매핑.md",
   "docs": "docs/",
-  "cameras": [],
-  "scenarios": []
+  "cameras": [
+    {
+      "cam": "cam1",
+      "path": "aihub2_cam1",
+      "name": "AI hub 3층 cam1",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:19.267",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam2",
+      "path": "aihub2_cam2",
+      "name": "AI hub 3층 cam2",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:59.867",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam3",
+      "path": "aihub2_cam3",
+      "name": "AI hub 3층 cam3",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:01:02.867",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam4",
+      "path": "aihub2_cam4",
+      "name": "AI hub 3층 cam4",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:56.433",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam5",
+      "path": "aihub2_cam5",
+      "name": "AI hub 3층 cam5",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:25.600",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam6",
+      "path": "aihub2_cam6",
+      "name": "AI hub 3층 cam6",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:57.833",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam7",
+      "path": "aihub2_cam7",
+      "name": "AI hub 3층 cam7",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:28.033",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam8",
+      "path": "aihub2_cam8",
+      "name": "AI hub 3층 cam8",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:23.533",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam9",
+      "path": "aihub2_cam9",
+      "name": "AI hub 3층 cam9",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:21.533",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam10",
+      "path": "aihub2_cam10",
+      "name": "AI hub 3층 cam10",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:54.200",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam11",
+      "path": "aihub2_cam11",
+      "name": "AI hub 3층 cam11",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:46.933",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam12",
+      "path": "aihub2_cam12",
+      "name": "AI hub 3층 cam12",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:41.333",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam13",
+      "path": "aihub2_cam13",
+      "name": "AI hub 3층 cam13",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:58.033",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam14",
+      "path": "aihub2_cam14",
+      "name": "AI hub 3층 cam14",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:01:05.333",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam15",
+      "path": "aihub2_cam15",
+      "name": "AI hub 3층 cam15",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:01:07.700",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam16",
+      "path": "aihub2_cam16",
+      "name": "AI hub 3층 cam16",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:30.267",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam17",
+      "path": "aihub2_cam17",
+      "name": "AI hub 3층 cam17",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:01:20.700",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam18",
+      "path": "aihub2_cam18",
+      "name": "AI hub 3층 cam18",
+      "floor": "floor4",
+      "analyze_fps": 5.0,
+      "concat_start": "00:01:22.567",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam31",
+      "path": "aihub2_cam31",
+      "name": "AI hub 1층·계단 cam31",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:34.000",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam32",
+      "path": "aihub2_cam32",
+      "name": "AI hub 1층·계단 cam32",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:27.533",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam33",
+      "path": "aihub2_cam33",
+      "name": "AI hub 1층·계단 cam33",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:32.400",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam34",
+      "path": "aihub2_cam34",
+      "name": "AI hub 1층·계단 cam34",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:14.533",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam35",
+      "path": "aihub2_cam35",
+      "name": "AI hub 1층·계단 cam35",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:16.133",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam36",
+      "path": "aihub2_cam36",
+      "name": "AI hub 1층·계단 cam36",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:24.433",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam37",
+      "path": "aihub2_cam37",
+      "name": "AI hub 1층·계단 cam37",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:30.117",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam38",
+      "path": "aihub2_cam38",
+      "name": "AI hub 1층·계단 cam38",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:11.167",
+      "mapping": null,
+      "valid_roi": null
+    },
+    {
+      "cam": "cam39",
+      "path": "aihub2_cam39",
+      "name": "AI hub 1층·계단 cam39",
+      "floor": "floor5",
+      "analyze_fps": 5.0,
+      "concat_start": "00:00:36.033",
+      "mapping": null,
+      "valid_roi": null
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "scenario_01",
+      "name": "피난 시나리오 1",
+      "cycle_sec": 0,
+      "grid_span": "00:11:59~00:12:37",
+      "duration_sec": 38,
+      "groups": "A·B 분리",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam9",
+          "cam5",
+          "cam8"
+        ],
+        "B": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam14",
+          "cam9",
+          "cam5",
+          "cam8"
+        ]
+      },
+      "cams_expected": 9,
+      "streams": []
+    },
+    {
+      "id": "scenario_02",
+      "name": "피난 시나리오 2",
+      "cycle_sec": 0,
+      "grid_span": "00:13:30~00:14:19",
+      "duration_sec": 49,
+      "groups": "A·B 동일",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A·B": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam9",
+          "cam5",
+          "cam8"
+        ]
+      },
+      "cams_expected": 8,
+      "streams": []
+    },
+    {
+      "id": "scenario_03",
+      "name": "피난 시나리오 3",
+      "cycle_sec": 0,
+      "grid_span": "00:15:09~00:16:30",
+      "duration_sec": 81,
+      "groups": "A·B 동일",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A·B": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam9",
+          "cam5",
+          "cam8"
+        ]
+      },
+      "cams_expected": 8,
+      "streams": []
+    },
+    {
+      "id": "scenario_04",
+      "name": "피난 시나리오 4",
+      "cycle_sec": 0,
+      "grid_span": "00:17:29~00:18:28",
+      "duration_sec": 59,
+      "groups": "A·B 분리",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam9",
+          "cam5",
+          "cam8"
+        ],
+        "B": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam14",
+          "cam11",
+          "cam12",
+          "cam13",
+          "cam7",
+          "cam6",
+          "cam5",
+          "cam9",
+          "cam8"
+        ]
+      },
+      "cams_expected": 13,
+      "streams": []
+    },
+    {
+      "id": "scenario_05",
+      "name": "피난 시나리오 5",
+      "cycle_sec": 0,
+      "grid_span": "00:19:46~00:20:30",
+      "duration_sec": 44,
+      "groups": "A·B 분리",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam9",
+          "cam5",
+          "cam8"
+        ],
+        "B": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam9",
+          "cam11",
+          "cam10",
+          "cam18",
+          "cam17",
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam9",
+          "cam5",
+          "cam8"
+        ]
+      },
+      "cams_expected": 8,
+      "streams": []
+    },
+    {
+      "id": "scenario_06",
+      "name": "피난 시나리오 6",
+      "cycle_sec": 0,
+      "grid_span": "00:21:34~00:22:36",
+      "duration_sec": 62,
+      "groups": "A·B 분리",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam11",
+          "cam9",
+          "cam5",
+          "cam8"
+        ],
+        "B": [
+          "cam16",
+          "cam17",
+          "cam18",
+          "cam10",
+          "cam14",
+          "cam11",
+          "cam12",
+          "cam13",
+          "cam7",
+          "cam6",
+          "cam5",
+          "cam9",
+          "cam8"
+        ]
+      },
+      "cams_expected": 13,
+      "streams": []
+    },
+    {
+      "id": "scenario_07",
+      "name": "피난 시나리오 7",
+      "cycle_sec": 0,
+      "grid_span": "00:24:50~00:25:35",
+      "duration_sec": 45,
+      "groups": "A·B 동일",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A·B": [
+          "cam3",
+          "cam1",
+          "cam2",
+          "cam4",
+          "cam5",
+          "cam9",
+          "cam8"
+        ]
+      },
+      "cams_expected": 7,
+      "streams": []
+    },
+    {
+      "id": "scenario_08",
+      "name": "피난 시나리오 8",
+      "cycle_sec": 0,
+      "grid_span": "00:27:00~00:28:01",
+      "duration_sec": 61,
+      "groups": "A·B 동일",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A·B": [
+          "cam3",
+          "cam1",
+          "cam2",
+          "cam4",
+          "cam5",
+          "cam9",
+          "cam8"
+        ]
+      },
+      "cams_expected": 7,
+      "streams": []
+    },
+    {
+      "id": "scenario_09",
+      "name": "피난 시나리오 9",
+      "cycle_sec": 0,
+      "grid_span": "00:30:13~00:30:58",
+      "duration_sec": 45,
+      "groups": "A·B 분리",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A": [
+          "cam3",
+          "cam1",
+          "cam2",
+          "cam4",
+          "cam5",
+          "cam9",
+          "cam8"
+        ],
+        "B": [
+          "cam1",
+          "cam2",
+          "cam4",
+          "cam5",
+          "cam9",
+          "cam8"
+        ]
+      },
+      "cams_expected": 7,
+      "streams": []
+    },
+    {
+      "id": "scenario_10",
+      "name": "피난 시나리오 10",
+      "cycle_sec": 0,
+      "grid_span": "00:32:27~00:33:46",
+      "duration_sec": 79,
+      "groups": "A·B 분리",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A": [
+          "cam3",
+          "cam1",
+          "cam2",
+          "cam4",
+          "cam5",
+          "cam9",
+          "cam8"
+        ],
+        "B": [
+          "cam3",
+          "cam1",
+          "cam2",
+          "cam4",
+          "cam5",
+          "cam6",
+          "cam7",
+          "cam13",
+          "cam12",
+          "cam15"
+        ]
+      },
+      "cams_expected": 12,
+      "streams": []
+    },
+    {
+      "id": "scenario_11",
+      "name": "피난 시나리오 11",
+      "cycle_sec": 0,
+      "grid_span": "00:36:40~00:38:35",
+      "duration_sec": 115,
+      "groups": "A·B 분리",
+      "grid_timeline": "3층조(cam1~18)",
+      "routes": {
+        "A": [
+          "cam3",
+          "cam1",
+          "cam2",
+          "cam4",
+          "cam5",
+          "cam9",
+          "cam8"
+        ],
+        "B": [
+          "cam3",
+          "cam1",
+          "cam2",
+          "cam4",
+          "cam5",
+          "cam6",
+          "cam7",
+          "cam13",
+          "cam12",
+          "cam15",
+          "cam12",
+          "cam11",
+          "cam14",
+          "cam10",
+          "cam16",
+          "cam10",
+          "cam14",
+          "cam11",
+          "cam12",
+          "cam15"
+        ]
+      },
+      "cams_expected": 16,
+      "streams": []
+    },
+    {
+      "id": "scenario_12",
+      "name": "피난 시나리오 12",
+      "cycle_sec": 0,
+      "grid_span": "00:10:45~00:12:03",
+      "duration_sec": 78,
+      "groups": "A·B 동일",
+      "grid_timeline": "1층조(cam31~39)",
+      "routes": {
+        "A·B": [
+          "cam31",
+          "cam32",
+          "cam33",
+          "cam36",
+          "cam35",
+          "cam38",
+          "cam39",
+          "cam34"
+        ]
+      },
+      "cams_expected": 8,
+      "streams": []
+    },
+    {
+      "id": "scenario_13",
+      "name": "피난 시나리오 13",
+      "cycle_sec": 0,
+      "grid_span": "00:15:07~00:16:15",
+      "duration_sec": 68,
+      "groups": "A·B 동일",
+      "grid_timeline": "1층조(cam31~39)",
+      "routes": {
+        "A·B": [
+          "cam31",
+          "cam32",
+          "cam33",
+          "cam36",
+          "cam35",
+          "cam38",
+          "cam39",
+          "cam37"
+        ]
+      },
+      "cams_expected": 8,
+      "streams": []
+    },
+    {
+      "id": "scenario_14",
+      "name": "피난 시나리오 14",
+      "cycle_sec": 0,
+      "grid_span": "00:17:27~00:18:44",
+      "duration_sec": 77,
+      "groups": "A·B 분리",
+      "grid_timeline": "1층조(cam31~39)",
+      "routes": {
+        "A": [
+          "cam31",
+          "cam32",
+          "cam33",
+          "cam36",
+          "cam35",
+          "cam38",
+          "cam39",
+          "cam34"
+        ],
+        "B": [
+          "cam31",
+          "cam32",
+          "cam33",
+          "cam36",
+          "cam35",
+          "cam38",
+          "cam39",
+          "cam37"
+        ]
+      },
+      "cams_expected": 9,
+      "streams": []
+    }
+  ],
+  "source": {
+    "hf_dataset": "PIA-SPACE/C-lab-AIHub-2026-09-11",
+    "shot_at": "2026-09-11",
+    "cameras_total": 27,
+    "scenarios": 14
+  },
+  "_TODO": [
+    "cameras[].mapping — ② 매핑에서 대응점 찍으면 H 가 생긴다 (현재 없음)",
+    "scenarios[].streams — 영상을 scenario_NN/ 에 두고 파일명을 채운다 (현재 없음)",
+    "cam 표기(cam1 vs cam01)는 **실제 파일명**을 보고 확정한다 — 기존 aihub 패키지는 2자리 패딩"
+  ]
 }
