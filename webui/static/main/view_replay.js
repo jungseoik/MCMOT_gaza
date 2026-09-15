@@ -159,6 +159,7 @@ Views.replay = (() => {
     const floors = drill.floors || [];
     $("rpFloorSel").innerHTML = floors.map((f) =>
       `<option value="${f}">${floorName(f)}</option>`).join("");
+    $("rpFloorSel").disabled = false;
     showBuildingMetrics(drill, "원본값");
     const st0 = drillSites[floors[0]];
     fillThresholds(st0 && st0.thresholds);
@@ -198,6 +199,26 @@ Views.replay = (() => {
     }
     renderRpBn();                       // 층 전환·재계산 후 그 층 병목 기준으로 갱신
     if (mc) mc.render();
+  }
+
+  /** 재생 바의 층 셀렉터 채우기.
+   *  drill: 그 훈련에 참여한 층만 (selectDrill 에서 따로 채운다)
+   *  sess : 사이트 층 전체 — 세션 목록이 층별이라 여기서 고른다.
+   *  상단바 전역 셀렉터는 이 탭에서 숨긴다(중복 + 바꾸면 뷰가 재진입돼 보던 게 날아간다). */
+  function fillFloorSel() {
+    if (mode === "drill") {
+      // 훈련을 고르기 전에는 참여 층을 알 수 없다 — 빈 셀렉터 대신 안내를 둔다.
+      if (!drill) {
+        $("rpFloorSel").innerHTML = `<option value="">(훈련을 선택하세요)</option>`;
+        $("rpFloorSel").disabled = true;
+      }
+      return;                                      // 고른 뒤는 selectDrill 이 채운다
+    }
+    $("rpFloorSel").disabled = false;
+    const fs = (App.floors && App.floors.length) ? App.floors : ((App.site && App.site.floors) || []);
+    const cur = (typeof API !== "undefined") ? API._floor() : "";
+    $("rpFloorSel").innerHTML = fs.map((f) =>
+      `<option value="${f.id}"${f.id === cur ? " selected" : ""}>${f.name || f.id}</option>`).join("");
   }
 
   function setDrillCanvasImage(floor, st) {
@@ -358,7 +379,9 @@ Views.replay = (() => {
     mode = m;
     $("rpModeSess").classList.toggle("on", m === "sess");
     $("rpModeDrill").classList.toggle("on", m === "drill");
-    $("rpFloorWrap").classList.toggle("hidden", m !== "drill");
+    $("rpFloorWrap").classList.remove("hidden");
+    $("rpFloorWrap").firstChild.textContent = mode === "drill" ? "재생 층 " : "층 ";
+    fillFloorSel();
     $("rpReport").classList.toggle("hidden", m !== "drill");
     pause();
     selId = null; data = null; site = null; drill = null;
@@ -647,6 +670,17 @@ Views.replay = (() => {
     $("rpModeSess").onclick = () => setMode("sess");
     $("rpModeDrill").onclick = () => setMode("drill");
     $("rpFloorSel").onchange = (e) => {
+      if (mode !== "drill") {
+        // 개별 층: 세션 목록이 층별이라 목록만 다시 받는다. App.setFloor 를 쓰면
+        // 뷰가 재진입(leave/enter)되어 보던 것이 날아가므로 값만 바꾼다.
+        App.currentFloor = e.target.value;
+        if (App.updateChip) App.updateChip();
+        if (App.updateExportLinks) App.updateExportLinks();
+        selId = null; data = null; site = null;
+        clearMetrics(); setControlsEnabled(false);
+        loadList();
+        return;
+      }
       // 재생 중 층 전환: 현재 절대 시각을 유지해 다른 층의 같은 순간으로 자연스럽게 전환.
       // (재생 중이면 그대로 계속 재생, 정지 중이면 그 시점에 멈춰 있음.)
       const absNow = (data && data.frames && data.frames.length)
@@ -664,6 +698,11 @@ Views.replay = (() => {
   function enter() {
     init();
     active = true;
+    // 상단바 전역 층 셀렉터는 이 탭에서 숨긴다 — 재생 바의 것과 중복이고,
+    // 전역 쪽을 바꾸면 뷰가 재진입돼 불러온 세션이 날아간다.
+    const gw = document.getElementById("floorSelWrap");
+    if (gw) { gw.dataset.rpHidden = gw.classList.contains("hidden") ? "1" : "0";
+              gw.classList.add("hidden"); }
     // 다층 사이트는 '건물 훈련'이 기본(실사용 단위). 최초 1회만 자동 설정 —
     // 이후 사용자가 '개별 층'을 고르면 그대로 존중.
     if (!modeAuto) {
@@ -672,9 +711,10 @@ Views.replay = (() => {
       mode = "drill";                      // 리허설·훈련 모두 건물 세션 — 개별 층은 디버그용
       $("rpModeDrill").classList.toggle("on", mode === "drill");
       $("rpModeSess").classList.toggle("on", mode === "sess");
-      $("rpFloorWrap").classList.toggle("hidden", mode !== "drill");
+      $("rpFloorWrap").classList.remove("hidden");     // 두 모드 다 쓴다
       $("rpReport").classList.toggle("hidden", mode !== "drill");
     }
+    fillFloorSel();
     setCanvasImage();
     loadList();
     if (selId && mode === "sess") {                // 재진입 시 선택 유지(세션 모드)
@@ -687,6 +727,8 @@ Views.replay = (() => {
 
   function leave() {
     active = false; pause();
+    const gw = document.getElementById("floorSelWrap");
+    if (gw && gw.dataset.rpHidden === "0") gw.classList.remove("hidden");
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   }
 
