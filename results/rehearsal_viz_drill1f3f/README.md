@@ -56,6 +56,26 @@ python tools/rehearsal_viz.py --package aihub-drill-1f3f --scenario scenario_01 
 
 **cam17 은 아직 미매핑** — 시나리오 01~06 에서 그만큼 빠진다.
 
+## 내려받아 볼 영상은 `web/`
+
+원래 출력은 그리드 크기 그대로라 최대 **3262x1350(level 5.0)** 이 나오고 5fps·
+키프레임 3개·무음성 트랙이다. 윈도우 기본 재생기에서 **막바지에 끊기거나 갑자기
+닫히는** 일이 있었다(실측). `web/` 에 호환용 재인코딩본을 둔다.
+
+| | 원본 | `web/` |
+|---|---|---|
+| 해상도 | ~3262x1350 (level 5.0) | 폭 ≤1920 (**level 4.0**) |
+| fps | 5 | 30 |
+| 키프레임 | 3개 (전체 575프레임) | 2초마다 |
+| 오디오 | 없음 | 무음 aac |
+| moov | 앞 | 앞(faststart) |
+
+```bash
+bash tools/viz_web_encode.sh results/rehearsal_viz_drill1f3f
+```
+
+이후 `rehearsal_viz.py`·`floor_live_viz.py` 는 처음부터 이 기준으로 뽑는다.
+
 ## 보관
 
 영상은 `.gitignore`(`results/rehearsal_viz_*/`) — 이 README 의 표만 남긴다.

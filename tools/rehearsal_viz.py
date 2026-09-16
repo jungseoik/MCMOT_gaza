@@ -402,11 +402,24 @@ def main() -> int:
     writer.release()
     for c in cams:
         c["cap"].release()
+    # **어디서나 재생되게** 마무리 인코딩한다. 그리드 크기 그대로 두면
+    # 3262x1350(level 5.0) 같은 것이 나오고, 5fps·키프레임 몇 개·무음성이라
+    # 윈도우 기본 재생기가 막바지에 끊기거나 갑자기 닫힌다(실측).
+    #   폭 ≤1920 → level 4.0 안 · fps 30 · 2초마다 키프레임 · 무음 aac · faststart
     tmp = str(out_path) + ".tmp.mp4"
-    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out_path), "-c:v", "libx264",
-                        "-preset", "veryfast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", tmp])
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(out_path),
+         "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-shortest",
+         "-vf", "scale='min(1920,iw)':-2:flags=lanczos,fps=30",
+         "-c:v", "libx264", "-preset", "medium", "-crf", "21",
+         "-profile:v", "high", "-level", "4.0", "-pix_fmt", "yuv420p",
+         "-g", "60", "-keyint_min", "30", "-sc_threshold", "0",
+         "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", tmp])
     if r.returncode == 0:
         Path(tmp).replace(out_path)
+    else:
+        Path(tmp).unlink(missing_ok=True)
+        print("[viz] 마무리 인코딩 실패 — 원본 그대로 둔다(재생기 호환 낮음)")
     print(f"[viz] 완료 {k}프레임({k / a.fps:.0f}s) → {out_path}")
     if gates:
         print(f"   출입구 통과 — 총 OUT {sum(g['out'] for g in gates)} · IN {sum(g['in'] for g in gates)}")

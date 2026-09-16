@@ -341,8 +341,13 @@ def main() -> int:
         tmp = out_path.with_suffix(".h264.mp4")
         r = subprocess.run(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(out_path),
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-             "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(tmp)])
+             "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-shortest",
+             # 폭 ≤1920(level 4.0) · 2초 키프레임 · 무음 트랙 — 윈도우 재생기 호환
+             "-vf", "scale='min(1920,iw)':-2:flags=lanczos",
+             "-c:v", "libx264", "-preset", "medium", "-crf", "21",
+             "-profile:v", "high", "-level", "4.0", "-pix_fmt", "yuv420p",
+             "-g", "60", "-keyint_min", "30", "-sc_threshold", "0",
+             "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", str(tmp)])
         if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
             before = out_path.stat().st_size
             tmp.replace(out_path)
