@@ -66,6 +66,9 @@ const App = {
     // — 리허설 가상 층(rh_*, rehearsal:true)은 여기에만 있고 site.floors엔 없다
     try { App.floors = await API.getFloors(); }
     catch (e) { App.floors = App.deriveFloors(); }
+    // 건물 목록 — 층을 묶는 단위. 실패해도 빈 배열이면 기존(단일 건물)처럼 동작한다.
+    try { App.buildings = (await API.getBuildings()).filter((b) => b.id); }
+    catch (e) { App.buildings = []; }
     // 현재 층 유효성 보정 (리허설 층에 서 있다면 유지 — App.floors 기준)
     if (!(App.floors || []).some((f) => f.id === App.currentFloor)
         && !App.site.floors.some((f) => f.id === App.currentFloor)) App.currentFloor = "default";
@@ -119,16 +122,39 @@ const App = {
   },
 
   // 상단 바 층 셀렉터 — 층 2개 이상일 때만 표시 (1개면 기존 UI와 동일하게 숨김)
+  /** 층 목록을 **건물별 optgroup** 으로. 건물이 하나뿐이거나 미지정이면
+   *  묶지 않는다 — 단일 건물 현장에서 괜한 계층이 생기지 않게. */
+  buildingName(bid) {
+    const b = (App.buildings || []).find((x) => x.id === bid);
+    return (b && b.name) || bid || "";
+  },
+
+  floorOptions(floors, cur) {
+    const opt = (f) => `<option value="${f.id}"${f.id === cur ? " selected" : ""}>`
+      + `${f.name || f.id}</option>`;
+    const bs = [...new Set(floors.map((f) => f.building || ""))];
+    if (bs.length <= 1) return floors.map(opt).join("");
+    // App.site.floors 에는 building_name 이 없다(요약 API 에만 있다) — 건물 목록에서 찾는다
+    const nameOf = (b) => (floors.find((f) => (f.building || "") === b) || {}).building_name
+                          || App.buildingName(b) || b || "건물 미지정";
+    return bs.map((b) => {
+      const mine = floors.filter((f) => (f.building || "") === b);
+      return `<optgroup label="${nameOf(b)}">${mine.map(opt).join("")}</optgroup>`;
+    }).join("");
+  },
+
   renderFloorSelector() {
     const wrap = document.getElementById("floorSelWrap");
     const sel = document.getElementById("floorSel");
     if (!wrap || !sel) return;
     // App.floors(백엔드 요약)가 있으면 그걸 쓴다 — 리허설 가상 층(rh_*)까지 포함
     const floors = (App.floors && App.floors.length) ? App.floors : (App.site.floors || []);
-    wrap.classList.toggle("hidden", floors.length <= 1);
-    sel.innerHTML = floors.map((f) =>
-      `<option value="${f.id}"${f.id === App.currentFloor ? " selected" : ""}>${f.name || f.id}</option>`
-    ).join("");
+    // ④ 리플레이는 재생 바에 자기 층 선택이 있다 — 상단바 것과 둘이 되면 헷갈리고,
+    // 상단바 쪽을 바꾸면 뷰가 재진입(leave/enter)돼 불러온 세션이 날아간다.
+    // enter() 에서 한 번 숨겨도 이 함수가 여기저기서 다시 불려 되살아났다.
+    const inReplay = (typeof App !== "undefined" && App.view === "replay");
+    wrap.classList.toggle("hidden", inReplay || floors.length <= 1);
+    sel.innerHTML = App.floorOptions(floors, App.currentFloor);
   },
 
   // 세션 내보내기 링크(JSON/CSV)에 현재 층 반영 (session.js는 정적 href 미변경)

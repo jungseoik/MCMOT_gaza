@@ -251,6 +251,19 @@ class Thresholds(BaseModel):
                             # BYTE 저신뢰 연관으로 연명한 트랙 관측을 지표 층에서 차단
 
 
+class Building(BaseModel):
+    """건물 1개 — 층을 묶는 단위 (v1.17).
+
+    한 사이트에 여러 건물이 섞일 수 있다(현장: CJ제일제당센터 17F·16F·1F·10F +
+    AI-hub 3층·1층). 건물 구분이 없으면 **건물 훈련이 층을 섞어 잡는다** —
+    실측으로 AI hub 시나리오를 돌리는데 참여 층이 CJ 17F·16F 까지 잡혔다.
+    층을 사이트로 쪼개는 대신 태그로 묶는다 — 데이터 디렉터리·세션·seed 를
+    가르지 않아 이관 비용이 없고, building 이 비면 기존과 똑같이 동작한다.
+    """
+    id: str
+    name: str = ""
+
+
 class Floor(BaseModel):
     """도면(층) 1개 — 독립 좌표계의 공간요소 묶음 (다중 도면 지원 v1.7).
 
@@ -261,6 +274,7 @@ class Floor(BaseModel):
     """
     id: str
     name: str = ""
+    building: str = ""          # Building.id — 빈 값이면 건물 미지정(기존 동작)
     map: MapSpec | None = None
     routes: list[Route] = []
     zones: list[Zone] = []
@@ -290,6 +304,7 @@ class SiteConfig(BaseModel):
     graph: SpatialGraph = SpatialGraph()            # IDR용 수동 그래프 (v1.2)
     alarm_origins: list[AlarmOrigin] = []           # 경보 발생원 N개 (v1.6)
     grid: GridConfig = GridConfig()                 # IDR 격자 BFS 설정 (v1.6)
+    buildings: list[Building] = []   # 건물 목록 (비면 단일 건물 취급)
     floors: list[Floor] = []                        # 도면(층) 목록 (v1.7) — 정본
     thresholds: Thresholds = Thresholds()
 
@@ -333,6 +348,25 @@ class SiteConfig(BaseModel):
                 cap = ex.resolve_capacity(mpp, q_default)
                 if cap is not None:
                     ex.design_capacity = cap
+
+    def building_of(self, floor_id: str | None) -> str:
+        """층이 속한 건물 id. 미지정이면 "" (단일 건물 취급)."""
+        for fl in self.floors:
+            if fl.id == floor_id:
+                return fl.building or ""
+        return ""
+
+    def building_name(self, bid: str) -> str:
+        for b in self.buildings:
+            if b.id == bid:
+                return b.name or b.id
+        return bid or ""
+
+    def floors_of_building(self, bid: str | None) -> list[Floor]:
+        """그 건물의 층. bid 가 비면 건물 미지정 층 + 전부(단일 건물 하위호환)."""
+        if not bid:
+            return list(self.floors)
+        return [fl for fl in self.floors if (fl.building or "") == bid]
 
     def get_floor(self, floor_id: str | None = None) -> Floor:
         """floor_id에 해당하는 층. None이면 'default', 없으면 첫 층.

@@ -27,11 +27,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from system.spatial.geometry import DirectionalLine   # noqa: E402
 
-TRUTH = {  # 사용자가 영상으로 확인한 정답 (2026-09-16)
-    "scenario_01": 10, "scenario_02": 9, "scenario_03": 10, "scenario_04": 10,
+TRUTH = {  # 사용자가 영상으로 확인한 정답 (2026-09-16 정정본)
+    # 값이 int 면 **전 출구 합계**, ("exit-1", n) 이면 **그 출구만** 본다.
+    # s11·s12·s14 는 사용자가 exit-1 기준으로 확인했다.
+    "scenario_01": 10, "scenario_02": 10, "scenario_03": 10, "scenario_04": 10,
     "scenario_05": 10, "scenario_06": 10, "scenario_07": 10, "scenario_08": 10,
-    "scenario_09": 10, "scenario_10": 10, "scenario_11": 9, "scenario_12": 10,
-    "scenario_13": 12, "scenario_14": 10,
+    "scenario_09": 10, "scenario_10": 10, "scenario_13": 12,
+    "scenario_11": ("exit-1", 9),    # 7명 들어감 → 2명 나가 배회 → 재진입 = 9
+    "scenario_12": ("exit-1", 10),
+    "scenario_14": ("exit-1", 10),
 }
 
 
@@ -39,10 +43,12 @@ class Zone:
     """ZoneGate 변형 — 규칙을 켜고 끌 수 있게 다시 쓴 것."""
 
     def __init__(self, poly, dwell=2, overlap=0.3, require_outside=True,
-                 inward=False, cumulative=False, inward_min_px=8.0):
+                 inward=False, cumulative=False, inward_min_px=8.0,
+                 dwell_mult=1, dwell_abs=None):
         self.poly = np.array(poly, np.float32).reshape(-1, 1, 2)
         self.cen = np.array(poly, np.float64).mean(axis=0)
-        self.dwell, self.overlap = max(1, int(dwell)), float(overlap)
+        self.dwell = max(1, int(dwell_abs if dwell_abs else dwell * dwell_mult))
+        self.overlap = float(overlap)
         self.require_outside, self.inward = require_outside, inward
         self.cumulative, self.inward_min = cumulative, float(inward_min_px)
         self.seen_out, self.streak, self.total = set(), {}, defaultdict(int)
@@ -88,6 +94,7 @@ class Zone:
 
 
 def build(cap, **kw):
+    """게이트 구성. kw 는 Zone 에만 넘긴다(통과선은 규칙 변형이 없다)."""
     gates = []
     for e in cap["exits"]:
         cc = (e.get("count_cam") or "").replace("rh_", "")
@@ -103,13 +110,23 @@ def build(cap, **kw):
     return gates
 
 
-def run(cap, **kw):
+def run(cap, min_conf=0.0, min_box_h=0.0, **kw):
     """캡처 재생 → {exit_id: set(트랙키)}"""
     gates = build(cap, **kw)
     H = {c: np.asarray(v["mapping"]["H"], np.float64).reshape(3, 3)
          for c, v in cap["cams"].items() if (v.get("mapping") or {}).get("H")}
     counted = {g["id"]: set() for g in gates}
-    for k, cam, tid, foot, bbox in cap["obs"]:
+    # 카메라마다 fps 가 다를 수 있다(출구만 10fps 실험) → **시각순**으로 재생한다
+    obs = cap["obs"]
+    if obs and len(obs[0]) >= 6:
+        obs = sorted(obs, key=lambda o: (o[5], o[1]))
+    for o in obs:
+        k, cam, tid, foot, bbox = o[0], o[1], o[2], o[3], o[4]
+        # 서버(엔진)와 같은 게이트 — 캡처에 conf 가 있을 때만 적용된다
+        if min_conf > 0 and len(o) >= 7 and o[6] < min_conf:
+            continue
+        if min_box_h > 0 and (bbox[3] - bbox[1]) < min_box_h:
+            continue
         key = f"{cam}:{tid}"
         for g in gates:
             if g["kind"] == "zone":
@@ -148,7 +165,8 @@ def person_merge(cap, counted: dict, max_gap_sec: float = 2.0,
     """
     fps = cap["fps"]
     span = {}                       # key -> (first_k, last_k, first_pt, last_pt)
-    for k, cam, tid, foot, bbox in cap["obs"]:
+    for o in cap["obs"]:
+        k, cam, tid, foot = o[0], o[1], o[2], o[3]
         key = f"{cam}:{tid}"
         if key not in span:
             span[key] = [k, k, foot, foot]
@@ -181,6 +199,9 @@ def person_merge(cap, counted: dict, max_gap_sec: float = 2.0,
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--caps", default="/tmp/exit_cap")
+    ap.add_argument("--min-conf", type=float, default=0.0,
+                    help="서버 엔진과 같은 min_conf 게이트 (사이트 기본 0.5)")
+    ap.add_argument("--caps2", default=None, help="비교할 두 번째 캡처(예: 출구 10fps)")
     a = ap.parse_args()
     caps = {}
     for f in sorted(Path(a.caps).glob("*.pkl")):
@@ -188,35 +209,43 @@ def main() -> int:
     if not caps:
         raise SystemExit(f"캡처 없음: {a.caps}")
 
-    VARIANTS = [
-        ("① 현행", dict(require_outside=True, inward=False, cumulative=False)),
-        ("② 누적dwell", dict(require_outside=True, inward=False, cumulative=True)),
-        ("③ 밖관측 해제+방향", dict(require_outside=False, inward=True, cumulative=False)),
-        ("④ ②+③+묶기(좁게)", dict(require_outside=False, inward=True, cumulative=True)),
-        ("⑤ ②+③+묶기(중간)", dict(require_outside=False, inward=True, cumulative=True)),
-    ]
-    MERGE = {"① 현행": False, "② 누적dwell": False, "③ 밖관측 해제+방향": False,
-             "④ ②+③+묶기(좁게)": {"max_gap_sec": 0.6, "max_px": 90.0},
-             "⑤ ②+③+묶기(중간)": {"max_gap_sec": 1.2, "max_px": 160.0}}
-    print(f"{'시나리오':>10}{'정답':>5}" + "".join(f"{n:>18}" for n, _ in VARIANTS))
-    tot = {n: [0, 0] for n, _ in VARIANTS}   # [정확 개수, 총오차]
-    for sid in sorted(caps):
-        t = TRUTH.get(sid)
-        row = f"{sid.replace('scenario_','s'):>10}{t if t else '—':>5}"
-        for n, kw in VARIANTS:
-            cnt = run(caps[sid], **kw)
-            m = MERGE.get(n)
-            if m:
-                cnt = person_merge(caps[sid], cnt, **(m if isinstance(m, dict) else {}))
-            c = sum(len(v) for v in cnt.values())
+    def load(d):
+        return {f.stem: pickle.load(open(f, "rb")) for f in sorted(Path(d).glob("*.pkl"))}
+    A = load(a.caps)
+    B = load(a.caps2) if a.caps2 else {}
+    if not A:
+        raise SystemExit(f"캡처 없음: {a.caps}")
+
+    # 현행(5fps dwell2) 대비, 출구만 10fps 로 올렸을 때 dwell 2~5 가 어떻게 되나
+    COLS = [("현행 5fps·d2", A, dict(), None)]
+    if B:
+        COLS += [(f"10fps·d{d}", B, dict(), d) for d in (2, 3, 4, 5)]
+
+    print(f"{'시나리오':>10}{'정답':>6}" + "".join(f"{n:>20}" for n, *_ in COLS))
+    print(f"{'':>16}(* = 그 출구만)")
+    tot = {n: [0, 0] for n, *_ in COLS}
+    for sid in sorted(A):
+        tr = TRUTH.get(sid)
+        scope, t = (tr if isinstance(tr, tuple) else (None, tr))
+        row = f"{sid.replace('scenario_','s'):>10}{f'{t}{chr(42) if scope else chr(32)}':>6}"
+        for n, caps, kw, mult in COLS:
+            c0 = caps.get(sid)
+            if c0 is None:
+                row += f"{'—':>20}"; continue
+            cnt = (run(c0, dwell_abs=mult, min_conf=a.min_conf, **kw) if mult
+                   else run(c0, min_conf=a.min_conf, **kw))
+            c = len(cnt.get(scope, ())) if scope else sum(len(v) for v in cnt.values())
             if t:
                 e = c - t
                 tot[n][0] += (e == 0); tot[n][1] += abs(e)
-                row += f"{c:>13}{'★' if e == 0 else f'{e:+d}':>5}"
+                row += f"{c:>15}{'★' if e == 0 else f'{e:+d}':>5}"
             else:
-                row += f"{c:>18}"
+                row += f"{c:>20}"
         print(row)
-    print(f"\n{'':>15}" + "".join(f"{'정확 %d/%d 오차 %d' % (tot[n][0], len(caps), tot[n][1]):>18}" for n, _ in VARIANTS))
+    n_tot = len(A)
+    print(f"\n{'GT 정확 일치':>16}" + "".join(
+        f"{'%d/%d' % (tot[n][0], n_tot):>20}" for n, *_ in COLS))
+    print(f"{'(참고) 총 오차':>16}" + "".join(f"{tot[n][1]:>20}" for n, *_ in COLS))
     return 0
 
 

@@ -34,6 +34,8 @@ def main() -> int:
     ap.add_argument("--package", required=True)
     ap.add_argument("--scenario", required=True)
     ap.add_argument("--fps", type=float, default=5.0)
+    ap.add_argument("--exit-fps", type=float, default=None,
+                    help="출구 카운팅 카메라만 이 fps 로 분석 (실험 — 가림 구간을 촘촘히 본다)")
     ap.add_argument("--capture", default=None,
                     help="관측을 pkl 로 저장 (판정 규칙만 바꿔 재생하려면 필수)")
     a = ap.parse_args()
@@ -78,11 +80,15 @@ def main() -> int:
     mpp = float((fl.get("map") or {}).get("m_per_px") or 0)
 
     streams = {st["cam"]: root / st["file"] for st in scen["streams"]}
+    exit_cams = {g["cam"] for g in gates if g["cam"]}
     caps, trackers = {}, {}
     for cam, f in streams.items():
         cap = cv2.VideoCapture(str(f))
         src = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        caps[cam] = {"cap": cap, "stride": max(1, int(round(src / a.fps)))}
+        # 출구 카메라만 더 촘촘히 볼 수 있다. 다른 카메라와 프레임 수가 달라지므로
+        # 관측에 **실제 시각(sec)** 을 함께 남긴다 — 재생 때 순서를 맞추기 위해.
+        fps_c = (a.exit_fps if (a.exit_fps and cam in exit_cams) else a.fps)
+        caps[cam] = {"cap": cap, "stride": max(1, int(round(src / fps_c))), "fps": fps_c}
         trackers[cam] = BoostTrack(max_age=max(1, int(round(a.fps * 2))), per_instance_ids=True)
         assert trackers[cam].ecc is None, "ECC 가 켜져 있다 — 라이브와 다르다"
 
@@ -106,13 +112,18 @@ def main() -> int:
             pred, ref = inf.detector.detect_frame(fr)
             sc = min(ref.shape[2] / fr.shape[0], ref.shape[3] / fr.shape[1])
             tg = trackers[cam].update(pred, ref, fr, f"{cam}:{k}")
-            dx, ds = AnalyzerThread._frame_dets(pred, sc)
+            dx, ds = AnalyzerThread._frame_dets(pred, sc)   # 원본 검출 (conf 매칭용)
             for t in np.asarray(tg).reshape(-1, tg.shape[1] if tg.size else 6):
                 x1, y1, x2, y2, tid = t[0], t[1], t[2], t[3], int(t[4])
                 key = f"{cam}:{tid}"
                 foot = ((x1 + x2) / 2, y2)
+                # **실제 검출 점수** — 트래커 출력 conf 는 내부 신뢰도(부스팅 포함)라
+                # 오탐 연명 트랙도 높다. 엔진과 같게 원본 검출과 IoU 매칭해 싣는다.
+                cf = AnalyzerThread._matched_score(
+                    np.array([x1, y1, x2, y2], np.float64), dx, ds)
                 obs.append((k, cam, int(tid), (float(foot[0]), float(foot[1])),
-                            (float(x1), float(y1), float(x2), float(y2))))
+                            (float(x1), float(y1), float(x2), float(y2)),
+                            round(k / caps[cam]["fps"], 4), float(cf)))
                 for g in gates:
                     if g["kind"] == "zone" and g["cam"] == cam:
                         ins = g["g"]._inside(foot, (x1, y1, x2, y2))
@@ -154,6 +165,8 @@ def main() -> int:
         import pickle
         cp = Path(a.capture); cp.parent.mkdir(parents=True, exist_ok=True)
         pickle.dump({"scenario": a.scenario, "package": a.package, "fps": a.fps,
+                     "exit_fps": a.exit_fps,
+                     "cam_fps": {c: v["fps"] for c, v in caps.items()},
                      "frames": k, "floor": floors[0], "obs": obs,
                      "exits": fl["exits"], "cams": {c: cams[c] for c in streams},
                      "map": fl.get("map")}, open(cp, "wb"))

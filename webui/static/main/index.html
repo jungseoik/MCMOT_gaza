@@ -84,10 +84,16 @@
         <div class="sidebody">
           <div id="mapSetPanel">
           <div class="group">
-            <div class="gtitle">도면(층) <span class="cnt" id="cntFloors">1</span></div>
+            <div class="gtitle">도면(층) <span class="cnt" id="cntFloors">1</span>
+              <span class="sp"></span><i class="bldnote" id="floorBldNote"></i></div>
             <div class="floor-edit">
               <select id="floorEditSel" title="편집할 층 선택"></select>
               <input id="floorNameInp" type="text" placeholder="층 이름" title="현재 층 이름 (Enter로 저장)" />
+            </div>
+            <!-- 건물 — 층을 묶는 단위. CAD 도 이 건물 기준으로 등록된다. -->
+            <div class="floor-edit">
+              <label class="fieldlab" title="이 층이 속한 건물. 건물 훈련은 한 건물 안에서만 돈다">건물
+                <select id="floorBldSel"></select></label>
             </div>
             <div class="floor-btns">
               <button class="btn sm" id="floorAddBtn" title="새 도면(층) 추가">+ 층 추가</button>
@@ -645,7 +651,9 @@
               <button class="btn" id="vsStartDrill"
                 title="훈련 영상을 t=0부터 틀고 ③ 운영 뷰로 이동한다">🎬 훈련 시작</button>
               <button class="btn ghost" id="vsStop">■ 종료</button>
-              <label class="vsloop" title="사이클마다 전 채널이 함께 되감긴다"><input type="checkbox" id="vsLoop" checked />반복</label>
+              <!-- TODO(loop): 반복 재생 제거 — 리허설은 1회 재생이 기준이다.
+                   반복이면 2주기 앞부분이 섞여 끝에서 ID 가 쏟아진다(실측: 사람 10 → 11).
+                   다시 필요해지면 이 체크박스와 start() 의 loop 인자를 되살린다. -->
             </div>
             <div class="grow" id="vsMsg"></div>
           </div>

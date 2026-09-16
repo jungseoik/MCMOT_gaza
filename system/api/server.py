@@ -380,7 +380,7 @@ class Runtime:
             logger.exception("reset: ingest start 실패")
         return True
 
-    def participating_floors(self) -> list[str]:
+    def participating_floors(self, building: str | None = None) -> list[str]:
         """드릴 참여 층 = 매핑되고 **활성**인 카메라가 ≥1개 있는 층.
 
         비활성 카메라는 수신 자체를 안 하므로 추적이 일어나지 않는다. 그 층을
@@ -388,9 +388,20 @@ class Runtime:
         (리허설이 다른 층 카메라를 파킹할 때 실제로 걸렸다 — ADR 08 §5-1).
         카메라 없는 층(예: 지상1층)은 그대로 제외. floors 순서 유지."""
         site, cams = self._site_plus_rehearsal(self.site()), self.cameras()
+        # 리허설(파일 모드) 중에는 사이트 RTSP 를 파킹해 **영상이 안 들어온다**.
+        # 그런데 park_site 는 수신만 내리고 카메라의 enabled 는 그대로 두므로,
+        # enabled 만 보면 17F·16F 같은 무관한 층이 참여로 잡힌다 — 경보 원점을
+        # 요구하면서 롤업에는 빈 결과가 들어간다. 파킹 중이면 리허설 카메라만 센다.
+        parked = bool(getattr(self, "_parked", False))
         have = {site.floor_id_of_camera(c) for c in cams
-                if c.mapping is not None and c.enabled}
-        return [fl.id for fl in site.floors if fl.id in have]
+                if c.mapping is not None and c.enabled
+                and not (parked and not c.cam_id.startswith(vpkg.CAM_PREFIX))}
+        out = [fl.id for fl in site.floors if fl.id in have]
+        # 건물이 지정되면 그 건물 층만. 건물 개념이 없으면(전부 빈 값) 그대로 둔다 —
+        # 안 그러면 CJ 17F 와 AI-hub 3층이 한 훈련에 묶인다(실측).
+        if building:
+            out = [f for f in out if site.building_of(f) == building]
+        return out
 
     # ------------------------------------------------------------ 수명주기
     def startup(self) -> None:
@@ -970,9 +981,51 @@ def clear_rehearsal_mapping(cam_id: str):
 def _floor_summary(cfg: SiteConfig, fl: Floor) -> dict:
     n_cams = sum(1 for c in rt.cameras() if cfg.floor_id_of_camera(c) == fl.id)
     return {"id": fl.id, "name": fl.name,
+            "building": fl.building or "",
+            "building_name": cfg.building_name(fl.building) if fl.building else "",
             "has_map": fl.map is not None,
             "map": fl.map.model_dump() if fl.map else None,
             "camera_count": n_cams}
+
+
+@app.put("/api/floors/{floor_id}")
+async def update_floor(floor_id: str, request: Request):
+    """층 속성 수정 — body {name?, building?}. 건물은 Building.id (빈 값 = 미지정).
+
+    건물이 바뀌면 그 층은 다른 건물 훈련 범위로 옮겨간다. 진행 중 세션이 있으면
+    막는다 — 같은 훈련 안에서 범위가 갈리면 롤업이 어긋난다.
+    """
+    body = await request.json()
+    cfg = rt.site()
+    fl = next((x for x in cfg.floors if x.id == floor_id), None)
+    if fl is None:
+        raise HTTPException(404, f"층 없음: {floor_id}")
+    rt.guard_session(floor_id)
+    if "name" in body:
+        fl.name = str(body.get("name") or "")
+    if "building" in body:
+        b = (body.get("building") or "").strip()
+        known = {x.id for x in cfg.buildings}
+        if b and b not in known:
+            raise HTTPException(422, f"없는 건물: {b} — 있는 것 {sorted(known)}")
+        fl.building = b
+    rt.store.save_site(cfg)
+    rt.reload_engine()
+    return _floor_summary(rt.site(), rt.site().get_floor(floor_id))
+
+
+@app.get("/api/buildings")
+def list_buildings():
+    """건물 목록 — 층을 묶는 단위. 층 추가·건물 훈련 범위 선택에 쓴다."""
+    cfg = rt.site()
+    out = []
+    for b in cfg.buildings:
+        fls = [fl.id for fl in cfg.floors if (fl.building or "") == b.id]
+        out.append({"id": b.id, "name": b.name or b.id, "floors": fls})
+    orphan = [fl.id for fl in cfg.floors if not (fl.building or "")]
+    if orphan:
+        out.append({"id": "", "name": "건물 미지정", "floors": orphan})
+    return out
 
 
 @app.get("/api/floors")
@@ -994,8 +1047,8 @@ def list_floors():
 
 @app.post("/api/floors")
 async def add_floor(request: Request):
-    """층 추가 — body {id?, name?}. id 생략 시 서버 발급(floor2..).
-    id 중복은 409."""
+    """층 추가 — body {id?, name?, building?}. id 생략 시 서버 발급(floor2..).
+    id 중복은 409. building 은 Building.id (① 맵설정에서 고른다)."""
     body = await request.json()
     cfg = rt.site()
     ids = {fl.id for fl in cfg.floors}
@@ -1007,7 +1060,8 @@ async def add_floor(request: Request):
         while f"floor{n}" in ids:
             n += 1
         fid = f"floor{n}"
-    cfg.floors.append(Floor(id=fid, name=body.get("name", "")))
+    cfg.floors.append(Floor(id=fid, name=body.get("name", ""),
+                            building=(body.get("building") or "").strip()))
     rt.store.save_site(cfg)
     rt.reload_engine()
     return _floor_summary(rt.site(), cfg.get_floor(fid))
@@ -1257,7 +1311,9 @@ async def drill_start(request: Request):
     import time as _t
     body = await request.json()
     floor_origins = body.get("floor_origins") or {}
-    part = rt.participating_floors()
+    # 건물 훈련은 **한 건물** 안에서 돈다. building 미지정이면 참여 층의 건물을
+    # 자동 판별한다 — 두 건물이 섞이면 409 로 막는다(섞인 롤업은 의미가 없다).
+    part = rt.participating_floors(body.get("building"))
     # 범위(floors) — 리허설은 시나리오 층만. 사이트 카메라가 파킹돼 있어도 매핑·활성이라
     # 참여 층으로 잡히므로, 범위를 안 주면 무관한 층에도 세션이 열린다.
     scope = body.get("floors")
@@ -1265,6 +1321,13 @@ async def drill_start(request: Request):
         part = [f for f in part if f in set(scope)]
     if not part:
         raise HTTPException(409, "카메라 매핑된 층이 없습니다 — 드릴 불가")
+    site_cfg = rt.site()
+    bset = {site_cfg.building_of(f) for f in part}
+    if not body.get("building") and len(bset) > 1:
+        raise HTTPException(409, {
+            "msg": "두 건물이 섞였습니다 — building 을 지정하세요",
+            "buildings": sorted(b for b in bset if b),
+            "floors": part})
     missing = [f for f in part if not floor_origins.get(f)]
     if missing:
         raise HTTPException(409, {"msg": "경보 발생원 미지정 층 — 각 층에 경보 위치를 지정하세요",
@@ -1744,7 +1807,11 @@ def _file_standby(sid: str) -> dict:
     cams_floor = {c.cam_id: (c.floor_id or DEFAULT_FLOOR_ID)
                   for c in vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST)}
     fps = next((c.analyze_fps for c in vpkg.virtual_cameras(pkg)), 5.0)
-    r = rt.filesrc.standby(pkg, ps[1], cams_floor=cams_floor, fps=fps)
+    # 카메라별 analyze_fps — 출구 카메라만 촘촘히 보는 식으로 쓴다(매니페스트 값).
+    cam_fps_map = {c["cam"]: float(c.get("analyze_fps") or fps)
+                   for c in pkg.get("cameras", []) if c.get("cam")}
+    r = rt.filesrc.standby(pkg, ps[1], cams_floor=cams_floor, fps=fps,
+                           cam_fps_map=cam_fps_map)
     rt.park_site(True)                       # 리허설 = 리허설 카메라만. 사이트 RTSP 는 내린다
     return r
 
@@ -1797,14 +1864,16 @@ async def vsource_start(request: Request):
         try:
             if not (rt.filesrc.active and rt.filesrc.scenario_id() == sid):
                 _file_standby(sid)
-            r = rt.filesrc.start(loop=bool(body.get("loop", True)))
+            # TODO(loop): 반복 재생 제거 — 리허설은 1회 재생이 기준이다.
+            #   반복이면 2주기 앞부분이 섞여 끝에서 ID 가 쏟아진다(실측).
+            r = rt.filesrc.start(loop=False)
             rt.reload_engine()
             return r
         except (FileNotFoundError, ValueError) as e:
             rt.set_rehearsal(*prev_pkg)
             raise HTTPException(409, str(e))
     try:
-        r = vsource.start(sid, loop=bool(body.get("loop", True)),
+        r = vsource.start(sid, loop=False,   # TODO(loop): 위 주석 참조
                           cameras=rt.cameras(),
                           attach_sec=float(at) if at else None)
         rt.reload_engine()          # 리허설 매핑 유지 (대기→재생 전환에도 그대로)

@@ -326,7 +326,8 @@ var VSource = (() => {
     msg("송출 시작 중…");
     try {
       const st = await jpost("/api/vsource/start",
-        { scenario_id: s.id, loop: $("vsLoop").checked, floor_id: pickedFloor() });
+        // TODO(loop): 반복 재생 제거 — 리허설은 1회 재생이 기준
+        { scenario_id: s.id, floor_id: pickedFloor() });
       const n = (st.pm2_stopped || []).length;
       msg(`<span class="ok">훈련 시작</span> — ${st.streams.length}채널 t=0 동시 재생`
         + (n ? ` · pm2 ${n}개 정지` : "")

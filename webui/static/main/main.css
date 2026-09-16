@@ -859,3 +859,6 @@ body.rehearsing .rhbanner{ display:block; }
 .jymtbl i.dim{ color:var(--text-3); }
 /* ⑤ 리허설 — '기본 층' 이 채움값임을 항상 보이게 (툴팁만으로는 오해를 샀다) */
 .rhfnote{ font-style:normal; font-size:10.5px; color:var(--text-3); margin-left:7px; }
+/* 건물 — 층을 묶는 단위 (v1.17) */
+.bldnote{ font-style:normal; font-size:10.5px; color:var(--text-3); }
+.floor-edit.hidden{ display:none; }

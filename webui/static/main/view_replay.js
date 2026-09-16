@@ -217,8 +217,8 @@ Views.replay = (() => {
     $("rpFloorSel").disabled = false;
     const fs = (App.floors && App.floors.length) ? App.floors : ((App.site && App.site.floors) || []);
     const cur = (typeof API !== "undefined") ? API._floor() : "";
-    $("rpFloorSel").innerHTML = fs.map((f) =>
-      `<option value="${f.id}"${f.id === cur ? " selected" : ""}>${f.name || f.id}</option>`).join("");
+    $("rpFloorSel").innerHTML = App.floorOptions ? App.floorOptions(fs, cur)
+      : fs.map((f) => `<option value="${f.id}"${f.id === cur ? " selected" : ""}>${f.name || f.id}</option>`).join("");
   }
 
   function setDrillCanvasImage(floor, st) {
@@ -455,11 +455,25 @@ Views.replay = (() => {
     $("rpSeek").value = "0";
   }
 
+  /** 개별 층 모드의 도면. **선택된 세션의 층** 것을 쓴다 — App.mapImg 는 상단바
+   *  전역 층의 도면이라, 재생 바에서 층을 바꿔도 그대로 남아 17F 도면이 박혔다.
+   *  (건물 훈련은 setDrillCanvasImage 가 층별로 따로 받는다.) */
+  /** 지금 보고 있는 층 — 건물 훈련이면 재생 중인 층, 개별 층이면 재생 바 선택값.
+   *  (같은 이름의 함수가 session.js 에도 있었는데 리포트 탭으로 옮겨가며 사라져
+   *  여기서 ReferenceError 가 났다.) */
+  function curFloor() {
+    return curDrillFloor || (typeof API !== "undefined" ? API._floor() : "");
+  }
+
   function setCanvasImage() {
-    if (App.mapImg && App.site && App.site.map)
-      mc.setImage(App.mapImg, App.site.map.w, App.site.map.h);
-    else if (site && site.map) mc.setImage(null, site.map.w, site.map.h);
-    else mc.setImage(null, 1000, 600);
+    const wh = (site && site.map) || (App.site && App.site.map) || { w: 1000, h: 600 };
+    if (!mc) return;
+    const fid = curFloor();
+    if (!fid) { mc.setImage(null, wh.w, wh.h); return; }
+    const img = new Image();
+    img.onload = () => { mc.setImage(img, wh.w, wh.h); mc.render(); };
+    img.onerror = () => { mc.setImage(null, wh.w, wh.h); mc.render(); };
+    img.src = API.mapImageUrl(fid);
   }
 
   // ------------------------------------------------------------ 재생 컨트롤
@@ -678,6 +692,7 @@ Views.replay = (() => {
         if (App.updateExportLinks) App.updateExportLinks();
         selId = null; data = null; site = null;
         clearMetrics(); setControlsEnabled(false);
+        setCanvasImage();                 // 층이 바뀌면 도면도 그 층 것으로
         loadList();
         return;
       }
@@ -698,11 +713,9 @@ Views.replay = (() => {
   function enter() {
     init();
     active = true;
-    // 상단바 전역 층 셀렉터는 이 탭에서 숨긴다 — 재생 바의 것과 중복이고,
-    // 전역 쪽을 바꾸면 뷰가 재진입돼 불러온 세션이 날아간다.
-    const gw = document.getElementById("floorSelWrap");
-    if (gw) { gw.dataset.rpHidden = gw.classList.contains("hidden") ? "1" : "0";
-              gw.classList.add("hidden"); }
+    // 상단바 전역 층 셀렉터 숨김은 App.renderFloorSelector 가 책임진다
+    // (App.view === "replay" 조건). 여기서만 숨기면 그 함수가 다시 불릴 때 되살아난다.
+    if (App.renderFloorSelector) App.renderFloorSelector();
     // 다층 사이트는 '건물 훈련'이 기본(실사용 단위). 최초 1회만 자동 설정 —
     // 이후 사용자가 '개별 층'을 고르면 그대로 존중.
     if (!modeAuto) {
@@ -727,8 +740,9 @@ Views.replay = (() => {
 
   function leave() {
     active = false; pause();
-    const gw = document.getElementById("floorSelWrap");
-    if (gw && gw.dataset.rpHidden === "0") gw.classList.remove("hidden");
+    // leave() 는 App.view 가 바뀌기 **전에** 불린다 — 지금 그리면 여전히 replay 로
+    // 판정돼 숨은 채로 남는다. 전환이 끝난 뒤에 다시 그린다.
+    setTimeout(() => { if (App.renderFloorSelector) App.renderFloorSelector(); }, 0);
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   }
 

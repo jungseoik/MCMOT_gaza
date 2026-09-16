@@ -47,8 +47,10 @@ const API = {
 
   // ---- floors (다중 도면 v1.7)
   getFloors: () => API._j("/api/floors"),
-  addFloor: (name, id) => API._post("/api/floors",
-    { ...(id ? { id } : {}), name: name || "" }),
+  addFloor: (name, id, building) => API._post("/api/floors",
+    { ...(id ? { id } : {}), name: name || "", ...(building ? { building } : {}) }),
+  updateFloor: (id, patch) => API._put(`/api/floors/${encodeURIComponent(id)}`, patch),
+  getBuildings: () => API._j("/api/buildings"),
   deleteFloor: (id) => API._j(`/api/floors/${id}`, { method: "DELETE" }),
 
   // ---- cameras

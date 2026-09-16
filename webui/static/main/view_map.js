@@ -755,18 +755,48 @@ Views.map = (() => {
     const floors = (App.site && App.site.floors) || [];
     $("cntFloors").textContent = floors.length;
     const sel = $("floorEditSel");
-    sel.innerHTML = floors.map((f) =>
-      `<option value="${f.id}"${f.id === App.currentFloor ? " selected" : ""}>${f.name || f.id}</option>`
-    ).join("");
+    sel.innerHTML = App.floorOptions ? App.floorOptions(floors, App.currentFloor)
+      : floors.map((f) => `<option value="${f.id}"${f.id === App.currentFloor ? " selected" : ""}>${f.name || f.id}</option>`).join("");
     $("floorNameInp").value = (App.floor && App.floor.name) || "";
+    renderBuildingPick(floors);
     $("floorDelBtn").disabled = (App.currentFloor === "default" || floors.length <= 1);
+  }
+
+
+  /** 건물 선택 — 층이 속한 건물을 고른다. 도면(CAD)·카메라·건물 훈련이 전부
+   *  이 값을 따른다. 건물이 하나도 정의되지 않은 현장에서는 감춘다. */
+  function renderBuildingPick(floors) {
+    const sel = $("floorBldSel"), note = $("floorBldNote");
+    if (!sel) return;
+    const bs = App.buildings || [];
+    const wrap = sel.closest(".floor-edit");
+    if (wrap) wrap.classList.toggle("hidden", bs.length === 0);
+    const cur = (App.floor && App.floor.building) || "";
+    sel.innerHTML = `<option value=""${cur ? "" : " selected"}>(미지정)</option>`
+      + bs.map((b) => `<option value="${b.id}"${b.id === cur ? " selected" : ""}>${b.name}</option>`).join("");
+    if (note) {
+      const n = floors.filter((f) => (f.building || "") === cur).length;
+      note.textContent = cur ? `${App.buildingName(cur)} · 층 ${n}개` : "";
+    }
+  }
+
+  async function saveBuilding() {
+    try {
+      await API.updateFloor(App.currentFloor, { building: $("floorBldSel").value });
+      await App.reloadSite();
+      renderFloorPanel();
+      floorMsg("건물 반영됨");
+    } catch (e) { floorMsg("건물 저장 실패: " + e.message, true); }
   }
 
   async function addFloor() {
     try {
       App.syncFloor();
       const n = ((App.site && App.site.floors) || []).length + 1;
-      const summary = await API.addFloor(`${n}층`);
+      // 새 층은 **지금 보고 있는 층과 같은 건물**에 넣는다 — 건물을 오가며
+      // 추가할 때 매번 고르지 않아도 되게.
+      const bld = (App.floor && App.floor.building) || "";
+      const summary = await API.addFloor(`${n}층`, undefined, bld);
       await App.reloadSite();
       await App.setFloor(summary.id);              // 새 층으로 전환 → 뷰 재진입
       floorMsg(`새 층 추가됨: ${summary.name || summary.id}`);
@@ -906,6 +936,7 @@ Views.map = (() => {
     // 도면(층) 관리 — 셀렉터/추가/삭제/이름
     $("floorEditSel").onchange = () => App.setFloor($("floorEditSel").value);
     $("floorAddBtn").onclick = addFloor;
+    $("floorBldSel").onchange = saveBuilding;
     $("floorDelBtn").onclick = delFloor;
     $("floorRenameBtn").onclick = renameFloor;
     $("floorNameInp").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); renameFloor(); } };

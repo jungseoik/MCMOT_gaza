@@ -55,6 +55,11 @@ class _Cam:
         self.drops = 0
         self._fps_ema = 0.0
         self.fps_analyze = fps_analyze
+        # 루프는 **가장 빠른 카메라 fps** 로 돈다. 이 카메라는 emit_every 스텝마다
+        # 한 번만 프레임을 내보낸다(그 사이 스텝은 grab 으로 위치만 맞춘다).
+        # 출구 카메라만 촘촘히 보고 나머지는 그대로 두기 위한 것 — 실측상
+        # 출구 10fps 로 GT 정확 일치가 6/14 → 11/14 로 올랐다.
+        self.emit_every = 1
 
     def open(self) -> None:
         self.close()
@@ -103,8 +108,17 @@ class _Cam:
         return self.frame0
 
     def read_step(self, k: int) -> np.ndarray | None:
-        """k번째 분석 프레임(= 원본 k*stride 번째). 끝나면 None."""
+        """루프 k 스텝의 프레임. 이 카메라 차례가 아니면 None(디코드 없이 위치만 전진).
+
+        전 카메라가 같은 fps 면 emit_every=1 이라 예전과 똑같이 동작한다.
+        """
         if self.cap is None or self.ended:
+            return None
+        if self.emit_every > 1 and (k % self.emit_every) != 0:
+            for _ in range(self.stride):        # 내 차례가 아니다 — 위치만 전진
+                if not self.cap.grab():
+                    self.ended = True
+                    return None
             return None
         n_skip = self.stride - 1 if k > 0 else 0
         for _ in range(n_skip):
@@ -180,7 +194,7 @@ class FileSourceRunner:
 
     # ------------------------------------------------------------ 제어
     def standby(self, pkg: dict, scen_id: str, cams_floor: dict[str, str] | None = None,
-                fps: float = 5.0) -> dict:
+                fps: float = 5.0, cam_fps_map: dict[str, float] | None = None) -> dict:
         """준비 — 영상을 열고 0번 프레임을 정지로 붙잡는다 (매핑용). 즉시 완료."""
         scen = next((s for s in pkg.get("scenarios", []) if s.get("id") == scen_id), None)
         if scen is None:
@@ -192,13 +206,21 @@ class FileSourceRunner:
             cam = st.get("cam")
             if not cam:
                 continue
-            c = _Cam(vpkg.cam_id_of(cam), vpkg.stream_path(pkg, cam), str(root / st["file"]), fps)
+            # 카메라별 analyze_fps (매니페스트). 없으면 공통값.
+            cam_fps = float((cam_fps_map or {}).get(cam) or fps)
+            c = _Cam(vpkg.cam_id_of(cam), vpkg.stream_path(pkg, cam),
+                     str(root / st["file"]), cam_fps)
             c.open()
             c.snapshot_candidates = vpkg.snapshot_times(pkg, scen_id, cam)
             c.read_first(c.snapshot_candidates)
             cams.append(c)
         if not cams:
             raise ValueError("시나리오에 영상이 없습니다")
+        # 루프는 가장 빠른 카메라에 맞추고, 느린 카메라는 그 배수마다 내보낸다.
+        loop_fps = max(c.fps_analyze for c in cams)
+        for c in cams:
+            c.emit_every = max(1, int(round(loop_fps / c.fps_analyze)))
+            c.stride = max(1, int(round(c.src_fps / loop_fps)))   # 스텝당 원본 프레임
         durs = [c.duration for c in cams if c.duration]
         with self._lock:
             self.cams = cams
@@ -206,7 +228,7 @@ class FileSourceRunner:
             self.scenario_name = f"{pkg.get('name', pkg['id'])} — {scen.get('name', scen_id)}"
             self.floors = sorted({cams_floor.get(c.cam_id) for c in cams
                                   if cams_floor and cams_floor.get(c.cam_id)})
-            self.fps = float(fps)
+            self.fps = float(loop_fps)
             self.cycle_sec = float(scen.get("cycle_sec") or 0) or \
                 (math.ceil(max(durs) + CYCLE_PAD_SEC) if durs else 0.0)
             self.mode = "standby"
@@ -216,6 +238,9 @@ class FileSourceRunner:
                     pkg["id"], scen_id, len(cams), fps, self.cycle_sec)
         return self.status()
 
+    # TODO(loop): 반복 재생은 제거했다. 리허설은 1회 재생이 기준이고, 반복이 켜져
+    #   있으면 2주기 앞부분이 섞여 끝에서 ID 가 쏟아진다(실측: 사람 10 → 11).
+    #   다시 필요해지면 loop 인자와 아래 `if self.loop:` 분기를 되살리면 된다.
     def start(self, loop: bool = False) -> dict:
         """재생 — t0 = 지금 + 여유. 경보 시각 = t0 (앞머리 없음)."""
         if self.mode not in ("standby", "play", "done") or not self.cams:
@@ -224,7 +249,7 @@ class FileSourceRunner:
         for c in self.cams:
             c.open()                                  # 0번 프레임부터 다시
         with self._lock:
-            self.loop = bool(loop)
+            self.loop = False          # TODO(loop): 반복 재생 비활성 — 위 주석 참조
             self.t0 = time.time() + START_MARGIN_SEC
             self.mode = "play"
             self.k = 0
@@ -289,7 +314,7 @@ class FileSourceRunner:
                     self._pool = ThreadPoolExecutor(max_workers=min(DECODE_WORKERS, max(1, len(self.cams))))
                 frames = list(zip(self.cams, self._pool.map(lambda c, kk=k: c.read_step(kk), self.cams)))
                 if all(fr is None for _, fr in frames):
-                    if self.loop:
+                    if self.loop:          # TODO(loop): 현재 항상 False
                         self.cycle_n += 1
                         base = self.t0 + self.cycle_n * self.cycle_sec
                         k = 0
