@@ -217,6 +217,8 @@ results/rehearsal_viz/
 results/floor_viz/*.mp4
 # AI hub 리허설 시각화 — 영상만 제외(README 의 실측표는 남긴다)
 results/rehearsal_viz_aihub/*.mp4
+# 1층·3층 합동 훈련 시각화 — 영상만 제외(README 의 측정표는 남긴다)
+results/rehearsal_viz_drill1f3f/*.mp4
 # 글로벌ID 비교 하네스 산출물(영상·프레임) — 하네스 코드는 tools/gid_compare/
 results/gid_compare/
 # ReID 모델 벤치 산출물(925MB, 모델별 crop·피처 덤프)
