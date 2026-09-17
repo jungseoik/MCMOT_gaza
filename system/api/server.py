@@ -1157,8 +1157,13 @@ def _session_db_path(session_id: str, floor_id: str = DEFAULT_FLOOR_ID) -> Path:
 
 def _attach_recorder(eng, floor_id: str, live) -> None:
     """세션 시작 시 녹화기 부착 — 그 층의 공간요소·카메라 스냅샷을 meta로 저장.
-    스냅샷이 있어야 리플레이가 세션 당시 도면 기준으로 결정적 재생된다."""
-    site = rt.site()
+    스냅샷이 있어야 리플레이가 세션 당시 도면 기준으로 결정적 재생된다.
+
+    **엔진이 실제로 쓰는 뷰**(_site_plus_rehearsal)를 저장한다. rt.site() 원본을
+    저장하면 리허설 시나리오별 출입구 오버라이드(cam_zone_overlap 등)가 빠져,
+    리플레이 재계산이 훈련 실행과 다른 통과 인원을 낸다(실측 8건 중 2건 불일치).
+    """
+    site = rt._site_plus_rehearsal(rt.site())
     cams = rt.cameras()
     floor_cams = [c for c in cams if site.floor_id_of_camera(c) == floor_id]
     meta = {
