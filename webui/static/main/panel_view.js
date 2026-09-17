@@ -23,13 +23,18 @@ const PanelView = {
     } catch (e) { /* 사생활 모드 등 — 기억만 못 할 뿐 동작은 그대로 */ }
   },
 
-  /** 밀도 적용 — side 에 dens-* 클래스 하나만 남긴다. */
+  /** 밀도 적용 — side 에 dens-* 클래스 하나만 남긴다.
+   *  키 목록은 세그먼트의 [data-dens] 에서 읽는다 — 패널마다 모드가 달라도 된다.
+   *  "full" 은 예약어: 클래스를 하나도 안 붙인다(원래 CSS 가 그대로 산다). */
   setDensity(sideId, segId, dens) {
     const side = document.getElementById(sideId);
     const seg = document.getElementById(segId);
     if (!side) return;
-    // "full" = 기존 화면 그대로 — 클래스를 하나도 안 붙인다(원래 CSS 가 그대로 산다).
-    ["sum", "card"].forEach((d) => side.classList.toggle("dens-" + d, d === dens));
+    const keys = seg
+      ? [...seg.querySelectorAll("[data-dens]")].map((b) => b.dataset.dens)
+      : ["sum", "card"];
+    keys.filter((k) => k !== "full")
+        .forEach((d) => side.classList.toggle("dens-" + d, d === dens));
     if (seg) {
       seg.querySelectorAll("[data-dens]").forEach((b) =>
         b.classList.toggle("on", b.dataset.dens === dens));
@@ -87,7 +92,9 @@ const PanelView = {
           PanelView.setDensity(sideId, segId, b.dataset.dens));
       });
     }
-    PanelView.setDensity(sideId, segId, (["sum","card"].includes(st["dens_" + sideId]) ? st["dens_" + sideId] : "full"));
+    const keys = seg ? [...seg.querySelectorAll("[data-dens]")].map((b) => b.dataset.dens) : [];
+    PanelView.setDensity(sideId, segId,
+      keys.includes(st["dens_" + sideId]) ? st["dens_" + sideId] : "full");
 
     const fb = document.getElementById(foldBtnId);
     if (fb) {

@@ -634,10 +634,59 @@ Views.replay = (() => {
     return ans < 0 ? null : tl[ans];
   }
 
+  /* KPI 카드 시간곡선 — 세션 전체 추이 + 현재 커서 위치.
+   * 리플레이는 '지금 몇인가'보다 '언제 어떻게 올라갔나'가 중요하다.
+   * 데이터는 이미 받아온 1초 타임라인 그대로 쓴다(추가 요청 없음). */
+  const SPARKS = [
+    ["rpSparkSei",  (p) => p.sei,       "#30DCFB", 0, 100],
+    ["rpSparkEpfi", (p) => p.epfi_avg,  "#7ad17a", 0, 100],
+    ["rpSparkCbs",  (p) => p.cbs_total, "#e08a2e", 0, null],
+    ["rpSparkIdr",  (p) => p.zones_started, "#c48ce0", 0, null],
+  ];
+
+  function drawSparks() {
+    const tl = (data && data.timeline) || [];
+    SPARKS.forEach(([id, pick, col, lo, hiFix]) => {
+      const cv = $(id);
+      if (!cv || !cv.clientWidth) return;               // 숨김 모드면 폭 0
+      const dpr = window.devicePixelRatio || 1;
+      const W = cv.clientWidth, H = cv.clientHeight;
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+      const c = cv.getContext("2d");
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, W, H);
+      if (tl.length < 2) return;
+      const vals = tl.map((p) => { const v = pick(p); return v == null ? null : +v; });
+      const seen = vals.filter((v) => v != null);
+      const hi = hiFix != null ? hiFix : Math.max(1, ...seen);
+      const t0 = tl[0].ts, span = Math.max(1e-6, tl[tl.length - 1].ts - t0);
+      const X = (t) => (t - t0) / span * (W - 2) + 1;
+      const Y = (v) => H - 2 - (v - lo) / Math.max(1e-6, hi - lo) * (H - 4);
+      // 값이 나오기 시작한 구간만 그린다 — 앞쪽 null 까지 채우면 없던
+      // 상승 삼각형이 생겨 "처음부터 올라간 것"처럼 보인다.
+      let x0 = null, x1 = null;
+      c.beginPath();
+      vals.forEach((v, i) => {
+        if (v == null) return;
+        const x = X(tl[i].ts), y = Y(v);
+        if (x0 === null) { x0 = x; c.moveTo(x, y); } else c.lineTo(x, y);
+        x1 = x;
+      });
+      if (x0 === null) return;                       // 전 구간 값 없음
+      c.strokeStyle = col; c.lineWidth = 1.6; c.stroke();
+      c.lineTo(x1, H); c.lineTo(x0, H); c.closePath();
+      c.fillStyle = col + "22"; c.fill();
+      // 현재 커서
+      const cx = X(t0 + cursor);
+      c.beginPath(); c.moveTo(cx, 0); c.lineTo(cx, H);
+      c.strokeStyle = "#ffffff88"; c.lineWidth = 1; c.stroke();
+    });
+  }
+
   const DENS_NOTE = {
-    full: "<b>전체</b> — 4대 지표 카드와 구역·병목·객체 표를 모두 표시합니다. (기본)",
-    card: "<b>카드</b> — 숫자 카드를 크게 2열로. 표는 그대로 아래에 이어집니다.",
-    sum:  "<b>요약</b> — 4대 지표만 2×2 로. 표·보조 차트를 숨겨 스크롤 없이 봅니다.",
+    num:  "<b>수치</b> — 4대 지표 숫자만 크게. 표·그래프를 모두 숨깁니다.",
+    full: "<b>표</b> — 숫자에 더해 구역·객체·병목 <b>표</b>를 모두 봅니다. (기본)",
+    viz:  "<b>시각화</b> — 지표마다 <b>시간 곡선</b>과 병목 그래프를 봅니다. ③ 운영 뷰에 가깝습니다.",
   };
   function setDensNote(d) {
     const el = $("rpDensNote");
@@ -663,6 +712,7 @@ Views.replay = (() => {
     $("rpIdrProg").textContent = `${done.length}/${zm.length}`;
 
     $("rpTag").textContent = `t=${fmtDur(cursor)} 시점값`;
+    drawSparks();
     if ($("rpExitNow")) {
       const ec = p.exit_counts || {};
       const ks = Object.keys(ec).sort();
@@ -772,6 +822,7 @@ Views.replay = (() => {
     if (inited) return;
     inited = true;
     mc = new MapCanvas($("rpCv"), { draw: overlay });
+    window.addEventListener("resize", () => { if (active) drawSparks(); });
     if (window.CbsBnPanel) bnPanel = CbsBnPanel($("rpBn"));
     $("rpPlay").onclick = togglePlay;
     $("rpToStart").onclick = () => { pause(); goTo(0); if (mc) mc.render(); };
@@ -830,7 +881,10 @@ Views.replay = (() => {
     const seg = $("rpDens");
     if (seg) {
       seg.querySelectorAll("[data-dens]").forEach((b) =>
-        b.addEventListener("click", () => setDensNote(b.dataset.dens)));
+        b.addEventListener("click", () => {
+          setDensNote(b.dataset.dens);
+          setTimeout(drawSparks, 30);     // 숨김→표시로 캔버스 폭이 생긴 뒤
+        }));
       const on = seg.querySelector("[data-dens].on");
       setDensNote(on ? on.dataset.dens : "full");
     }

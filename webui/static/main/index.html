@@ -587,13 +587,13 @@
         <div class="sidehead">
           <span>지표 · 재계산</span>
           <span class="sp"></span>
-          <span class="seg dens" id="rpDens" title="이 패널을 얼마나 자세히 볼지">
+          <span class="seg dens" id="rpDens" title="무엇까지 보여줄지">
+            <button class="tag-btn" data-dens="num"
+              title="수치만 — 4대 지표 숫자 카드만. 표·그래프 없음">123 수치</button>
             <button class="tag-btn on" data-dens="full"
-              title="전체 — 지표 카드 + 구역·병목·객체 표까지 모두 (기본)">▤ 전체</button>
-            <button class="tag-btn" data-dens="card"
-              title="카드 — 숫자 카드를 2열로. 표는 그대로 아래에">▦ 카드</button>
-            <button class="tag-btn" data-dens="sum"
-              title="요약 — 4대 지표만 2×2 로, 표·보조차트 숨김 (스크롤 없음)">◱ 요약</button>
+              title="표 — 숫자 + 구역·객체·병목 표까지 (기본)">▤ 표</button>
+            <button class="tag-btn" data-dens="viz"
+              title="시각화 — ③ 운영 뷰처럼 지표별 시간 곡선·병목 그래프 중심">📈 시각화</button>
           </span>
           <button class="tag-btn sidefold" id="rpFold" title="패널 접기 — 맵을 전체 폭으로">⟩</button>
         </div>
@@ -608,10 +608,10 @@
             </div>
             <div class="grow" id="rpExitNow"></div>
             <div class="mgrid2">
-              <div class="mcard2"><div class="mh2"><b>SEI</b> 출구효율</div><div class="mbig t-num" id="rpSei">—</div></div>
-              <div class="mcard2"><div class="mh2"><b>EPFI</b> 경로충실</div><div class="mbig t-num" id="rpEpfi">—</div></div>
-              <div class="mcard2"><div class="mh2"><b>CBS</b> 병목누적</div><div class="mbig t-num" id="rpCbs">—</div></div>
-              <div class="mcard2"><div class="mh2"><b>IDR</b> 평균 <span class="t-num" id="rpIdrProg" style="opacity:.6">—</span></div><div class="mbig t-num" id="rpIdr">—</div></div>
+              <div class="mcard2"><div class="mh2"><b>SEI</b> 출구효율</div><div class="mbig t-num" id="rpSei">—</div><canvas class="rpspark" id="rpSparkSei"></canvas></div>
+              <div class="mcard2"><div class="mh2"><b>EPFI</b> 경로충실</div><div class="mbig t-num" id="rpEpfi">—</div><canvas class="rpspark" id="rpSparkEpfi"></canvas></div>
+              <div class="mcard2"><div class="mh2"><b>CBS</b> 병목누적</div><div class="mbig t-num" id="rpCbs">—</div><canvas class="rpspark" id="rpSparkCbs"></canvas></div>
+              <div class="mcard2"><div class="mh2"><b>IDR</b> 평균 <span class="t-num" id="rpIdrProg" style="opacity:.6">—</span></div><div class="mbig t-num" id="rpIdr">—</div><canvas class="rpspark" id="rpSparkIdr"></canvas></div>
             </div>
             <div class="grow" id="rpBase"></div>
           </div>

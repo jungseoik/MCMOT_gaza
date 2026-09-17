@@ -532,11 +532,18 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 #rpSide .mh2 b{ color:var(--text-1); }
 #rpSide .mcard2 .mbig{ font-size:22px; font-weight:700; color:var(--text-1); }
 .rpbase{ display:block; margin-top:8px; font-size:11px; color:var(--text-3); }
-.rpgrid{ display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; }
-.rpgrid label{ display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text-3); }
-.rpgrid label input{ width:56px; height:28px; padding:0 6px; border-radius:var(--r-md);
-  border:1px solid var(--stroke-3); background:var(--bg-3); color:var(--text-1); font:var(--num-13, 13px monospace); }
-.rpgrid label i{ font-style:normal; color:var(--text-3); font-size:11px; }
+/* 임계값 조정 격자 — 라벨/입력/단위가 한 줄에 눌려 있었다.
+   입력칸이 56px 이라 0.866 같은 4자리 값이 잘려 보였다(실측 '0.8(' 로 표시). */
+.rpgrid{ display:grid; grid-template-columns:1fr 1fr; gap:14px 16px; }
+.rpgrid label{ display:grid; grid-template-columns:auto 1fr auto; align-items:center;
+  gap:8px; font-size:13px; color:var(--text-2); min-width:0; }
+.rpgrid label input{ width:100%; min-width:0; height:32px; padding:0 9px; border-radius:var(--r-md);
+  border:1px solid var(--stroke-3); background:var(--bg-3); color:var(--text-1);
+  font-family:var(--font-num); font-size:14px; }
+.rpgrid label input[type="checkbox"]{ width:17px; height:17px; padding:0; justify-self:start;
+  accent-color:var(--brand,#30DCFB); cursor:pointer; }
+.rpgrid label i{ font-style:normal; color:var(--text-3); font-size:11px; white-space:nowrap; }
+.rpbtns{ margin-top:14px !important; }
 .rpbtns{ display:flex; gap:8px; margin-top:10px; align-items:center; }
 .rpbtns .btn{ flex:1; }
 #rpSeek{ accent-color:var(--brand, #30DCFB); }
@@ -992,3 +999,51 @@ body.rehearsing .rhbanner{ display:block; }
 /* 카드 모드 — 숫자만 크게, 표는 아래 그대로 */
 .side.metrics.dens-card .mgrid2{ gap:12px; }
 .side.metrics.dens-card .mcard2 .mbig{ font-size:30px; }
+
+/* ── ④ 리플레이 패널 표출 모드 ────────────────────────────────────────────
+   무엇을 **더** 보여주느냐로 나눈다 (이전의 '밀도' 3단계는 의미가 모호했다).
+     수치   숫자 카드만 — 표·그래프 없음
+     표     숫자 + 구역·객체·병목 표 (기본, 클래스 없음)
+     시각화 지표별 시간 곡선 + 병목 그래프 중심, 긴 표는 숨김            */
+
+/* KPI 카드 안 시간곡선 — 기본은 숨김, 시각화 모드에서만 보인다 */
+.rpspark{ display:none; width:100%; height:46px; margin-top:8px; }
+
+/* ── 수치: 카드 외 그룹 전부 숨김. 임계값 조정은 남긴다(재계산을 해야 하므로) ── */
+.side.metrics.dens-num #rpGrpIdr,
+.side.metrics.dens-num #rpGrpObj,
+.side.metrics.dens-num #rpGrpBn{ display:none; }
+.side.metrics.dens-num .mcard2 .mbig{ font-size:34px; }
+.side.metrics.dens-num .mgrid2{ gap:14px; }
+.side.metrics.dens-num .mcard2{ padding:16px 15px 17px; }
+
+/* ── 시각화: 카드마다 곡선을 켜고, 줄 많은 표(구역·객체)는 접는다.
+      병목 그룹은 스파크라인이 본체라 남긴다. ── */
+.side.metrics.dens-viz .rpspark{ display:block; }
+.side.metrics.dens-viz #rpGrpObj{ display:none; }
+.side.metrics.dens-viz #rpGrpIdr .rpidrtbl{ max-height:150px; overflow:auto; }
+.side.metrics.dens-viz .mcard2{ padding:13px 14px 14px; }
+.side.metrics.dens-viz .mcard2 .mbig{ font-size:24px; }
+
+/* ── 체크박스 공통 — 다크 테마에서 네이티브 체크박스는 흰 덩어리로 보인다 ── */
+.rpgrid label input[type="checkbox"],
+.th-param input[type="checkbox"],
+.atcur input[type="checkbox"]{
+  appearance:none; -webkit-appearance:none; position:relative;
+  width:17px; height:17px; flex:0 0 auto; padding:0; margin:0;
+  border:1px solid var(--stroke-3); border-radius:5px;
+  background:var(--bg-3); cursor:pointer; }
+.rpgrid label input[type="checkbox"]:checked,
+.th-param input[type="checkbox"]:checked,
+.atcur input[type="checkbox"]:checked{
+  background:var(--brand,#30DCFB); border-color:transparent; }
+.rpgrid label input[type="checkbox"]:checked::after,
+.th-param input[type="checkbox"]:checked::after,
+.atcur input[type="checkbox"]:checked::after{
+  content:""; position:absolute; left:5px; top:1.5px; width:4px; height:9px;
+  border:solid #06121a; border-width:0 2px 2px 0; transform:rotate(43deg); }
+
+/* 입력칸이 단위 라벨에 밀려 찌부되지 않게 최소폭을 준다 (q_design '인/분/m' 등) */
+.rpgrid label{ grid-template-columns:auto minmax(56px,1fr) auto; }
+.rpgrid label i{ font-size:10.5px; }
+.rpgrid label input[type="number"]{ min-width:58px; }
