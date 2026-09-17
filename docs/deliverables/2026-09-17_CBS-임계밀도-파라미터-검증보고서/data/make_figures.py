@@ -32,8 +32,10 @@ INTENT = {  # floor4 시나리오별 촬영 의도
  "scenario_11": ("SEI", "7:3 + 2명 재진입"),
 }
 CBS_SET = [k for k, v in INTENT.items() if v[0] == "CBS"]
+ROLE = {"scenario_08": "양성(실제 밀집)", "scenario_07": "음성(비교군)",
+        "scenario_09": "음성(비교군)"}
 F4 = {r["label"].split()[-1]: r for r in ROWS if r["floor"] == "floor4"}
-REC_LO, REC_HI = 1.0, 1.5     # 권장 구간
+REC_LO, REC_HI = 1.75, 2.25   # 권장 구간 (2판 — 음성 대조군이 0 이 되는 구간)
 
 # ---------------------------------------------- 그림 1. CBS 정의
 def fig_definition():
@@ -66,54 +68,19 @@ def fig_sweep():
         y = [F4[k]["sweep"][str(r)]["total"] for r in RHOS]
         if k in CBS_SET:
             ax.plot(RHOS, y, color=COL[k], lw=2.4, marker="o", ms=4.5, zorder=3,
-                    label=f"{k.replace('scenario_','S')} — CBS 의도 · {INTENT[k][1]}")
+                    label=f"{k.replace('scenario_','S')} — {ROLE[k]} · {INTENT[k][1]}")
         else:
             ax.plot(RHOS, y, color="#bbbbbb", lw=1.0, zorder=1)
-    ax.plot([], [], color="#bbbbbb", lw=1.0, label="그 외 8개 시나리오 (IDR·EPFI·SEI 의도)")
+    ax.plot([], [], color="#bbbbbb", lw=1.0, label="그 외 8개 시나리오 (참고)")
     ax.axvline(2.0, color="#888", ls=":", lw=1.2)
-    ax.text(2.06, 6.5, "종전 기본값 2.0", fontsize=9, color="#666")
+    ax.text(2.06, 6.5, "현행 2.0", fontsize=9, color="#666")
     ax.text((REC_LO+REC_HI)/2, 28.5, "권장 구간", ha="center", fontsize=9.5, color="#2a7d3f")
     ax.set_xlabel("임계밀도  ρcrit (명/㎡)"); ax.set_ylabel("CBS (명/㎡·초)")
     ax.set_xlim(0.1, 3.6); ax.set_ylim(-0.8, 31)
     ax.legend(frameon=False, fontsize=9, loc="upper right")
-    ax.set_title("그림 2.  임계밀도에 따른 CBS 변화 — AI hub 3층 11개 시나리오",
+    ax.set_title("그림 3.  임계밀도에 따른 CBS 변화 — AI hub 3층 11개 시나리오",
                  fontsize=12, pad=10)
-    fig.savefig(f"{OUT}/fig2_rho_sweep.png"); plt.close(fig)
-
-# ---------------------------------------------- 그림 3. 변별력
-def fig_discrimination():
-    det_i, det_all, ratio = [], [], []
-    for r in RHOS:
-        vi = [F4[k]["sweep"][str(r)]["total"] for k in CBS_SET]
-        vn = [F4[k]["sweep"][str(r)]["total"] for k in F4 if k not in CBS_SET]
-        det_i.append(sum(1 for v in vi if v > 0))
-        det_all.append(sum(1 for v in vi+vn if v > 0))
-        mi, mn = sum(vi)/len(vi), sum(vn)/len(vn)
-        ratio.append(mi/mn if mn > 0 else np.nan)
-    fig, ax = plt.subplots(figsize=(9.5, 4.8))
-    ax.axvspan(REC_LO, REC_HI, color="#2a7d3f", alpha=0.08, zorder=0)
-    ax.plot(RHOS, det_i, color="#c0504d", lw=2.2, marker="o", ms=5,
-            label="CBS 의도 시나리오 검출 수 (최대 3)")
-    ax.plot(RHOS, det_all, color="#999", lw=1.6, marker="s", ms=4,
-            label="전체 검출 시나리오 수 (최대 11)")
-    ax.set_xlabel("임계밀도  ρcrit (명/㎡)"); ax.set_ylabel("검출 시나리오 수")
-    ax.set_ylim(-0.4, 12); ax.set_xlim(0.1, 3.6)
-    ax2 = ax.twinx(); ax2.grid(False)
-    ax2.plot(RHOS, ratio, color="#2f6fb0", lw=2.0, ls="--", marker="^", ms=5,
-             label="대비 = 의도 평균 ÷ 비의도 평균")
-    ax2.set_ylabel("대비 (배)", color="#2f6fb0")
-    ax2.tick_params(axis="y", colors="#2f6fb0"); ax2.set_ylim(0, 30)
-    best = RHOS[int(np.nanargmax(np.where(np.array(det_i) == 3, ratio, np.nan)))]
-    ax2.annotate(f"대비 최대 {max(v for v, di in zip(ratio, det_i) if di == 3):.1f}배\n"
-                 f"(의도 3/3 유지)", (best, max(v for v, di in zip(ratio, det_i) if di == 3)),
-                 textcoords="offset points", xytext=(-95, -10), fontsize=9, color="#2f6fb0")
-    h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
-    ax.legend(h1+h2, l1+l2, loc="upper center", frameon=False, fontsize=9,
-              bbox_to_anchor=(0.5, -0.17), ncol=3)
-    ax.set_title("그림 3.  임계밀도에 따른 변별력\n"
-                 "낮으면 전건이 걸려 구분이 안 되고, 높으면 의도한 혼잡조차 놓친다",
-                 fontsize=11.5, pad=10)
-    fig.savefig(f"{OUT}/fig3_discrimination.png"); plt.close(fig)
+    fig.savefig(f"{OUT}/fig3_rho_sweep.png"); plt.close(fig)
 
 # ---------------------------------------------- 그림 4. 병목별 실측 밀도 분포
 def fig_peaks():
@@ -174,7 +141,7 @@ def fig_weight():
     fig.savefig(f"{OUT}/fig5_weight_linearity.png"); plt.close(fig)
 
 os.makedirs(OUT, exist_ok=True)
-fig_definition(); fig_sweep(); fig_discrimination(); fig_peaks(); fig_weight()
+fig_definition(); fig_sweep(); fig_peaks(); fig_weight()
 
 # ---------------------------------------------- CSV
 import csv
@@ -187,4 +154,45 @@ with open(f"{BASE}/data/cbs_by_rho.csv", "w", newline="") as f:
         w.writerow([r["label"].rsplit(" ", 1)[0], scen, r["floor"], it,
                     f"{max(r['peaks'].values()):.3f}"]
                    + [f"{r['sweep'][str(x)]['total']:.4f}" for x in RHOS])
+# ---------------------------------------------- 그림 6. 양성/음성 대조
+def fig_control():
+    POS = "scenario_08"; NEG = ["scenario_07", "scenario_09"]
+    OTH = [k for k in F4 if k != POS and k not in NEG]
+    pos = [F4[POS]["sweep"][str(r)]["total"] for r in RHOS]
+    neg = [max(F4[k]["sweep"][str(r)]["total"] for k in NEG) for r in RHOS]
+    oth = [max(F4[k]["sweep"][str(r)]["total"] for k in OTH) for r in RHOS]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12.6, 4.8))
+    a1.axvspan(1.75, 2.25, color="#2a7d3f", alpha=0.09, zorder=0)
+    a1.plot(RHOS, pos, color="#c0504d", lw=2.6, marker="o", ms=5,
+            label="양성 대조 S08 — 실제 밀집")
+    a1.plot(RHOS, neg, color="#2f6fb0", lw=2.0, marker="s", ms=4.5,
+            label="음성 대조 S07·S09 중 최대 — 밀집 없음")
+    a1.plot(RHOS, oth, color="#bbb", lw=1.6, ls="--",
+            label="그 외 8건 중 최대 (참고)")
+    a1.set_xlabel("임계밀도  ρcrit (명/㎡)"); a1.set_ylabel("CBS (명/㎡·초)")
+    a1.set_xlim(0.1, 3.6); a1.set_ylim(-1, 31)
+    a1.text(2.0, 12.5, "음성 대조 0 구간", ha="center", fontsize=9.5, color="#2a7d3f")
+    a1.legend(frameon=False, fontsize=9, loc="upper right")
+    a1.set_title("(가) 양성·음성 대조군의 CBS", fontsize=11, pad=8)
+
+    ratio = [p / max(n, o) if max(n, o) > 0 else np.nan
+             for p, n, o in zip(pos, neg, oth)]
+    a2.axvspan(1.75, 2.25, color="#2a7d3f", alpha=0.09, zorder=0)
+    a2.plot(RHOS, ratio, color="#7b4fa0", lw=2.2, marker="^", ms=5)
+    for x, y, n in zip(RHOS, ratio, neg):
+        if np.isnan(y): continue
+        if x in (1.0, 1.5, 2.0):
+            a2.annotate(f"{y:.1f}배", (x, y), textcoords="offset points",
+                        xytext=(-6, 8), fontsize=9, color="#7b4fa0")
+    a2.axhline(1.0, color="#999", ls=":", lw=1)
+    a2.set_xlabel("임계밀도  ρcrit (명/㎡)"); a2.set_ylabel("분리비  S08 ÷ 2위")
+    a2.set_xlim(0.1, 3.6); a2.set_ylim(0, 11)
+    a2.text(2.9, 2.2, "ρ≥2.5 는 S08 만 남아\n분리비가 정의되지 않음 (∞)",
+            ha="center", fontsize=8.5, color="#666")
+    a2.set_title("(나) 양성이 2위보다 몇 배 큰가", fontsize=11, pad=8)
+    fig.suptitle("그림 2.  양성(실제 밀집) · 음성(비교군) 대조 — CBS 가 둘을 가르는가",
+                 fontsize=12.5, y=1.02)
+    fig.savefig(f"{OUT}/fig2_control_contrast.png"); plt.close(fig)
+
+fig_control()
 print("완료:", sorted(os.listdir(OUT)))

@@ -649,6 +649,9 @@ Views.map = (() => {
     $("thBh").value = t.min_box_h != null ? t.min_box_h : 0;
     $("thQd").value = t.q_design != null ? t.q_design : 60;
     $("thMeanA").checked = !!t.idr_mean_align;
+    // 제목 옆 배지로 현재 판정 규칙을 알린다 (체크박스를 못 보고 지나치지 않게)
+    $("thIdrRule").textContent = t.idr_mean_align
+      ? "구역 평균 정렬도 요구 (옛 방식)" : "개별 객체 정렬도 기준";
   }
 
   function refresh() { refreshLists(); renderFloorPanel(); syncUndoBtn(); if (mc) mc.render(); }
@@ -901,7 +904,7 @@ Views.map = (() => {
     inited = true;
     mc = new MapCanvas($("mapSetupCv"), {
       onClick, onDragDraw, onHover,
-      onDragEnd: () => {},
+      onDragEnd: () => refresh(),      // 점 개수·목록 갱신 (클릭/드래그 공통 종료점)
       onDblClick: (p) => {
         if (tool === "graph") { graphDblClick(p); return; }
         finishDraft();
@@ -923,6 +926,10 @@ Views.map = (() => {
       e.preventDefault();
       undo();
     });
+    $("thMeanA").onchange = () => {
+      $("thIdrRule").textContent = $("thMeanA").checked
+        ? "구역 평균 정렬도 요구 (옛 방식)" : "개별 객체 정렬도 기준";
+    };
     syncUndoBtn();
     // 우측 패널: [설정] · [추론 모델] · [지표 설명] 토글
     const MS_TABS = { set: "mapSetPanel", model: "mapModelPanel", help: "mapHelpPanel" };

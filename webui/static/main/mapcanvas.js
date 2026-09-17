@@ -156,8 +156,9 @@ class MapCanvas {
     const btn = this._down.btn, moved = this._moved, drawing = this._drawing;
     this._down = null; this._drawing = false;
     if (drawing) {
-      if (moved && this.opts.onDragEnd) this.opts.onDragEnd();
-      else if (!moved && this.opts.onClick) this.opts.onClick(this.toMap(e), e);
+      // 제자리 클릭이어도 onClick 을 부르면 안 된다 — _md 의 onDragDraw(first=true)
+      // 가 이미 그 점을 넣었다. 둘 다 부르면 클릭 한 번에 점이 2개 찍힌다.
+      if (this.opts.onDragEnd) this.opts.onDragEnd();
       this.render();
       return;
     }
