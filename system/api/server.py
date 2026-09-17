@@ -76,7 +76,11 @@ FRONT_DIR = Path(__file__).resolve().parents[2] / "webui" / "static" / "main"
 # 파일 모드 재생이 끝나면 리허설 층의 세션을 자동 종료·저장 (ADR 09 §19). 0 이면 수동.
 AUTO_END_SESSION = os.environ.get("VSOURCE_AUTO_END_SESSION", "1").strip().lower() not in ("0", "false", "no")
 AUTO_END_GRACE_SEC = float(os.environ.get("VSOURCE_AUTO_END_GRACE", "2.0"))
+# 재생 종료 후 분석 큐가 비기를 기다리는 상한 (파일 모드)
+AUTO_END_DRAIN_MAX_SEC = float(os.environ.get("VSOURCE_AUTO_END_DRAIN_MAX", "120"))
 # 리허설(파일 모드) 동안 사이트 RTSP 인제스트를 내린다 (ADR 09 §14). 0 이면 유지.
+FILE_NODROP = os.environ.get("VSOURCE_FILE_NODROP", "1").strip().lower() not in ("0", "false", "no")
+FILE_QUEUE_SIZE = int(os.environ.get("VSOURCE_FILE_QUEUE", "256"))
 PARK_SITE_ON_REHEARSAL = os.environ.get("VSOURCE_PARK_SITE", "1").strip().lower() not in ("0", "false", "no")
 
 
@@ -108,7 +112,7 @@ class Runtime:
         self._rh_ingested: set[str] = set()    # 그중 ingest(RTSP)에 실제로 넣은 것 — rtsp 모드만
         # 파일 소스 모드 (ADR 09 §11) — 영상을 직접 읽어 잠금 동기로 분석 큐에 넣는다.
         # 분석 스레드는 첫 사용 때 띄운다(TRT 로드 수 초) — DS 백엔드 서버엔 없기 때문.
-        self._file_queue = FrameQueue(maxsize=64)
+        self._file_queue = FrameQueue(maxsize=FILE_QUEUE_SIZE)
         self._file_analyzer = None
         self.filesrc = vfile.FileSourceRunner(queue_put=self._file_put,
                                               rtsp_host=vsource.RTSP_HOST,
@@ -193,7 +197,8 @@ class Runtime:
         if pkg:
             # 활성 시나리오가 쓰는 카메라만 — 나머지는 송출이 없어 슬롯 낭비다
             cams = cams + [c for c in
-                           vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST)
+                           vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST,
+                                                scen_id=self._rh_scen_id)
                            if c.cam_id in self._rh_cam_ids]
         return cams
 
@@ -232,7 +237,8 @@ class Runtime:
         pkg = vpkg.get(pkg_id) if pkg_id else None
         subset = vpkg.scenario_cam_ids(pkg, scen_id) if (pkg and scen_id) else None
         want = [c for c in
-                (vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST) if pkg else [])
+                (vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST,
+                                      scen_id=scen_id) if pkg else [])
                 if subset is None or c.cam_id in subset]
         want_ids = {c.cam_id for c in want}
         # 파일 모드(기본)는 ingest(RTSP)에 넣지 않는다 — 프레임은 파일 러너가 분석 큐에 직접
@@ -268,9 +274,9 @@ class Runtime:
     def _file_put(self, item) -> None:
         """파일 러너 → 분석 큐. ffmpeg 백엔드면 라이브와 같은 AnalyzerThread 큐를 공유."""
         if self.analyzer is not None:
-            self.queue.put(item)
+            self.queue.put(item, block=FILE_NODROP)
         else:
-            self._file_queue.put(item)
+            self._file_queue.put(item, block=FILE_NODROP)
 
     def ensure_file_analyzer(self) -> None:
         """DS 백엔드 서버엔 호스트 분석 스레드가 없다 — 파일 모드용으로 하나 띄운다.
@@ -327,7 +333,17 @@ class Runtime:
                   if f in self.engines and self.engines[f].session_live() is not None]
         if not floors:
             return
-        time.sleep(AUTO_END_GRACE_SEC)
+        # 큐가 빌 때까지 기다린다 — 고정 대기는 NODROP 에서 꼬리를 자른다.
+        # 파일 재생은 디코드(최대 862 콜/초)가 분석(127 콜/초)보다 훨씬 빨라 큐가
+        # 늘 꽉 차 있고, 재생이 끝난 시점에 아직 수백 장이 남는다. 2초만 기다리고
+        # 세션을 닫으면 그 프레임이 통째로 버려진다 — 실측 영상 대비 녹화 4~13초
+        # 누락(s02 49→39.6s), 하필 사람이 문을 나가는 끝부분이다.
+        deadline = time.time() + AUTO_END_DRAIN_MAX_SEC
+        while time.time() < deadline:
+            if self._file_queue.qsize() == 0:
+                break
+            time.sleep(0.2)
+        time.sleep(AUTO_END_GRACE_SEC)      # 마지막 프레임이 엔진에 흘러들 여유
         sid = _stop_live_drill(floors)
         logger.info("리허설 영상 종료 → 세션 자동 종료·저장: %s (층 %s)", sid, floors)
 
@@ -1336,6 +1352,12 @@ async def drill_start(request: Request):
     if busy:
         raise HTTPException(409, {"msg": "이미 세션 진행 중인 층 — 먼저 종료하세요", "busy_floors": busy})
     t_alarm = float(body["t_alarm"]) if body.get("t_alarm") is not None else _t.time()
+    # 파일 리허설은 ts 가 **영상 시간**(t0 + k/fps)이다. NODROP 로 재생이 벽시계보다
+    # 느려지면 벽시계 경보 시각과 어긋나 '경보 후 경과'가 부풀어 IDR·EPFI 가 틀어진다.
+    if body.get("t_alarm") is None:
+        _v = rt.filesrc.virtual_ts() if getattr(rt, "filesrc", None) is not None else None
+        if _v is not None:
+            t_alarm = float(_v)
     floors = []
     for f in part:
         eng = rt.engine_for(f)
@@ -1805,11 +1827,11 @@ def _file_standby(sid: str) -> dict:
     ps = vpkg.parse_scenario_id(sid)
     rt.ensure_file_analyzer()
     cams_floor = {c.cam_id: (c.floor_id or DEFAULT_FLOOR_ID)
-                  for c in vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST)}
-    fps = next((c.analyze_fps for c in vpkg.virtual_cameras(pkg)), 5.0)
-    # 카메라별 analyze_fps — 출구 카메라만 촘촘히 보는 식으로 쓴다(매니페스트 값).
-    cam_fps_map = {c["cam"]: float(c.get("analyze_fps") or fps)
-                   for c in pkg.get("cameras", []) if c.get("cam")}
+                  for c in vpkg.virtual_cameras(pkg, rtsp_host=vsource.RTSP_HOST,
+                                                scen_id=ps[1])}
+    # 카메라별 analyze_fps — 카메라 기본값 + **시나리오 오버라이드**(scenario.cam_fps).
+    cam_fps_map = vpkg.scenario_cam_fps(pkg, ps[1])
+    fps = max(cam_fps_map.values()) if cam_fps_map else 5.0
     r = rt.filesrc.standby(pkg, ps[1], cams_floor=cams_floor, fps=fps,
                            cam_fps_map=cam_fps_map)
     rt.park_site(True)                       # 리허설 = 리허설 카메라만. 사이트 RTSP 는 내린다
@@ -2078,12 +2100,21 @@ def status():
                         **(bridge.stats() if bridge is not None else {})}
         else:
             pipeline = {"tracking": "disabled"}
-        return {
+        out = {
             "backend": INGEST_BACKEND,
             "pipeline": pipeline,
             "queue": {"size": rt.queue.qsize(), "drops": rt.queue.dropped},
             "cameras": [s.model_dump() for s in rt.cam_states()],
         }
+        # 파일 모드(리허설) 분석 스레드는 rt.analyzer 가 아니라 _file_analyzer 다.
+        # 여기를 안 내보내면 리허설 중 처리율·드롭이 보이지 않아(전부 0 으로 보인다)
+        # 왜 밀리는지 진단할 수 없다.
+        fa = getattr(rt, "_file_analyzer", None)
+        if fa is not None:
+            out["file_pipeline"] = fa.stats()
+            out["file_queue"] = {"size": rt._file_queue.qsize(),
+                                 "drops": rt._file_queue.dropped}
+        return out
     except Exception as e:  # 원인 노출 (임시 디버그 겸 방어)
         logger.exception("/api/status 실패")
         raise HTTPException(500, f"status 수집 실패: {type(e).__name__}: {e}")

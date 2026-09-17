@@ -115,6 +115,7 @@ class AnalyzerThread(threading.Thread):
         self._frames = 0
         self._frames_by_cam: dict[str, int] = {}
         self._infer_ms_sum = 0.0
+        self._stage_ms = {}   # [진단] 단계별 누적 ms
         self._infer_ms_last = 0.0
         self._lag_sum = 0.0          # 큐 대기 지연 (수신 ts → 분석 시작)
 
@@ -142,6 +143,7 @@ class AnalyzerThread(threading.Thread):
                 "avg_queue_lag_s": (self._lag_sum / n) if n else 0.0,
                 "queue_size": self.queue.qsize(),
                 "queue_dropped": self.queue.dropped,
+                "stage_ms": {k: v / n for k, v in self._stage_ms.items()} if n else {},
             }
 
     # ------------------------------------------------------------ 메인 루프
@@ -164,18 +166,22 @@ class AnalyzerThread(threading.Thread):
         # 검출기 공통 인터페이스 — detect_frame(bgr) -> (dets, scale_ref).
         # dets 좌표계는 검출기마다 다르고(YOLOX=letterbox, YOLO26/RF-DETR=원본),
         # scale_ref의 shape가 그 차이를 표현한다(BoostTrack.update와 동일 규약).
+        _t = time.perf_counter(); _st = {}
         pred, ref = self.detector.detect_frame(item.frame)
+        _st["1_detect"] = (time.perf_counter() - _t) * 1000; _t = time.perf_counter()
         h, w = item.frame.shape[:2]
         scale_r = min(ref.shape[2] / h, ref.shape[3] / w)
 
         tracker = self._tracker_for(item.cam_id)
         targets = tracker.update(pred, ref, item.frame,
                                  f"{item.cam_id}:{item.seq}")
+        _st["2_tracker"] = (time.perf_counter() - _t) * 1000; _t = time.perf_counter()
 
         # 트랙별 '실제 검출 점수' — 트래커 출력 conf는 내부 신뢰도(부스팅 포함)라
         # 오탐 연명 트랙도 높게 나온다. 원본 검출과 IoU 매칭해 진짜 점수를 싣는다
         # (TrackedObject.conf 계약 의미). 미매칭(coasting) 프레임은 0.0.
         det_xyxy, det_scores = self._frame_dets(pred, scale_r)
+        _st["3_framedets"] = (time.perf_counter() - _t) * 1000; _t = time.perf_counter()
 
         # 트랙별 EMA 외형 특징 — 글로벌 ID 매칭용 (v1.13). 트래커가 내부 매칭에
         # 이미 유지하는 벡터의 참조라 추가 계산 0. use_reid off 면 더미(size 1)라 제외.
@@ -186,6 +192,7 @@ class AnalyzerThread(threading.Thread):
                 if e is not None and getattr(e, "size", 0) >= 16:
                     emb_by_tid[trk.id + 1] = e   # update() 반환 id 는 trk.id+1
 
+        _st["4_emb"] = (time.perf_counter() - _t) * 1000; _t = time.perf_counter()
         tracks: list[TrackedObject] = []
         for t in np.asarray(targets).reshape(-1, targets.shape[1] if targets.size else 6):
             x1, y1, x2, y2, tid = t[0], t[1], t[2], t[3], int(t[4])
@@ -205,7 +212,11 @@ class AnalyzerThread(threading.Thread):
                           if self.want_crops and e is not None else None),
             ))
 
+        _st["5_build_crop"] = (time.perf_counter() - _t) * 1000
         infer_ms = (time.perf_counter() - t0) * 1000.0
+        with self._stats_lock:
+            for _k, _v in _st.items():
+                self._stage_ms[_k] = self._stage_ms.get(_k, 0.0) + _v
         with self._stats_lock:
             self._frames += 1
             self._frames_by_cam[item.cam_id] = self._frames_by_cam.get(item.cam_id, 0) + 1
@@ -213,7 +224,11 @@ class AnalyzerThread(threading.Thread):
             self._infer_ms_last = infer_ms
             self._lag_sum += lag
 
+        _t6 = time.perf_counter()
         self.on_tracks(item.cam_id, item.ts, tracks)
+        with self._stats_lock:
+            self._stage_ms["6_on_tracks"] = (self._stage_ms.get("6_on_tracks", 0.0)
+                                             + (time.perf_counter() - _t6) * 1000)
 
     # ------------------------------------------------------------ 내부
     @staticmethod

@@ -36,7 +36,10 @@ START_MARGIN_SEC = float(os.environ.get("VSOURCE_FILE_START_MARGIN", "0.8"))
 FALLBEHIND_SKIP_SEC = 1.0    # 이만큼 뒤처지면 프레임을 건너뛰어 벽시계를 따라간다
 # 디코드는 스텝 비용의 85%(실측 1080p 채널당 14ms) — cv2 는 GIL 을 놓으므로 카메라별
 # 스레드로 병렬화하면 코어 수만큼 나눠진다. 직렬이면 12채널@5fps 가 실시간 한계였다.
-DECODE_WORKERS = int(os.environ.get("VSOURCE_FILE_DECODE_WORKERS", "8"))
+DECODE_WORKERS = int(os.environ.get("VSOURCE_FILE_DECODE_WORKERS", "16"))
+# 파일 재생은 벽시계를 지킬 이유가 없다 — 기다리게 하고 한 장도 안 버린다.
+# ts 는 언제나 t0 + k/fps(=영상 시간)라, 처리가 느려져도 측정값은 그대로다.
+NODROP = os.environ.get("VSOURCE_FILE_NODROP", "1").strip().lower() not in ("0", "false", "no")
 
 
 class _Cam:
@@ -53,6 +56,10 @@ class _Cam:
         self.ended = False
         self.seq = 0
         self.drops = 0
+        # 재생 루프의 스텝 주파수(전 카메라 공통). standby 가 정한다.
+        # stride 는 **루프 기준**이어야 한다 — 자기 fps 로 잡으면 emit_every 와
+        # 이중으로 걸려 느린 카메라가 배속으로 달린다(실측 5fps 카메라 2배속).
+        self.loop_fps = None
         self._fps_ema = 0.0
         self.fps_analyze = fps_analyze
         # 루프는 **가장 빠른 카메라 fps** 로 돈다. 이 카메라는 emit_every 스텝마다
@@ -69,7 +76,8 @@ class _Cam:
         self.cap = cap
         self.src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         self.total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        self.stride = max(1, int(round(self.src_fps / self.fps_analyze)))
+        base = self.loop_fps or self.fps_analyze
+        self.stride = max(1, int(round(self.src_fps / base)))
         self.duration = self.total / self.src_fps if self.src_fps else 0.0
         self.ended = False
 
@@ -219,6 +227,7 @@ class FileSourceRunner:
         # 루프는 가장 빠른 카메라에 맞추고, 느린 카메라는 그 배수마다 내보낸다.
         loop_fps = max(c.fps_analyze for c in cams)
         for c in cams:
+            c.loop_fps = loop_fps                                 # start() 의 open() 이 다시 써도 유지
             c.emit_every = max(1, int(round(loop_fps / c.fps_analyze)))
             c.stride = max(1, int(round(c.src_fps / loop_fps)))   # 스텝당 원본 프레임
         durs = [c.duration for c in cams if c.duration]
@@ -285,29 +294,61 @@ class FileSourceRunner:
         self._stop.clear()
 
     # ------------------------------------------------------------ 재생 루프
+    def virtual_ts(self) -> float | None:
+        """지금 재생 중인 프레임의 **영상 시간**. NODROP 이면 벽시계와 다르다.
+
+        경보 시각(alarm_ts)은 이 시계로 잡아야 한다 — 벽시계로 잡으면 재생이
+        느려진 만큼 '경보 후 경과'가 부풀어 IDR·EPFI 가 통째로 틀어진다.
+        """
+        with self._lock:
+            if self.mode not in ("play", "standby"):
+                return None
+            return self.t0 + self.k / self.fps if self.fps else self.t0
+
     def _run(self) -> None:
         fps = self.fps
         base = self.t0
         k = 0
         try:
+            # NODROP 이라도 **시작 시각(t0)은 지킨다** — 클라이언트가 alarm_at 에 맞춰
+            # 세션을 열 여유다. 이걸 건너뛰면 재생이 앞서가 앞머리 프레임이
+            # 세션 밖으로 빠진다(실측 s02 10→6). 이후 스텝 페이싱만 없앤다.
+            if NODROP:
+                while not self._stop.is_set():
+                    lead = base - time.time()
+                    if lead <= 0:
+                        break
+                    self._stop.wait(min(lead, 0.05))
             while not self._stop.is_set():
                 ts = base + k / fps
                 now = time.time()
-                if ts > now:
+                if NODROP:
+                    # 파일 재생은 벽시계를 지킬 이유가 없다 — 대기도 건너뛰기도 안 한다.
+                    # 추론이 감당하는 속도로 흐르고, ts 는 언제나 영상 시간이라
+                    # 속도·체류·경보후경과 같은 측정값은 그대로다.
+                    pass
+                elif ts > now:
                     # 정밀 대기 — 전 카메라 같은 ts 로 한 스텝
                     if self._stop.wait(min(ts - now, 0.25)):
                         break
                     if time.time() < ts:
                         continue
                 elif now - ts > FALLBEHIND_SKIP_SEC:
-                    # 추론이 밀렸다 — 프레임을 버려 벽시계를 따라간다 (라이브의 드롭과 동형)
+                    # 추론이 밀렸다 — 프레임을 버려 벽시계를 따라간다 (라이브의 드롭과 동형).
+                    # 이 건너뛰기는 **스레드풀로** 해야 한다. 직렬 grab 은 정상 경로(풀)보다
+                    # 훨씬 느려서(실측 815ms vs 49ms/스텝) 따라잡으려다 더 밀리는
+                    # 죽음의 나선을 만든다.
                     skip = int((now - ts) * fps)
-                    for c in self.cams:
-                        for _ in range(skip * c.stride):
+                    if self._pool is None:
+                        self._pool = ThreadPoolExecutor(
+                            max_workers=min(DECODE_WORKERS, max(1, len(self.cams))))
+                    def _skip(c, n=skip):
+                        for _ in range(n * c.stride):
                             if not c.cap or not c.cap.grab():
                                 c.ended = True
-                                break
-                        c.drops += skip
+                                return
+                        c.drops += n
+                    list(self._pool.map(_skip, self.cams))
                     k += skip
                     continue
                 if self._pool is None:

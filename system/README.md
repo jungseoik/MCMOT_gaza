@@ -104,10 +104,14 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 | 환경변수 | 기본 | 내용 |
 |---|---|---|
 | `MAP_STREAM_HZ` | `5` | 맵 SSE 송출 주기 — analyze_fps 와 같게 (더 높으면 같은 스냅샷 반복, 낮으면 끊김) |
-| `VSOURCE_FILE_DECODE_WORKERS` | `8` | 파일 모드 디코드 스레드(1080p 채널당 14ms → 병렬화, ~15ch@5fps) |
+| `VSOURCE_FILE_DECODE_WORKERS` | `16` | 파일 모드 디코드 스레드. 디코드가 GIL 을 잡아 detect 를 2.3배 느리게 했다(실측 8워커 14.9ms → 16워커 9.7ms) |
+| `VSOURCE_FILE_NODROP` | `1` | **파일 재생 전용** — 벽시계 대기·프레임 건너뛰기를 끄고 큐가 찰 때까지 기다린다. analyze_fps 를 한 장도 안 버리고 보장(실측 처리율 21% → 100%). `ts` 는 언제나 영상 시간이라 측정값은 재생 속도와 무관. 라이브 RTSP 는 미적용 |
+| `VSOURCE_FILE_QUEUE` | `256` | 파일 모드 분석 큐 크기(기존 64) |
+| `VSOURCE_AUTO_END_DRAIN_MAX` | `120` | 영상 종료 후 분석 큐가 빌 때까지 기다리는 상한(초). 고정 대기만 하면 꼬리가 잘린다(실측 녹화 4~13초 누락) |
+| `YOLO26_GPU_PREPROC` | `1` | letterbox 전처리를 GPU 로. 검출 결과 동일(좌표 최대차 0.00px) · detect 14.06→4.14ms. `0`=CPU |
 | `VSOURCE_FILE_START_MARGIN` | `0.8` | 시작 여유(초) — t0 = 지금 + 여유, 경보 시각 = t0 |
 | (사이트 `thresholds.exit_extrap_m`) | `2.0` | 출입구 통과 판정에 헐 밖 관측을 쓰는 반경(m, 헐 경계 기준). 0=끔. ADR 09 §18 |
-| `VSOURCE_AUTO_END_SESSION` | `1` | 파일 모드 영상이 끝나면 리허설 층 세션 자동 종료·저장 (`VSOURCE_AUTO_END_GRACE` 2s) |
+| `VSOURCE_AUTO_END_SESSION` | `1` | 파일 모드 영상이 끝나면 리허설 층 세션 자동 종료·저장 (`VSOURCE_AUTO_END_GRACE` 2s + 큐 드레인 대기) |
 | `VSOURCE_PARK_SITE` | `1` | 리허설(파일 모드) 동안 사이트 RTSP 인제스트를 내리고(GPU 해제) 종료 시 복원. `0`=유지 |
 
 ## 카메라 일괄 등록 (벌크)

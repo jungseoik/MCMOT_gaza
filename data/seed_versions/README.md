@@ -10,8 +10,10 @@
 python tools/seed_version.py list                 # 보관 목록 + 현재 seed 요약
 python tools/seed_version.py show v1              # 한 버전 상세(층·축척·카메라)
 python tools/seed_version.py save v2 --note "..." # 현재 seed 를 v2 로 보관
-python tools/seed_version.py save v2 --source live --note "..."
-                                                  # 지금 돌고 있는 라이브를 보관
+python tools/seed_version.py save v2 --source live --note "..."   # 지금 돌고 있는 라이브를 보관
+# ⚠ --source 기본값은 seed(과거 디폴트 스냅샷)다. 지금 상태를 저장하려면 반드시
+#   --source live. 빠뜨리면 옛 스냅샷이 복사돼 방금 바꾼 설정이 안 들어간다
+#   (실측: v13 을 그렇게 저장해 건물 정보가 빠졌다).
 python tools/seed_version.py restore v1           # seed 만 v1 로 교체 (라이브 유지)
 python tools/seed_version.py restore v1 --apply   # 라이브까지 즉시 복원 (= [Reset])
 ```

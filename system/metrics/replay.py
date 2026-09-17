@@ -118,11 +118,26 @@ def run_replay(db_path, overrides: dict | None = None, fps: float = 5.0):
     frames: list[dict] = []
     dt = 1.0 / max(0.5, float(fps))
     last: float | None = None
-    for cam_id, ts, tracks in recorder.iter_calls(db_path):
-        eng.on_tracks(cam_id, ts, tracks)
-        if last is None or ts - last >= dt:
+    # 한 순간(ts)에는 카메라 여러 대의 on_tracks 가 따로 들어온다(실측 3~8콜).
+    # 첫 콜에서 바로 스냅샷을 찍으면 **그 카메라만 최신이고 나머지는 한 스텝 과거**라,
+    # 2D 맵이 카메라마다 제각각 움직이는 것처럼 보인다. 같은 ts 의 콜이 모두
+    # 반영된 뒤(= 더 큰 ts 가 나타난 순간) 찍어야 전 카메라가 같은 시각이 된다.
+    # call_seq 순서에서 ts 는 단조증가한다(실측 역행 0건).
+    pending: float | None = None
+
+    def _emit(t: float) -> None:
+        nonlocal last
+        if last is None or t - last >= dt:
             frames.append(_lite_frame(eng.snapshot()))
-            last = ts
+            last = t
+
+    for cam_id, ts, tracks in recorder.iter_calls(db_path):
+        if pending is not None and ts > pending:
+            _emit(pending)                      # pending 순간의 전 카메라 반영 완료
+        eng.on_tracks(cam_id, ts, tracks)
+        pending = ts
+    if pending is not None:
+        _emit(pending)
 
     result = eng.stop_session()
     timeline = eng.session_timeline()

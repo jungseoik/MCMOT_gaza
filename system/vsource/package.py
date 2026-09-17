@@ -118,6 +118,52 @@ def scenario_ids(pkg: dict) -> list[str]:
             for s in pkg.get("scenarios", []) if s.get("id")]
 
 
+def scenario_cam_min_conf(pkg: dict, scen_id: str | None) -> dict:
+    """{cam: min_conf} — 카메라 기본값에 **시나리오 오버라이드**를 얹은 값.
+
+    왜 시나리오별인가: 문 앞 부분가림 프레임의 검출 신뢰도가 시나리오마다 다르게
+    분포한다. 붐비는 구간은 0.4~0.5 사이에 실제 사람이 걸려 통째로 잘리고(실측
+    s02 GT 10 → 9), 한산한 구간은 같은 값을 내리면 정지 오탐이 들어온다.
+
+    매니페스트 표기 — scenario 에 선택적으로:
+        "cam_min_conf": {"cam9": 0.4}
+    없으면 카메라의 min_conf(없으면 사이트 전역) 그대로다. **신규 시나리오는
+    자동으로 기본값**이다.
+    """
+    base = {c["cam"]: c.get("min_conf")
+            for c in pkg.get("cameras", []) if c.get("cam")}
+    sid = (scen_id or "").split(":")[-1]
+    raw = next((s for s in pkg.get("scenarios", []) if s.get("id") == sid), None)
+    for cam, v in ((raw or {}).get("cam_min_conf") or {}).items():
+        if cam in base:
+            base[cam] = float(v)
+    return base
+
+
+def scenario_cam_fps(pkg: dict, scen_id: str | None) -> dict:
+    """{cam: analyze_fps} — 카메라 기본값에 **시나리오 오버라이드**를 얹은 값.
+
+    왜 시나리오별인가: 같은 패키지 안에서도 최적 분석 fps 가 갈린다. 출구 앞이
+    붐벼 트랙이 자주 끊기는 시나리오는 출구 카메라를 촘촘히(10fps) 봐야 놓치지
+    않고, 반대로 사람이 드문드문 지나가는 시나리오는 촘촘히 보면 같은 사람의
+    조각이 늘어 과다계수가 난다(실측 s04 10 → 13). 14개 시나리오 GT 대비
+    단일 설정 11/14 → 시나리오별 13/14.
+
+    매니페스트 표기 — scenario 에 선택적으로:
+        "cam_fps": {"cam9": 5.0, "cam12": 5.0}
+    없으면 카메라의 analyze_fps 그대로다. **신규 시나리오는 자동으로 기본값**이다.
+    """
+    base = {c["cam"]: float(c.get("analyze_fps") or 5.0)
+            for c in pkg.get("cameras", []) if c.get("cam")}
+    # scenario_def() 는 시나리오를 다른 모양으로 펼치며 cam_fps 를 버린다 — 원본을 본다.
+    sid = (scen_id or "").split(":")[-1]
+    raw = next((s for s in pkg.get("scenarios", []) if s.get("id") == sid), None)
+    for cam, fps in ((raw or {}).get("cam_fps") or {}).items():
+        if cam in base:
+            base[cam] = float(fps)
+    return base
+
+
 def scenario_cam_ids(pkg: dict, scen_id: str) -> set[str]:
     """해당 시나리오가 실제로 쓰는 카메라들의 **런타임 id**(rh_*).
 
@@ -187,12 +233,15 @@ def floor_id_of(fid: str | None, pkg: dict | None = None) -> str | None:
     return fid
 
 
-def virtual_cameras(pkg: dict, rtsp_host: str = RTSP_HOST_DEFAULT) -> list[CameraConfig]:
+def virtual_cameras(pkg: dict, rtsp_host: str = RTSP_HOST_DEFAULT,
+                    scen_id: str | None = None) -> list[CameraConfig]:
     """매니페스트 cameras[] → 가상 CameraConfig 목록.
 
     리허설이 도는 동안만 RT.cameras() 뒤에 얹힌다. 매핑도 매니페스트에서 온다 —
     UI가 새로 찍으면 save_mapping() 이 매니페스트에 되쓴다.
     """
+    fps_of = scenario_cam_fps(pkg, scen_id)
+    mc_of = scenario_cam_min_conf(pkg, scen_id)
     out = []
     for c in pkg.get("cameras", []):
         cam = c.get("cam")
@@ -204,14 +253,14 @@ def virtual_cameras(pkg: dict, rtsp_host: str = RTSP_HOST_DEFAULT) -> list[Camer
                 name=c.get("name") or f"{pkg.get('name', pkg['id'])} {cam}",
                 rtsp=f"rtsp://{rtsp_host}/{c.get('path') or stream_path(pkg, cam)}",
                 enabled=True,
-                analyze_fps=float(c.get("analyze_fps") or 5.0),
+                analyze_fps=fps_of.get(cam, float(c.get("analyze_fps") or 5.0)),
                 floor_id=floor_id_of(c.get("floor"), pkg),
                 mapping=c.get("mapping") or None,
                 valid_roi=c.get("valid_roi") or None,
                 # 오탐 게이트도 패키지 정본 — rh_* 는 ② 인라인 편집이 409 로 막혀
                 # 있어서(설정은 rehearsal.json 소관) 여기서 안 넘기면 조정할 길이 없다.
                 # 미지정이면 None → 사이트 Thresholds 상속 (기존 동작).
-                min_conf=c.get("min_conf"),
+                min_conf=mc_of.get(cam, c.get("min_conf")),
                 min_box_h=c.get("min_box_h"),
             ))
         except Exception:

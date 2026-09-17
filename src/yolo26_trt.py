@@ -23,12 +23,20 @@ BoostTrack.update는 ref의 shape로만 스케일을 내므로 ref=(1,3,H,W)면 
 from __future__ import annotations
 
 import cv2
+import os
 import numpy as np
 import torch
 
 from src.inference_trt import TRTEngine
 
 PAD_VALUE = 114.0
+
+
+# 전처리를 GPU 로 — CPU letterbox 는 numpy 연산이라 GIL 을 잡고, 파일 디코드
+# 스레드와 경합해 detect 가 2.3배 느려진다(실측 6.6→14.9ms). GPU 로 옮기면
+# 검출 결과는 완전히 동일하고(좌표 최대차 0.00px) 14.06→4.14ms 로 떨어진다.
+# 끄려면 YOLO26_GPU_PREPROC=0.
+GPU_PREPROC = os.environ.get("YOLO26_GPU_PREPROC", "1").strip().lower() not in ("0", "false", "no")
 
 
 class YOLO26TRTDetector:
@@ -60,6 +68,25 @@ class YOLO26TRTDetector:
         canvas[dy:dy + nh, dx:dx + nw] = img[:, :, ::-1]         # BGR→RGB
         chw = canvas.transpose(2, 0, 1) / 255.0
         return np.ascontiguousarray(chw, dtype=np.float32), r, dx, dy
+
+    # GPU 전처리 (선택) — CPU letterbox 가 GIL 을 잡아 디코드 스레드와 경합한다.
+    # 실측: 디코드 8워커 동시에 detect_frame 6.6ms → 14.9ms (2.3배). 전처리를 GPU 로
+    # 옮기면 그 경합이 사라진다. cv2.INTER_LINEAR 와 F.interpolate(bilinear) 는
+    # 완전히 같지는 않으므로 켜기 전에 검출 결과 동등성을 확인할 것.
+    def _letterbox_gpu(self, bgr: np.ndarray):
+        import torch.nn.functional as F
+        h, w = bgr.shape[:2]
+        s = self.imgsz
+        r = min(s / h, s / w)
+        nh, nw = int(round(h * r)), int(round(w * r))
+        t = torch.from_numpy(np.ascontiguousarray(bgr)).cuda(non_blocking=True)
+        t = t.permute(2, 0, 1).float().flip(0)[None]          # BGR→RGB, (1,3,H,W)
+        if (nh, nw) != (h, w):
+            t = F.interpolate(t, size=(nh, nw), mode="bilinear", align_corners=False)
+        canvas = torch.full((1, 3, s, s), float(PAD_VALUE), device="cuda")
+        dx, dy = (s - nw) // 2, (s - nh) // 2
+        canvas[:, :, dy:dy + nh, dx:dx + nw] = t
+        return canvas / 255.0, r, dx, dy
 
     def preprocess_batch(self, frames: list[np.ndarray]):
         """여러 프레임 → (cuda tensor (B,3,S,S), metas[(r,dx,dy,W,H)])"""
@@ -102,8 +129,11 @@ class YOLO26TRTDetector:
     @torch.no_grad()
     def detect_frame(self, bgr: np.ndarray):
         H, W = bgr.shape[:2]
-        chw, r, dx, dy = self._letterbox(bgr)
-        tensor = torch.from_numpy(chw).unsqueeze(0).cuda()
+        if GPU_PREPROC:
+            tensor, r, dx, dy = self._letterbox_gpu(bgr)
+        else:
+            chw, r, dx, dy = self._letterbox(bgr)
+            tensor = torch.from_numpy(chw).unsqueeze(0).cuda()
         raw = self.engine(tensor)[0]                       # (1,300,6)
         dets = self._decode(raw[0], (r, dx, dy, W, H))
         ref = torch.empty((1, 3, H, W), device="meta")     # scale=1 (원본좌표)

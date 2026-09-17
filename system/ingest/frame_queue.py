@@ -25,7 +25,15 @@ class FrameQueue:
         self._dropped_by_cam: dict[str, int] = defaultdict(int)
         self._drop_lock = threading.Lock()
 
-    def put(self, item: FrameItem) -> None:
+    def put(self, item: FrameItem, block: bool = False) -> None:
+        """block=True 면 자리가 날 때까지 기다린다 (파일 재생 전용).
+
+        라이브 RTSP 는 현실을 멈출 수 없어 반드시 버려야 하지만, 파일 재생은
+        생산자가 기다리면 그만이다 — 한 프레임도 안 버리고 analyze_fps 를 보장한다.
+        """
+        if block:
+            self._q.put(item)
+            return
         try:
             self._q.put_nowait(item)
             return
