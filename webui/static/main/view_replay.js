@@ -15,6 +15,8 @@ Views.replay = (() => {
   let selId = null;         // 선택된 session_id
   let baseRow = null;       // 선택 세션의 원본 요약(비교용)
   let data = null;          // {result, timeline, frames, site, meta}
+  let drillTimelines = {};  // 층별 1초 타임라인 — 재생 커서 시점 지표용
+  let liveAtCursor = true;  // 재생 시점값으로 지표를 따라가게 할지 (끄면 최종값 고정)
   let site = null;          // 세션 당시 공간요소 (배경 렌더)
 
   // 건물 드릴 모드(Phase 2·3) — 전 층 공유 세션 이력·재계산
@@ -187,6 +189,7 @@ Views.replay = (() => {
     drill = resp.drill;
     drillFrames = resp.frames_by_floor || {};
     drillSites = resp.site_by_floor || {};
+    drillTimelines = resp.timeline_by_floor || {};
     const floors = drill.floors || [];
     $("rpFloorSel").innerHTML = floors.map((f) =>
       `<option value="${f}">${floorName(f)}</option>`).join("");
@@ -217,6 +220,7 @@ Views.replay = (() => {
     const st = drillSites[floor] || null;
     site = st;
     data = { frames: drillFrames[floor] || [], site: st, result: floorResultOf(floor),
+             timeline: drillTimelines[floor] || [],
              meta: { alarm_origins: (st && st.alarm_origins) || [] } };
     prepPlayback();
     setDrillCanvasImage(floor, st);
@@ -225,6 +229,7 @@ Views.replay = (() => {
       cursor = Math.max(0, Math.min(duration, seekAbsTs - f[0].ts));
       $("rpSeek").value = String(frameIndexAt(cursor));
       updateTimeLabel();
+      showMetricsAtCursor();
     } else {
       goTo(0);
     }
@@ -435,6 +440,7 @@ Views.replay = (() => {
       drill = resp.drill;
       drillFrames = resp.frames_by_floor || {};
       drillSites = resp.site_by_floor || {};
+      drillTimelines = resp.timeline_by_floor || {};
       showBuildingMetrics(drill, "재계산값");
       const floors = drill.floors || [];
       const fl = floors.includes(keepFloor) ? keepFloor : floors[0];
@@ -527,6 +533,7 @@ Views.replay = (() => {
     cursor = f[idx].ts - f[0].ts;
     $("rpSeek").value = String(idx);
     updateTimeLabel();
+    showMetricsAtCursor();
   }
 
   function frameIndexAt(cur) {                     // cursor(초) → 프레임 인덱스(≤)
@@ -607,6 +614,69 @@ Views.replay = (() => {
   }
 
   // ------------------------------------------------------------ 지표 패널
+
+  /* 재생 커서 시점의 지표.
+   *
+   * 왜: 리플레이는 지금까지 **세션 최종 결과값**만 찍어 재생 내내 같은 숫자가
+   * 박혀 있었다. ③ 운영 뷰는 SSE 로 매 순간 갱신되는데 ④ 리플레이만 정지값이라
+   * "그 시점에 무슨 일이 있었나"를 볼 수 없었다. 1초 타임라인으로 맞춘다.
+   *
+   * IDR 만 타임라인에 값이 없다(개시 판정 시각만 안다) — 구역의 개시 시각이
+   * 커서를 지난 구역들의 IDR 평균을 쓴다. 즉 개시 전에는 '—' 이고 개시하는
+   * 순간 값이 뜬다. 실제 판정 흐름 그대로다. */
+  function timelineAt(cur) {
+    const tl = data && data.timeline;
+    if (!tl || !tl.length) return null;
+    const target = tl[0].ts + cur;
+    let lo = 0, hi = tl.length - 1, ans = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1;
+      if (tl[m].ts <= target) { ans = m; lo = m + 1; } else hi = m - 1; }
+    return ans < 0 ? null : tl[ans];
+  }
+
+  const DENS_NOTE = {
+    full: "<b>전체</b> — 4대 지표 카드와 구역·병목·객체 표를 모두 표시합니다. (기본)",
+    card: "<b>카드</b> — 숫자 카드를 크게 2열로. 표는 그대로 아래에 이어집니다.",
+    sum:  "<b>요약</b> — 4대 지표만 2×2 로. 표·보조 차트를 숨겨 스크롤 없이 봅니다.",
+  };
+  function setDensNote(d) {
+    const el = $("rpDensNote");
+    if (el) el.innerHTML = DENS_NOTE[d] || DENS_NOTE.full;
+  }
+
+  function showMetricsAtCursor() {
+    if (!liveAtCursor) return;
+    const p = timelineAt(cursor);
+    if (!p) return;                       // 타임라인 없는 세션 — 최종값 그대로 둔다
+    $("rpSei").textContent = p.sei == null ? "—" : Math.round(p.sei);
+    $("rpEpfi").textContent = p.epfi_avg == null ? "—" : Math.round(p.epfi_avg);
+    $("rpCbs").textContent = (p.cbs_total || 0).toFixed(1);
+
+    const res = (data && data.result) || {};
+    const zm = res.zone_metrics || [];
+    const t = p.ts;
+    const done = zm.filter((z) => z.evacuation_start_at != null
+                                  && z.evacuation_start_at <= t);
+    const vs = done.map((z) => z.idr).filter((v) => v != null);
+    $("rpIdr").textContent = vs.length
+      ? (vs.reduce((a, b) => a + b, 0) / vs.length).toFixed(2) : "—";
+    $("rpIdrProg").textContent = `${done.length}/${zm.length}`;
+
+    $("rpTag").textContent = `t=${fmtDur(cursor)} 시점값`;
+    if ($("rpExitNow")) {
+      const ec = p.exit_counts || {};
+      const ks = Object.keys(ec).sort();
+      $("rpExitNow").textContent = ks.length
+        ? ks.map((k) => `${exitName(k)} ${ec[k]}`).join(" · ") : "";
+    }
+  }
+
+  /** 출구 id → 표기명 (세션 스냅샷 기준, 없으면 id). */
+  function exitName(id) {
+    const ex = ((site && site.exits) || []).find((e) => e.id === id);
+    return (ex && ex.name) || id;
+  }
+
   function showMetrics(res, tag) {
     $("rpTag").textContent = tag || "현재값";
     $("rpSei").textContent = res.sei == null ? "—" : Math.round(res.sei);
@@ -672,8 +742,8 @@ Views.replay = (() => {
       data = await API.replaySession(selId, collectOverrides());
       site = data.site || site;
       prepPlayback();
-      goTo(Math.min(keepIdx, (data.frames||[]).length - 1));  // 위치 유지
       showMetrics(data.result, "재계산값");
+      goTo(Math.min(keepIdx, (data.frames||[]).length - 1));  // 위치 유지(+시점값 갱신)
       $("rpMsg").textContent = "재계산 완료 — 원본 저장값은 그대로 보존됩니다.";
       if (mc) mc.render();
     } catch (e) {
@@ -692,6 +762,7 @@ Views.replay = (() => {
       if (cursor >= duration) { cursor = duration; pause(); }
       $("rpSeek").value = String(frameIndexAt(cursor));
       updateTimeLabel();
+      showMetricsAtCursor();
     } else { lastRaf = ts; }
     if (mc) mc.render();
   }
@@ -755,6 +826,22 @@ Views.replay = (() => {
       { el: "#rpGrpObj", key: "rp.obj" },
       { el: "#rpGrpBn",  key: "rp.bn" },
     ]);
+    // 모드가 무엇을 바꾸는지 한 줄로 알린다 (PanelView 에는 변경 콜백이 없다)
+    const seg = $("rpDens");
+    if (seg) {
+      seg.querySelectorAll("[data-dens]").forEach((b) =>
+        b.addEventListener("click", () => setDensNote(b.dataset.dens)));
+      const on = seg.querySelector("[data-dens].on");
+      setDensNote(on ? on.dataset.dens : "full");
+    }
+    const at = $("rpAtCursor");
+    if (at) {
+      at.onchange = () => {
+        liveAtCursor = at.checked;
+        if (liveAtCursor) showMetricsAtCursor();
+        else if (data && data.result) showMetrics(data.result, "세션 최종값");
+      };
+    }
   }
 
   function enter() {

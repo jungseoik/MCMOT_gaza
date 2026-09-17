@@ -965,3 +965,30 @@ body.rehearsing .rhbanner{ display:block; }
 .camrow.rpsess .rpdel:disabled{ opacity:.4; cursor:default; }
 /* 버튼 자리를 비워 제목이 밑으로 안 파고들게 */
 .camrow.rpsess .r1{ padding-right:26px; }
+
+/* ── ④ 리플레이 지표 패널 — 모드 설명줄 · 여백 ──────────────────────────
+   왜: 요약/카드/기본이 무엇을 바꾸는지 버튼 이름만으론 알 수 없다는 지적.
+   현재 모드가 무엇을 보여주는지 한 줄로 말해 준다. */
+.densnote{ padding:7px 14px 8px; font-size:12px; line-height:1.45; color:var(--text-3);
+  background:var(--bg-2); border-bottom:1px solid var(--stroke-2); }
+.densnote b{ color:var(--text-2); font-weight:600; }
+.side.metrics.folded .densnote{ display:none; }
+
+/* 재생 시점값 토글 */
+.atcur{ display:inline-flex; align-items:center; gap:5px; font-size:11px;
+  color:var(--text-3); cursor:pointer; white-space:nowrap; }
+.atcur input{ width:14px; height:14px; margin:0; accent-color:var(--brand,#30DCFB); cursor:pointer; }
+#rpExitNow{ font-size:12px; color:var(--text-3); }
+
+/* 찌부돼 보이던 간격을 늘린다 — 카드 내부 패딩·격자 간격·그룹 간격 */
+#rpSide .sidebody{ padding:16px 16px 20px; gap:20px; }
+#rpSide .group{ gap:9px; }
+#rpSide .mgrid2{ gap:12px; }
+#rpSide .mcard2{ padding:12px 13px 13px; }
+#rpSide .mh2{ font-size:12px; margin-bottom:5px; }
+#rpSide .mcard2 .mbig{ font-size:26px; line-height:1.15; }
+#rpSide .gtitle{ display:flex; align-items:center; gap:6px; }
+
+/* 카드 모드 — 숫자만 크게, 표는 아래 그대로 */
+.side.metrics.dens-card .mgrid2{ gap:12px; }
+.side.metrics.dens-card .mcard2 .mbig{ font-size:30px; }

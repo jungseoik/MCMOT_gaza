@@ -3,7 +3,8 @@
 합성 TrackedObject 궤적 기반 (GPU 불필요).
 맵: 1000×1000 px, 축척 0.01 m/px (100 px = 1 m). 카메라: 항등 호모그래피.
 판정 임계값은 Thresholds 디폴트(v_th=0.5, a_th=0.7, r_th=0.5,
-dt_hold=3.0, d_allow=2.0)를 site.thresholds로 사용한다.
+dt_hold=3.0)를 site.thresholds로 사용한다. d_allow 가 결과를 좌우하는
+테스트는 Thresholds(d_allow=...) 로 직접 못박는다(기본값 변경에 흔들리지 않게).
 """
 import pytest
 
@@ -74,8 +75,14 @@ class TestEPFI:
         assert res.epfi_avg == pytest.approx(100.0)
 
     def test_constant_offset_epfi_50(self):
-        """경로에서 상시 1 m 이탈, d_allow=2 m → EPFI = 50."""
-        eng = MetricsEngine(make_site(routes=[ROUTE]), [make_cam()])
+        """경로에서 상시 1 m 이탈, d_allow=2 m → EPFI = 50.
+
+        d_allow 는 사이트 설정값이라 기본값이 바뀌면 같이 흔들린다 — 이 테스트가
+        검증하는 건 '이탈/허용 = 0.5 → 50점' 이라는 **수식**이므로 여기서 못박는다.
+        """
+        eng = MetricsEngine(
+            make_site(routes=[ROUTE], thresholds=Thresholds(d_allow=2.0)),
+            [make_cam()])
         eng.start_session((100, 500), t_alarm=100.0)
         self.feed_line(eng, 1, 200, 600, 100, 100.0, 104.0)   # y=600 → 1 m 이탈
         res = eng.stop_session()

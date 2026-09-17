@@ -1630,17 +1630,22 @@ async def drill_replay(session_id: str, request: Request):
     floors: list[tuple[str, dict]] = []
     frames_by_floor: dict[str, list] = {}
     site_by_floor: dict[str, dict] = {}
+    timeline_by_floor: dict[str, list] = {}
     for f, db in dbs:
-        result, _timeline, frames, meta = await anyio.to_thread.run_sync(
+        result, timeline, frames, meta = await anyio.to_thread.run_sync(
             run_replay, db, overrides, fps)
         floors.append((f, result.model_dump()))
         frames_by_floor[f] = frames
         site_by_floor[f] = meta.get("site_view")
+        # 재생 커서 시점의 지표를 보여주려면 1초 타임라인이 필요하다 — 최종
+        # result 만 내려보내면 재생 내내 같은 숫자가 박혀 있게 된다.
+        timeline_by_floor[f] = [t.model_dump() for t in timeline]
     roll = _aggregate_floors(session_id, floors)
     m = _drill_meta(session_id)
     return {"drill": DrillResult.model_validate(roll).model_dump(),
             "label": (m or {}).get("label"), "rehearsal": (m or {}).get("rehearsal"),
-            "frames_by_floor": frames_by_floor, "site_by_floor": site_by_floor}
+            "frames_by_floor": frames_by_floor, "site_by_floor": site_by_floor,
+            "timeline_by_floor": timeline_by_floor}
 
 
 @app.get("/api/session")

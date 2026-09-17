@@ -587,16 +587,26 @@
         <div class="sidehead">
           <span>지표 · 재계산</span>
           <span class="sp"></span>
-          <span class="seg dens" id="rpDens" title="지표 표출 밀도 — 기본이 원래 화면">
-            <button class="tag-btn on" data-dens="full" title="기본 — 표까지 그대로">기본</button>
-            <button class="tag-btn" data-dens="card" title="2×2 카드">카드</button>
-            <button class="tag-btn" data-dens="sum" title="4개를 시각화까지 한 화면에 — 스크롤 없음">요약</button>
+          <span class="seg dens" id="rpDens" title="이 패널을 얼마나 자세히 볼지">
+            <button class="tag-btn on" data-dens="full"
+              title="전체 — 지표 카드 + 구역·병목·객체 표까지 모두 (기본)">▤ 전체</button>
+            <button class="tag-btn" data-dens="card"
+              title="카드 — 숫자 카드를 2열로. 표는 그대로 아래에">▦ 카드</button>
+            <button class="tag-btn" data-dens="sum"
+              title="요약 — 4대 지표만 2×2 로, 표·보조차트 숨김 (스크롤 없음)">◱ 요약</button>
           </span>
           <button class="tag-btn sidefold" id="rpFold" title="패널 접기 — 맵을 전체 폭으로">⟩</button>
         </div>
+        <div class="densnote" id="rpDensNote"></div>
         <div class="sidebody">
           <div class="group" id="rpGrpKpi">
-            <div class="gtitle">4대 지표 <span class="mtag" id="rpTag">현재값</span></div>
+            <div class="gtitle">4대 지표 <span class="mtag" id="rpTag">현재값</span>
+              <span class="sp"></span>
+              <label class="atcur" title="켜면 재생 위치의 지표를, 끄면 세션 최종값을 표시합니다">
+                <input type="checkbox" id="rpAtCursor" checked /> 재생 시점값
+              </label>
+            </div>
+            <div class="grow" id="rpExitNow"></div>
             <div class="mgrid2">
               <div class="mcard2"><div class="mh2"><b>SEI</b> 출구효율</div><div class="mbig t-num" id="rpSei">—</div></div>
               <div class="mcard2"><div class="mh2"><b>EPFI</b> 경로충실</div><div class="mbig t-num" id="rpEpfi">—</div></div>
