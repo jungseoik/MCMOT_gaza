@@ -684,9 +684,9 @@ Views.replay = (() => {
   }
 
   const DENS_NOTE = {
-    num:  "<b>수치</b> — 4대 지표 숫자만 크게. 표·그래프를 모두 숨깁니다.",
-    full: "<b>표</b> — 숫자에 더해 구역·객체·병목 <b>표</b>를 모두 봅니다. (기본)",
-    viz:  "<b>시각화</b> — 지표마다 <b>시간 곡선</b>과 병목 그래프를 봅니다. ③ 운영 뷰에 가깝습니다.",
+    num:  "<b>숫자</b> — 4대 지표 값만 크게. 표·그래프를 모두 숨깁니다.",
+    full: "<b>표</b> — 값에 더해 출구·구역·객체·병목 <b>표</b>를 모두 봅니다. (기본)",
+    viz:  "<b>그래프</b> — 지표별 <b>시간 곡선</b>과 출구·병목 그래프를 봅니다.",
   };
   function setDensNote(d) {
     const el = $("rpDensNote");
@@ -712,6 +712,7 @@ Views.replay = (() => {
     $("rpIdrProg").textContent = `${done.length}/${zm.length}`;
 
     $("rpTag").textContent = `t=${fmtDur(cursor)} 시점값`;
+    renderSeiTbl(p.exit_counts || null);
     drawSparks();
     if ($("rpExitNow")) {
       const ec = p.exit_counts || {};
@@ -719,6 +720,58 @@ Views.replay = (() => {
       $("rpExitNow").textContent = ks.length
         ? ks.map((k) => `${exitName(k)} ${ec[k]}`).join(" · ") : "";
     }
+  }
+
+  /* SEI 출구별 — 이 지표가 무엇으로 만들어졌는지 보여주는 유일한 자리.
+   * IDR 은 구역별, CBS 는 병목별, EPFI 는 객체별 표가 있는데 SEI 만 없었다.
+   * 설계 분담(문 폭 기반 용량 비율)과 실제 분담(통과 인원 비율)을 나란히 둔다
+   * — SEI = (1 − ½Σ|실제−설계|) × 100 이므로 이 표가 곧 산식의 내역이다. */
+  function renderSeiTbl(counts) {
+    const box = $("rpSeiTbl");
+    if (!box) return;
+    const ems = ((data && data.result && data.result.exit_metrics) || []);
+    if (!ems.length) { box.innerHTML = `<div class="mnote">출입구 없음</div>`; return; }
+    // counts 가 오면 그 시점 통과 인원으로 실제 분담을 다시 센다(재생 시점값).
+    const act = {};
+    ems.forEach((m) => { act[m.exit_id] = (counts && counts[m.exit_id] != null)
+      ? counts[m.exit_id] : (m.actual_count || 0); });
+    const totA = ems.reduce((v, m) => v + (act[m.exit_id] || 0), 0);
+    const totC = ems.reduce((v, m) => v + (m.design_capacity || 0), 0);
+    let tvd = 0;
+    const rows = ems.map((m) => {
+      const a = totA > 0 ? (act[m.exit_id] || 0) / totA : 0;
+      const d = totC > 0 ? (m.design_capacity || 0) / totC : 1 / ems.length;
+      tvd += Math.abs(a - d) / 2;
+      return { id: m.exit_id, n: act[m.exit_id] || 0, a, d, cap: m.design_capacity };
+    });
+    const pc = (v) => (v * 100).toFixed(0) + "%";
+    // 아직 아무도 통과하지 않았으면 '실제 분담'이 정의되지 않는다 —
+    // 0% 로 두고 편차 −53% 같은 숫자를 띄우면 "설계보다 한참 못하다"로 오읽힌다.
+    const none = totA === 0;
+    box.innerHTML =
+      `<div class="rpseihd"><span>출구</span><span>통과</span>`
+      + `<span class="rpseibarhd">설계 / 실제 분담</span><span>편차</span></div>`
+      + rows.map((r) => {
+          const dv = r.a - r.d;
+          const cls = none ? "" : (Math.abs(dv) < 0.05 ? "ok"
+                                   : (Math.abs(dv) < 0.2 ? "mid" : "bad"));
+          return `<div class="rpseirow">
+            <span class="rpseiname" title="${exitName(r.id)}">${exitName(r.id)}</span>
+            <span class="t-num">${r.n}명</span>
+            <span class="rpseibars">
+              <span class="rpseibar d"><i style="width:${(r.d*100).toFixed(1)}%"></i></span>
+              <span class="rpseibar a"><i style="width:${(r.a*100).toFixed(1)}%"></i></span>
+            </span>
+            <span class="t-num rpseidv ${cls}">${none ? "—"
+              : (dv >= 0 ? "+" : "") + pc(dv)}</span>
+          </div>`;
+        }).join("")
+      + (none
+          ? `<div class="rpseifoot">설계 <b>${rows.map((r)=>pc(r.d)).join(" : ")}</b>`
+            + ` · <b>아직 통과 인원 없음</b> — 첫 통과부터 SEI 가 산출됩니다.</div>`
+          : `<div class="rpseifoot">설계 <b>${rows.map((r)=>pc(r.d)).join(" : ")}</b>`
+            + ` · 실제 <b>${rows.map((r)=>pc(r.a)).join(" : ")}</b>`
+            + ` · TVD ${tvd.toFixed(3)} → SEI <b>${((1-tvd)*100).toFixed(1)}</b></div>`);
   }
 
   /** 출구 id → 표기명 (세션 스냅샷 기준, 없으면 id). */
@@ -733,6 +786,7 @@ Views.replay = (() => {
     $("rpEpfi").textContent = res.epfi_avg == null ? "—" : Math.round(res.epfi_avg);
     $("rpCbs").textContent = (res.cbs_total || 0).toFixed(1);
     renderObjTbl(res.person_metrics || []);        // 개별 층 모드 경로
+    renderSeiTbl(null);                            // 최종 통과 인원 기준
     const zm = res.zone_metrics || [];
     const started = zm.filter((z) => z.status === "started").length;
     const vs = zm.map((z) => z.idr).filter((v) => v != null);

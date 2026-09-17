@@ -1055,3 +1055,25 @@ body.rehearsing .rhbanner{ display:block; }
 @media (max-width:1600px){ #rpSide{ width:440px; } }
 @media (max-width:1280px){ #rpSide{ width:380px; } }
 #rpSide.folded{ width:38px; min-width:38px; }
+
+/* ── SEI 출구별 — 설계/실제 분담을 나란한 막대로 ── */
+.rpseitbl{ display:flex; flex-direction:column; gap:2px; font-size:12.5px; }
+.rpseihd, .rpseirow{ display:grid; grid-template-columns:78px 52px 1fr 54px;
+  align-items:center; gap:10px; padding:6px 8px; }
+.rpseihd{ color:var(--text-3); font-size:11px; padding-bottom:2px; }
+.rpseirow{ background:var(--bg-3); border-radius:var(--r-sm); }
+.rpseiname{ color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rpseibars{ display:flex; flex-direction:column; gap:3px; min-width:0; }
+.rpseibar{ position:relative; height:9px; background:var(--bg-2); border-radius:3px; overflow:hidden; }
+.rpseibar i{ position:absolute; inset:0 auto 0 0; display:block; border-radius:3px; }
+.rpseibar.d i{ background:var(--text-3); opacity:.55; }        /* 설계 */
+.rpseibar.a i{ background:var(--brand,#30DCFB); }              /* 실제 */
+.rpseidv{ text-align:right; }
+.rpseidv.ok{ color:#7ad17a; }
+.rpseidv.mid{ color:#e0a030; }
+.rpseidv.bad{ color:#e06b6b; }
+.rpseifoot{ color:var(--text-3); font-size:11.5px; padding:7px 8px 0; line-height:1.55; }
+.rpseifoot b{ color:var(--text-2); }
+
+/* 숫자 모드에선 출구 표도 숨긴다 */
+.side.metrics.dens-num #rpGrpSei{ display:none; }

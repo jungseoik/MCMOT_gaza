@@ -589,11 +589,11 @@
           <span class="sp"></span>
           <span class="seg dens" id="rpDens" title="무엇까지 보여줄지">
             <button class="tag-btn" data-dens="num"
-              title="수치만 — 4대 지표 숫자 카드만. 표·그래프 없음">123 수치</button>
+              title="숫자 — 4대 지표 값만. 표·그래프 없음">숫자</button>
             <button class="tag-btn on" data-dens="full"
-              title="표 — 숫자 + 구역·객체·병목 표까지 (기본)">▤ 표</button>
+              title="표 — 값에 더해 출구·구역·객체·병목 표까지 (기본)">표</button>
             <button class="tag-btn" data-dens="viz"
-              title="시각화 — ③ 운영 뷰처럼 지표별 시간 곡선·병목 그래프 중심">📈 시각화</button>
+              title="그래프 — 지표별 시간 곡선과 출구·병목 그래프 중심">그래프</button>
           </span>
           <button class="tag-btn sidefold" id="rpFold" title="패널 접기 — 맵을 전체 폭으로">⟩</button>
         </div>
@@ -614,6 +614,10 @@
               <div class="mcard2"><div class="mh2"><b>IDR</b> 평균 <span class="t-num" id="rpIdrProg" style="opacity:.6">—</span></div><div class="mbig t-num" id="rpIdr">—</div><canvas class="rpspark" id="rpSparkIdr"></canvas></div>
             </div>
             <div class="grow" id="rpBase"></div>
+          </div>
+          <div class="group" id="rpGrpSei">
+            <div class="gtitle">SEI 출구별 <span class="mtag" id="rpSeiTag">실제 분담 vs 설계 분담</span></div>
+            <div id="rpSeiTbl" class="rpseitbl"></div>
           </div>
           <div class="group" id="rpGrpIdr">
             <div class="gtitle">IDR 구역별 <span class="mtag" id="rpIdrTag">재계산 시 변화 표시</span></div>
