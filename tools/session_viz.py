@@ -11,9 +11,17 @@ tools/rehearsal_viz.py 는 매번 GPU 추론을 다시 돌려서 웹 UI·보고�
 어긋날 수 있다. 여기서는 **세션 녹화본(.db)** 의 트랙과 리플레이 타임라인을 그대로
 쓴다 — ④ 리플레이 화면과 **같은 수치**가 나온다. 리허설 영상은 그림만 그린다.
 
-  좌  도면 — 구역·병목·출구·경로 + 객체 점(카메라별 색) + 2초 궤적
-  우  카메라 그리드 — **원본 fps** 프레임에 박스·발끝점 되그리기
+  좌  도면 — 구역·병목·출구·경로 + 객체 점(카메라별 색) + 궤적
+  우  카메라 그리드 — **원본 fps** 원본 프레임 (박스는 그리지 않는다, 아래 참고)
   하  4대 지표(SEI·EPFI·CBS·IDR) + 인원·출구 통과 — 1초 타임라인을 홀드
+
+맵 좌표는 **리플레이가 내주는 프레임의 객체 좌표를 그대로** 쓴다. .db 의 트랙을
+직접 투영하면 안 된다 — 엔진은 valid_roi·min_conf·min_box_h 로 관측을 걸러내는데,
+그 필터를 거치지 않은 점까지 찍으면 화면에 없어야 할 점이 흩어진다
+(실측: cam1 4개 중 3개가 엔진에서 버려지는 관측이었다).
+
+그리드에 박스를 그리지 않는 이유: 관측은 5fps 인데 영상은 30fps 라 박스가 6프레임마다
+튀어 심하게 깜빡인다. 위치 확인은 좌측 도면이 맡는다.
 
 시간축: 관측은 분석 fps(보통 5)라 출력 프레임 사이를 **홀드**한다. 영상은 원본 fps
 그대로라 부드럽고, 지표는 라이브와 같은 1초 격자다.
@@ -26,7 +34,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
 import subprocess
 import sys
 import warnings
@@ -87,6 +94,28 @@ def fit(img, w, h):
     oy, ox = (h - r.shape[0]) // 2, (w - r.shape[1]) // 2
     out[oy:oy + r.shape[0], ox:ox + r.shape[1]] = r
     return out, s, ox, oy
+
+
+def arrows_along(img, pts, color, every_px: float = 110.0, head: float = 12.0):
+    """폴리라인 진행방향 화살촉 — 일정 **화면 거리**마다 찍는다.
+
+    cv2.arrowedLine 의 tipLength 는 선분 길이 대비 **비율**이라, 고정값을 주면
+    긴 구간에서 화살촉이 화면을 덮고 짧은 구간에선 사라진다. 여기서는 목표
+    픽셀(head)을 그 구간 길이로 나눠 비율로 환산하고, 구간이 길면 중간에도 찍는다.
+    """
+    for i in range(1, len(pts)):
+        (x0, y0), (x1, y1) = pts[i - 1], pts[i]
+        seg = float(np.hypot(x1 - x0, y1 - y0))
+        if seg < 6:
+            continue
+        n = max(1, int(seg // every_px))          # 이 구간에 찍을 개수
+        for k in range(1, n + 1):
+            t = k / n
+            hx, hy = int(x0 + (x1 - x0) * t), int(y0 + (y1 - y0) * t)
+            back = min(1.0, head / seg)
+            tx, ty = int(hx - (x1 - x0) * back), int(hy - (y1 - y0) * back)
+            cv2.arrowedLine(img, (tx, ty), (hx, hy), color, 2,
+                            tipLength=min(0.9, head / max(1.0, head)))
 
 
 def cam_color(i: int):
@@ -159,18 +188,6 @@ def resolve_clips(cam_ids: list[str], label: str,
     return out, desc
 
 
-def load_calls(db: Path):
-    """ts → [{cam_id, lid, u, v, box}] (분석 fps 격자 그대로)."""
-    con = sqlite3.connect(str(db))
-    calls: dict[float, list] = defaultdict(list)
-    for ts, cid, lid, u, v, x1, y1, x2, y2 in con.execute(
-            "select ts,cam_id,local_id,u,v,x1,y1,x2,y2 from tracks order by ts"):
-        calls[round(ts, 3)].append({"cam": cid, "lid": lid, "uv": (u, v),
-                                    "box": (x1, y1, x2, y2)})
-    con.close()
-    return sorted(calls.items())
-
-
 def latest_at(seq, t, key=lambda x: x[0]):
     """t 이하에서 가장 최근 원소 — 관측·지표 홀드용."""
     lo, hi, ans = 0, len(seq) - 1, None
@@ -210,14 +227,16 @@ def main() -> int:
         ov = json.loads(ovp.read_text(encoding="utf-8"))
         print(f"[viz] 도면 편집본 적용 — {ovp.name}")
 
-    print("[viz] 리플레이로 지표 재산출…")
-    result, timeline, _frames, _m = run_replay(db, ov, fps=1.0)
+    print("[viz] 리플레이로 지표·좌표 재산출…")
+    # fps=5 = 분석 격자. 프레임의 objects 가 ④ 리플레이 화면이 그리는 바로 그 좌표다
+    # (valid_roi·min_conf 필터가 이미 적용돼 있다).
+    result, timeline, frames, _m = run_replay(db, ov, fps=5.0)
     res = result.model_dump()
     tl = [t.model_dump() for t in timeline]
     site = (ov.get("geometry") and {**meta["site_view"], **ov["geometry"]}) or meta["site_view"]
 
     cam_ids = sorted({c["cam_id"] for c in meta.get("cameras", [])}
-                     or {r["cam"] for _t, rs in load_calls(db) for r in rs})
+                     or {o["cam_id"] for f in frames for o in f["objects"]})
     clips, desc = resolve_clips(cam_ids, label, a.package, a.scenario)
     print(f"[viz] {desc}")
     if not clips:
@@ -234,13 +253,12 @@ def main() -> int:
         print("영상을 하나도 열지 못했습니다"); return 1
     out_fps = a.fps or max(src_fps.values())
 
-    calls = load_calls(db)
     t0 = float(meta["alarm_ts"])                      # 영상 t=0 ↔ 경보 시각
-    t_end = max(calls[-1][0], tl[-1]["ts"]) if calls else tl[-1]["ts"]
+    t_end = max(frames[-1]["ts"], tl[-1]["ts"]) if frames else tl[-1]["ts"]
     dur = (t_end - t0) if not a.sec else min(a.sec, t_end - t0)
     n_out = int(dur * out_fps)
     print(f"[viz] 출력 {out_fps:.0f}fps · {dur:.1f}s · {n_out}프레임 "
-          f"(관측 {len(calls)}콜 · 지표 {len(tl)}점)")
+          f"(관측 {len(frames)}프레임 · 지표 {len(tl)}점)")
 
     # ---------------------------------------------------------- 레이아웃
     OW = a.width
@@ -261,22 +279,6 @@ def main() -> int:
     mox = (LEFT_W - mimg.shape[1]) // 2
     moy = (PANE_H - mimg.shape[0]) // 2
     MP = lambda x, y: (int(x * ms) + mox, int(y * ms) + moy)   # noqa: E731
-
-    # 카메라별 호모그래피 (화면 px → 맵 px). 엔진과 같은 행렬을 쓴다.
-    Hs = {}
-    for c in meta.get("cameras", []):
-        h = ((c.get("mapping") or {}).get("H"))
-        if h and len(h) == 9:
-            Hs[c["cam_id"]] = np.asarray(h, np.float64).reshape(3, 3)
-
-    def project(cid, uv):
-        H = Hs.get(cid)
-        if H is None:
-            return None
-        v = H @ np.array([uv[0], uv[1], 1.0])
-        if abs(v[2]) < 1e-9:
-            return None
-        return float(v[0] / v[2]), float(v[1] / v[2])
 
     fname = next((f.get("name") or floor for f in (site.get("floors") or [])
                   if f.get("id") == floor), floor)
@@ -299,9 +301,9 @@ def main() -> int:
         pp = [MP(*p) for p in (r.get("points") or [])]
         for i in range(len(pp) - 1):
             cv2.line(left0, pp[i], pp[i + 1], (120, 255, 160), 2)
-        if len(pp) >= 2:                                  # 진행방향 화살표
-            cv2.arrowedLine(left0, pp[-2], pp[-1], (120, 255, 160), 2, tipLength=0.5)
-            cv2.circle(left0, pp[0], 5, (120, 255, 160), 2)
+        if len(pp) >= 2:
+            arrows_along(left0, pp, (120, 255, 160))
+            cv2.circle(left0, pp[0], 5, (120, 255, 160), 2)   # 시작점(속 빈 원)
     for e in (site.get("exits") or []):
         ln = e.get("line") or []
         if len(ln) >= 2:
@@ -322,24 +324,19 @@ def main() -> int:
     try:
         for k in range(n_out):
             t = t0 + k / out_fps
-            call = latest_at(calls, t)
-            obs = call[1] if call else []
-            new_call = call is not None and call[0] != last_call_ts
+            fr_obj = latest_at(frames, t, key=lambda f: f["ts"])
+            obs = fr_obj["objects"] if fr_obj else []
+            new_call = fr_obj is not None and fr_obj["ts"] != last_call_ts
             if new_call:
-                last_call_ts = call[0]
+                last_call_ts = fr_obj["ts"]
             tp = latest_at(tl, t, key=lambda p: p["ts"]) or {}
 
             # ── 좌: 도면
             left = left0.copy()
             for o in obs:
-                # 녹화본에는 카메라 발끝(u,v)만 있다 — 세션 스냅샷의 호모그래피로
-                # 맵 좌표로 투영한다(엔진이 쓰는 것과 같은 H).
-                xy = project(o["cam"], o["uv"])
-                if xy is None:
-                    continue
-                p = MP(*xy)
-                c = cols.get(o["cam"], (200, 200, 200))
-                key = f'{o["cam"]}:{o["lid"]}'
+                p = MP(o["x"], o["y"])
+                c = cols.get(o["cam_id"], (200, 200, 200))
+                key = o["gid"]
                 if new_call:                      # 홀드 중엔 같은 점이 쌓이지 않게
                     trails[key].append(p)
                 tr = list(trails[key])
@@ -370,19 +367,10 @@ def main() -> int:
                 fr = cur[cid]
                 cell = np.zeros((ch, cw, 3), np.uint8)
                 if fr is not None:
+                    # 박스는 그리지 않는다 — 관측 5fps / 영상 30fps 라 심하게 깜빡인다.
                     cell, sc, ox, oy = fit(fr, cw, ch)
-                    mine = [o for o in obs if o["cam"] == cid]
-                    for o in mine:
-                        x1, y1, x2, y2 = o["box"]
-                        if None in (x1, y1, x2, y2):
-                            continue
-                        p1 = (int(x1 * sc) + ox, int(y1 * sc) + oy)
-                        p2 = (int(x2 * sc) + ox, int(y2 * sc) + oy)
-                        cv2.rectangle(cell, p1, p2, cols[cid], 2)
-                        fu = (int(o["uv"][0] * sc) + ox, int(o["uv"][1] * sc) + oy)
-                        cv2.circle(cell, fu, 4, (255, 255, 255), -1)
-                        cv2.circle(cell, fu, 4, cols[cid], 1)
-                    put(cell, f"{cam_name(cid)}  {len(mine)}명", (8, 6), 15, cols[cid], True)
+                    n_here = sum(1 for o in obs if o["cam_id"] == cid)
+                    put(cell, f"{cam_name(cid)}  {n_here}명", (8, 6), 15, cols[cid], True)
                 else:
                     put(cell, f"{cam_name(cid)} — 영상 없음", (10, ch // 2), 15, (120, 120, 120))
                 cv2.rectangle(cell, (0, 0), (cw - 1, ch - 1), cols[cid], 2)
