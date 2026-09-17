@@ -154,7 +154,16 @@ def resolve_clips(cam_ids: list[str], label: str,
     scenario_NN 과 **카메라 이름 일치도**로 패키지를 찾는다. 힌트를 주면 그것을 쓴다.
     """
     want = {cam_name(c) for c in cam_ids}
-    scen_id = scen_hint or (re.search(r"(scenario_\d+|combo_\d+)", label) or [None])[0]
+    scen_id = scen_hint
+    if not scen_id:
+        m = re.search(r"(scenario_\d+|combo_\d+)", label or "")
+        if m:
+            scen_id = m.group(1)
+        else:
+            # 라벨이 "경로v2 01 …" 처럼 번호만 있는 경우 — 앞머리 뒤 두 자리를 시나리오로 본다
+            m2 = re.match(r"^\S+\s+(\d{1,2})\b", label or "")
+            if m2:
+                scen_id = f"scenario_{int(m2.group(1)):02d}"
     if not scen_id:
         raise SystemExit(f"시나리오를 알 수 없습니다 — --scenario 로 지정하세요 (라벨: {label!r})")
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 저장된 전 세션을 session_viz 로 일괄 렌더한다.
 #
-#   bash tools/session_viz_all.sh [동시실행수] [출력폴더]
+#   bash tools/session_viz_all.sh [동시실행수] [출력폴더] [라벨앞머리]
 #
 # 이미 만들어진 mp4 는 건너뛴다(중단 후 이어서 돌리기). 로그는 출력폴더/_log/.
 set -u
@@ -10,9 +10,16 @@ OUT="${2:-results/session_viz}"
 cd "$(dirname "$0")/.."
 mkdir -p "$OUT/_log"
 
-mapfile -t SIDS < <(ls data/sites/default/sessions/_drills/*.json 2>/dev/null \
-                    | xargs -r -n1 basename | sed 's/\.json$//' | sort)
-echo "[all] 세션 ${#SIDS[@]}건 · 동시 ${JOBS} · 출력 ${OUT}"
+# 세 번째 인자로 라벨 앞머리를 주면 그 세션만 고른다 (예: 경로v2)
+FILTER="${3:-}"
+if [ -n "$FILTER" ]; then
+  mapfile -t SIDS < <(grep -l "\"label\": \"$FILTER" data/sites/default/sessions/_drills/*.json 2>/dev/null \
+                      | xargs -r -n1 basename | sed 's/\.json$//' | sort)
+else
+  mapfile -t SIDS < <(ls data/sites/default/sessions/_drills/*.json 2>/dev/null \
+                      | xargs -r -n1 basename | sed 's/\.json$//' | sort)
+fi
+echo "[all] 세션 ${#SIDS[@]}건 · 동시 ${JOBS} · 출력 ${OUT}${FILTER:+ · 필터 \"$FILTER\"}"
 
 render() {
   local sid="$1" fl="$2" out="$3"
