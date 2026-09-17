@@ -376,8 +376,7 @@ def main() -> int:
                 if fr is not None:
                     # 박스는 그리지 않는다 — 관측 5fps / 영상 30fps 라 심하게 깜빡인다.
                     cell, sc, ox, oy = fit(fr, cw, ch)
-                    n_here = sum(1 for o in obs if o["cam_id"] == cid)
-                    put(cell, f"{cam_name(cid)}  {n_here}명", (8, 6), 15, cols[cid], True)
+                    put(cell, cam_name(cid), (8, 6), 15, cols[cid], True)
                 else:
                     put(cell, f"{cam_name(cid)} — 영상 없음", (10, ch // 2), 15, (120, 120, 120))
                 cv2.rectangle(cell, (0, 0), (cw - 1, ch - 1), cols[cid], 2)
@@ -404,8 +403,9 @@ def main() -> int:
                 put(bar, val, (x, 58), 30, c, True)
             x0 = 16 + 4 * int(OW * 0.135)
             put(bar, "관측", (x0, 8), 15, (150, 150, 150))
+            # 추적 인원은 표시하지 않는다 — 요구사항. 출구 통과는 도면 위 출구 옆에도
+            # 같은 값이 뜨고, 여기엔 전체 합계 성격으로 남긴다.
             for i, (lab, val) in enumerate([
-                    ("추적 인원", f"{len(obs)}명"),
                     ("출구 통과", " · ".join(f"{k2} {v2}" for k2, v2 in sorted(ec.items())) or "—"),
                     ("경과", f"{t - t0:5.1f}s / {dur:.0f}s")]):
                 x = x0 + i * int(OW * 0.135)
