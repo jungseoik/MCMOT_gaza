@@ -881,6 +881,18 @@ Views.replay = (() => {
       r.points.forEach((p, i) => i ? ctx.lineTo(TX(p[0]), TY(p[1]))
                                    : ctx.moveTo(TX(p[0]), TY(p[1])));
       ctx.stroke();
+      // 방향 표시 — 새로 그린 경로도 방향이 지표에 그대로 들어간다.
+      // 거꾸로 그리면 IDR 정렬도가 음수가 되므로 시작·끝을 분명히 보인다.
+      const ps = r.points, n = ps.length - 1;
+      if (n >= 1) {
+        const e1 = [TX(ps[n][0]), TY(ps[n][1])], e0 = [TX(ps[n-1][0]), TY(ps[n-1][1])];
+        mcArrowHead(ctx, e1[0], e1[1],
+                    Math.atan2(e1[1] - e0[1], e1[0] - e0[0]), 15, "#30DCFB");
+        const s0 = [TX(ps[0][0]), TY(ps[0][1])];
+        ctx.beginPath(); ctx.arc(s0[0], s0[1], 5, 0, 7);
+        ctx.fillStyle = "rgba(17,17,17,.75)"; ctx.fill();
+        ctx.strokeStyle = "#30DCFB"; ctx.lineWidth = 2; ctx.stroke();
+      }
     });
     eGeo.bottlenecks.forEach((b) => {
       if (baseB.has(b.id)) return;

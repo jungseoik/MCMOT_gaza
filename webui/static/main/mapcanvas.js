@@ -495,15 +495,28 @@ function drawSiteElements(g, site, opts = {}) {
     mcPath(g, r.points, false);
     ctx.strokeStyle = MC_COLORS.route; ctx.lineWidth = 2.5;
     ctx.setLineDash([8, 5]); ctx.stroke(); ctx.setLineDash([]);
+    // 진행방향 표시. **경로 방향은 지표에 직접 들어간다** — IDR 정렬도가
+    // 등록 순서 tangent 와의 cosine 이라, 거꾸로 그린 경로는 정렬도를 음수로
+    // 만들어 피난개시 판정을 영원히 막는다. 그래서 눈에 띄게 그린다:
+    // 시작점은 속 빈 원, 중간에 화살촉 몇 개, **끝점에는 항상** 큰 화살촉.
     const pts = r.points;
-    for (let i = 1; i < pts.length; i += Math.max(1, Math.floor(pts.length / 4))) {
+    const step = Math.max(1, Math.floor((pts.length - 1) / 4));
+    for (let i = step; i < pts.length - 1; i += step) {
       const c1 = PT(g, pts[i][0], pts[i][1]);
       const c0 = PT(g, pts[i - 1][0], pts[i - 1][1]);
-      const ang = Math.atan2(c1[1] - c0[1], c1[0] - c0[0]);
-      mcArrowHead(ctx, c1[0], c1[1], ang, 9, MC_COLORS.route);
+      mcArrowHead(ctx, c1[0], c1[1],
+                  Math.atan2(c1[1] - c0[1], c1[0] - c0[0]), 11, MC_COLORS.route);
     }
+    const eN = pts.length - 1;
+    const cE = PT(g, pts[eN][0], pts[eN][1]);
+    const cP = PT(g, pts[eN - 1][0], pts[eN - 1][1]);
+    mcArrowHead(ctx, cE[0], cE[1],
+                Math.atan2(cE[1] - cP[1], cE[0] - cP[0]), 15, MC_COLORS.route);
     const r0 = PT(g, pts[0][0], pts[0][1]);
-    lab(r.name || r.id, r0[0], r0[1] - 14, MC_COLORS.route);
+    ctx.beginPath(); ctx.arc(r0[0], r0[1], 5, 0, 7);
+    ctx.fillStyle = "rgba(17,17,17,.75)"; ctx.fill();
+    ctx.strokeStyle = MC_COLORS.route; ctx.lineWidth = 2; ctx.stroke();
+    lab(r.name || r.id, r0[0], r0[1] - 16, MC_COLORS.route);
     ctx.globalAlpha = 1;
   });
 
