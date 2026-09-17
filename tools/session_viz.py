@@ -37,7 +37,6 @@ import re
 import subprocess
 import sys
 import warnings
-from collections import defaultdict, deque
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
@@ -315,9 +314,7 @@ def main() -> int:
     final = outdir / f"{a.session}_{floor}.mp4"
     vw = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (OW, OH))
 
-    trails: dict[str, deque] = defaultdict(lambda: deque(maxlen=12))  # 약 2초(5fps)
     cur = {cid: None for cid in caps}
-    last_call_ts = None
     pos = {cid: -1 for cid in caps}
     f1 = lambda v, d=1: "—" if v is None else f"{v:.{d}f}"   # noqa: E731
 
@@ -326,9 +323,6 @@ def main() -> int:
             t = t0 + k / out_fps
             fr_obj = latest_at(frames, t, key=lambda f: f["ts"])
             obs = fr_obj["objects"] if fr_obj else []
-            new_call = fr_obj is not None and fr_obj["ts"] != last_call_ts
-            if new_call:
-                last_call_ts = fr_obj["ts"]
             tp = latest_at(tl, t, key=lambda p: p["ts"]) or {}
 
             # ── 좌: 도면
@@ -336,14 +330,27 @@ def main() -> int:
             for o in obs:
                 p = MP(o["x"], o["y"])
                 c = cols.get(o["cam_id"], (200, 200, 200))
-                key = o["gid"]
-                if new_call:                      # 홀드 중엔 같은 점이 쌓이지 않게
-                    trails[key].append(p)
-                tr = list(trails[key])
-                for i in range(1, len(tr)):
-                    cv2.line(left, tr[i - 1], tr[i], c, 1)
                 cv2.circle(left, p, 5, c, -1)
                 cv2.circle(left, p, 5, (20, 20, 20), 1)
+            # 출구별 통과 인원 — 사람이 나갈 때마다 도면 위 숫자가 올라간다.
+            # 값은 타임라인의 exit_counts(리플레이와 동일) 시점값.
+            for e in (site.get("exits") or []):
+                ln = e.get("line") or []
+                if len(ln) < 2:
+                    continue
+                mx = (ln[0][0] + ln[1][0]) / 2.0
+                my = (ln[0][1] + ln[1][1]) / 2.0
+                ex, ey = MP(mx, my)
+                n_out = (tp.get("exit_counts") or {}).get(e["id"], 0)
+                txt = f"{e.get('name') or e['id']}  {n_out}명"
+                wpx = 11 * len(txt)
+                cv2.rectangle(left, (ex - wpx // 2, ey - 34), (ex + wpx // 2, ey - 12),
+                              (18, 18, 18), -1)
+                cv2.rectangle(left, (ex - wpx // 2, ey - 34), (ex + wpx // 2, ey - 12),
+                              (60, 90, 255), 1)
+                put(left, txt, (ex - wpx // 2 + 5, ey - 33), 15,
+                    (120, 180, 255) if n_out else (150, 150, 150), True)
+
             cv2.rectangle(left, (0, 0), (LEFT_W, 62), (18, 18, 18), -1)
             put(left, f"{fname} — {label or a.session}", (14, 6), 18, (240, 240, 240), True)
             for i, (lb, c) in enumerate([("구역", (90, 200, 255)), ("병목", (80, 140, 255)),
