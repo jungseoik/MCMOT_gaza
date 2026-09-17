@@ -1488,10 +1488,6 @@ const Session = (() => {
    *  경로 기준이라 의미가 섞인다.
    *  옛 서버 응답(epfi 없음)일 때만 조각값 가중평균으로 물러난다. */
   function jyFoldMetrics(person, pmByKey) {
-    if (person && person.epfi != null) {
-      return { epfi: person.epfi, dev: person.dev_m, devMax: person.dev_max_m,
-               route: person.route_id || null, routeSplit: false, server: true };
-    }
     let wsum = 0, epfi = 0, dev = 0, devMax = null;
     const routes = {};
     (person.segments || []).forEach((s) => {
@@ -1505,12 +1501,17 @@ const Session = (() => {
     });
     const route = Object.entries(routes).sort((a, b) => b[1] - a[1])[0];
     return {
+      // 조각 기준 (기존 방식) — 조각마다 배정 경로가 다르므로 참고값이다
       epfi: wsum ? epfi / wsum : null,
       dev: wsum ? dev / wsum : null,
       devMax,
       route: route ? route[0] : null,
-      // 배정 경로가 조각마다 갈리면 경로를 오갔다는 뜻 — EPFI 해석의 단서
+      // 배정 경로가 조각마다 갈리면 경로를 오갔거나 배정이 리셋됐다는 뜻
       routeSplit: Object.keys(routes).length > 1,
+      // 사람 기준 (서버가 경로 1개로 재적분) — 옛 응답이면 없다
+      epfiP: person && person.epfi != null ? person.epfi : null,
+      devP: person && person.dev_m != null ? person.dev_m : null,
+      routeP: (person && person.route_id) || null,
     };
   }
 
@@ -1528,12 +1529,14 @@ const Session = (() => {
     const rows = ps.map((p) => {
       const m = jyFoldMetrics(p, pm);
       const exits = Object.entries(p.exit_at || {});
-      const bad = m.epfi != null && m.epfi < 60;
+      const eShow = m.epfiP != null ? m.epfiP : m.epfi;
+      const bad = eShow != null && eShow < 60;
       return `<tr>
         <td><span class="jydot" style="background:${jyColor(p.person_id, jy)}"></span>
             <b>${p.person_id}</b></td>
-        <td class="t-num${bad ? " bad" : ""}">${f(m.epfi, 0)}</td>
-        <td class="t-num">${f(m.dev, 2)}</td>
+        <td class="t-num${bad ? " bad" : ""}">${f(m.epfiP != null ? m.epfiP : m.epfi, 0)}</td>
+        <td class="t-num dim2" title="조각 기준(기존 방식)">${f(m.epfi, 0)}</td>
+        <td class="t-num">${f(m.devP != null ? m.devP : m.dev, 2)}</td>
         <td class="t-num">${f(m.devMax, 2)}</td>
         <td class="t-num">${f(p.dist_m, 1)}</td>
         <td class="t-num">${f(p.speed_avg, 2)}</td>
@@ -1554,10 +1557,12 @@ const Session = (() => {
       ? `출구 게이트 ${ex.events}건 → 사람 ${ex.persons_with_exit}명 귀속`
         + (ex.unowned ? ` · ${ex.unowned}건 미귀속(재구성에서 빠진 조각)` : "")
       : "";
-    const srv = ps.length && jyFoldMetrics(ps[0], pm).server;
+    const srv = ps.length && jyFoldMetrics(ps[0], pm).epfiP != null;
     return `<div class="jybar">사람별 지표
         <i>재구성된 ${ps.length}명(global id) · ${srv
-            ? `EPFI 는 사람당 경로 1개로 재적분${jy.d_allow ? ` (d_allow ${jy.d_allow}m)` : ""}`
+            ? `EPFI <b>사람</b>=경로 1개로 재적분${jy.d_allow ? ` (d_allow ${jy.d_allow}m)` : ""}
+               · <b>조각</b>=기존 방식(조각값 관측수 가중평균) — 둘이 크게 다르면 카메라를
+               옮기며 경로 배정이 리셋된 것이다`
             : "EPFI·이탈은 조각값을 관측 수로 가중평균"}</i></div>`
       + (note ? `<div class="jynote">${note} — 게이트는 <b>트랙렛 단위</b>로 세므로
           한 사람이 조각나면 여러 번, 재구성에서 빠진 조각은 아무에게도 안 붙는다.
@@ -1566,8 +1571,9 @@ const Session = (() => {
       <div class="jymwrap"><table class="reptbl jymtbl">
         <thead><tr>
           <th>사람</th>
-          <th title="경로 충실도 0~100 — 높을수록 권장 경로를 따름">EPFI</th>
-          <th title="권장 경로에서 평균 얼마나 벗어났나">이탈 평균 m</th>
+          <th title="사람 기준 — 이 사람에게 경로를 하나만 배정해 정의식대로 다시 적분한 값. 우회를 제대로 반영한다">EPFI<i class="thsub">사람</i></th>
+          <th title="조각 기준(기존) — 카메라별 트랙 조각의 EPFI 를 관측 수로 가중평균. 조각마다 경로가 재배정돼 우회가 가려진다">EPFI<i class="thsub">조각</i></th>
+          <th title="사람 기준 평균 이탈거리">이탈 평균 m</th>
           <th title="가장 크게 벗어난 순간">최대 m</th>
           <th title="관측된 구간의 이동 거리 합">이동 m</th>
           <th title="이동거리 / 관측 구간 시간">평균 m/s</th>

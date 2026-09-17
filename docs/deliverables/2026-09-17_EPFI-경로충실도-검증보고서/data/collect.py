@@ -33,52 +33,34 @@ def analyse(db, d_allow=D_ALLOW):
     mpp = (sv.get("map") or {}).get("m_per_px")
     routes = [(r["id"], np.asarray(r["points"], float)) for r in sv.get("routes", [])
               if len(r.get("points") or []) >= 2]
-    res, _tl, frames, _ = run_replay(db, {"thresholds": {"d_allow": d_allow}}, fps=5.0)
+    res, _tl, _frames, _ = run_replay(db, {"thresholds": {"d_allow": d_allow}}, fps=5.0)
     r = res.model_dump()
-    obs = {}
-    for f in frames:
-        for o in f["objects"]:
-            obs.setdefault(o["gid"], []).append((f["ts"], o["x"], o["y"]))
-    jr = J.reconstruct(db, J.Params())
+    jr = J.reconstruct(db, J.Params.from_dict({"d_allow": d_allow}))
     tlm = {p["global_track_id"]: p for p in r["person_metrics"]}
-
-    def integ(points):
-        """(ts,x,y) → (평균이탈 m, 배정경로, 지속 s). 경로는 **첫 점에서 한 번만** 배정."""
-        pts = sorted(points)
-        if len(pts) < 2 or not routes or not mpp:
-            return None, None, 0.0
-        rid, rp = min(routes, key=lambda q: nearest_on_polyline(
-            (pts[0][1], pts[0][2]), q[1]).dist_px)
-        acc, pt, pd = 0.0, None, None
-        for ts, x, y in pts:
-            d = nearest_on_polyline((x, y), rp).dist_px * mpp
-            if pt is not None and ts > pt:
-                acc += 0.5 * (d + pd) * (ts - pt)
-            pt, pd = ts, d
-        T = pts[-1][0] - pts[0][0]
-        return (acc / T if T > 0 else None), rid, T
 
     people = []
     for p in jr["persons"]:
         if p.get("fragment"):
             continue
-        pts, num, den = [], 0.0, 0.0
+        # 사람 단위 값은 **제품 코드(journey.reconstruct)가 낸 것을 그대로 쓴다** —
+        # 보고서에서 따로 계산하면 화면·API 와 숫자가 갈린다.
+        dev_person, rid, T = p.get("dev_m"), p.get("route_id"), p.get("epfi_dur_sec") or 0.0
+        num = den = 0.0
         for s in p.get("segments", []):
-            pts += obs.get(s["key"], [])
             m = tlm.get(s["key"])
             if m and m.get("mean_deviation_m") is not None and m.get("duration_sec"):
                 num += m["duration_sec"] * m["mean_deviation_m"]
                 den += m["duration_sec"]
-        dev_person, rid, T = integ(pts)
         if dev_person is None or den <= 0:
             continue
-        dev_track = num / den                      # 현행: 트랙렛별 배정의 가중 평균
+        dev_track = num / den                      # 현행 화면: 트랙렛별 배정의 가중 평균
         people.append({
             "pid": p["person_id"], "obs": p["obs"], "cams": len(p["cams"]),
             "n_tracklets": p["n_tracklets"], "dur": T,
             "dev_track": dev_track, "dev_person": dev_person,
             "epfi_track": max(0.0, 1 - dev_track / d_allow) * 100,
-            "epfi_person": max(0.0, 1 - dev_person / d_allow) * 100,
+            "epfi_person": p.get("epfi"),          # 제품 코드가 낸 값
+            "evac_sec": p.get("evac_sec"),         # 첫 관측 → 출구 통과
             "route": rid})
     people.sort(key=lambda x: -x["dev_person"])
     return people, r.get("epfi_avg")
