@@ -1047,3 +1047,11 @@ body.rehearsing .rhbanner{ display:block; }
 .rpgrid label{ grid-template-columns:auto minmax(56px,1fr) auto; }
 .rpgrid label i{ font-size:10.5px; }
 .rpgrid label input[type="number"]{ min-width:58px; }
+
+/* ④ 리플레이 패널 폭 — 340px 은 ③ 운영 뷰(660px)에 비해 너무 좁았다.
+   지표 카드 2열·임계값 2열이 같은 폭에 들어가 글자가 눌린다.
+   운영 뷰와 기존 폭의 중간으로 넓힌다. 접기는 id 특이성 때문에 다시 지정. */
+#rpSide{ width:500px; }
+@media (max-width:1600px){ #rpSide{ width:440px; } }
+@media (max-width:1280px){ #rpSide{ width:380px; } }
+#rpSide.folded{ width:38px; min-width:38px; }
