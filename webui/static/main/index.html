@@ -579,6 +579,22 @@
           <span class="fieldlab" title="객체 위치 보간 렌더링 목표 fps">보간
             <input id="rpFps" type="number" min="1" max="30" step="1" value="20" style="width:46px" /> fps</span>
         </div>
+        <div class="toolbar rpedit" id="rpEditBar">
+          <span class="fieldlab">도면 편집</span>
+          <span class="seg" id="rpTools">
+            <button class="tag-btn on" data-etool="pan" title="편집 안 함 — 줌·팬만">보기</button>
+            <button class="tag-btn" data-etool="route" title="피난경로 그리기 — 클릭으로 꼭짓점, 드래그로 자유곡선, 더블클릭/[완료]로 종료">경로 추가</button>
+            <button class="tag-btn" data-etool="bnsector" title="병목 부채꼴 — 중심 → 반경·시작방향 → 끝방향 3점">병목 추가(부채꼴)</button>
+            <button class="tag-btn" data-etool="erase" title="요소를 클릭하면 제외합니다 (되돌릴 수 있음)">클릭 제외</button>
+          </span>
+          <button class="tag-btn hidden" id="rpEdDone">완료 ⏎</button>
+          <button class="tag-btn hidden" id="rpEdCancel">취소</button>
+          <button class="tag-btn" id="rpEdUndo" disabled title="마지막 편집 되돌리기">↶ 되돌리기</button>
+          <span class="sp"></span>
+          <span class="rpedstat" id="rpEdStat"></span>
+          <button class="btn primary sm" id="rpEdApply" disabled title="편집한 도면으로 지표를 다시 계산하고 이 세션에 저장합니다">이 도면으로 재계산 ↻</button>
+          <button class="tag-btn" id="rpEdReset" disabled title="녹화 당시 도면으로 되돌립니다 — 편집본을 삭제합니다">원본 도면으로</button>
+        </div>
         <div class="hint" id="rpHint">좌측에서 경보 세션을 선택하면 그 세션의 이동 기록을 도면 위에 그대로 재생합니다. (휠: 줌 · 드래그: 팬)</div>
         <canvas id="rpCv" class="mapcv"></canvas>
       </div>
@@ -614,6 +630,10 @@
               <div class="mcard2"><div class="mh2"><b>IDR</b> 평균 <span class="t-num" id="rpIdrProg" style="opacity:.6">—</span></div><div class="mbig t-num" id="rpIdr">—</div><canvas class="rpspark" id="rpSparkIdr"></canvas></div>
             </div>
             <div class="grow" id="rpBase"></div>
+          </div>
+          <div class="group" id="rpGrpGeo">
+            <div class="gtitle">도면 요소 <span class="mtag" id="rpGeoTag">녹화 당시</span></div>
+            <div id="rpGeoList" class="rpgeolist"></div>
           </div>
           <div class="group" id="rpGrpSei">
             <div class="gtitle">SEI 출구별 <span class="mtag" id="rpSeiTag">실제 분담 vs 설계 분담</span></div>

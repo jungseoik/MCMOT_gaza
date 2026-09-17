@@ -1089,3 +1089,19 @@ body.rehearsing .rhbanner{ display:block; }
 #rpSide .sidebody > .group > .gtitle{ margin-bottom:6px; }
 /* 접힌 섹션은 제목만 남으므로 아래 여백을 줄인다 */
 #rpSide .sidebody > .group.folded{ padding-bottom:2px; }
+
+/* ── ④ 리플레이 도면 편집 ─────────────────────────────────────────────── */
+.toolbar.rpedit{ border-top:1px solid var(--stroke-2); flex-wrap:wrap; row-gap:6px; }
+.rpedstat{ font-size:12px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.rpedstat.dirty{ color:var(--brand,#30DCFB); font-weight:600; }
+.tag-btn.xs{ padding:2px 7px; font-size:10.5px; }
+
+.rpgeolist{ display:flex; flex-direction:column; gap:3px; font-size:12.5px; }
+.rpgeorow{ display:grid; grid-template-columns:36px 1fr auto auto; align-items:center;
+  gap:9px; padding:6px 8px; background:var(--bg-3); border-radius:var(--r-sm); }
+.rpgeorow.isnew{ box-shadow:inset 2px 0 0 var(--brand,#30DCFB); }
+.rpgeok{ font-size:10.5px; color:var(--text-3); }
+.rpgeoid{ color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rpgeometa{ font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.rpgeodrop{ margin-top:7px; padding-top:7px; border-top:1px dashed var(--stroke-2);
+  font-size:11.5px; color:#e06b6b; line-height:2; }

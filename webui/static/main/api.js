@@ -93,6 +93,16 @@ const API = {
     API._j(`/api/sessions/${encodeURIComponent(id)}?` + API._fq(floor), { method: "DELETE" }),
   // 건물 드릴 재계산(Phase 3) — 전 층 .db를 같은 오버라이드로 리플레이 → 재산출 롤업.
   drillReplay: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/replay`, body || {}),
+  // ---- 리플레이 도면 편집본 (세션별 사이드카) — 녹화본은 건드리지 않는다
+  getReplayOverrides: (id, floor) =>
+    API._j(`/api/replay/${encodeURIComponent(id)}/overrides`
+           + (floor ? "?floor=" + encodeURIComponent(floor) : "")),
+  putReplayOverrides: (id, byFloor) =>
+    API._put(`/api/replay/${encodeURIComponent(id)}/overrides`, { by_floor: byFloor }),
+  clearReplayOverrides: (id, floor) =>
+    API._j(`/api/replay/${encodeURIComponent(id)}/overrides`
+           + (floor ? "?floor=" + encodeURIComponent(floor) : ""), { method: "DELETE" }),
+
   // 여정 재구성 — 끝난 세션의 트랙 조각을 ReID 로 사람 단위로 다시 묶는다
   drillJourney: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/journey`, body || {}),
   // 트랙렛 대표 프레임 JPEG — 임베딩과 같은 프레임의 crop

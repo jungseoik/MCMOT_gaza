@@ -16,6 +16,7 @@ Views.replay = (() => {
   let baseRow = null;       // 선택 세션의 원본 요약(비교용)
   let data = null;          // {result, timeline, frames, site, meta}
   let drillTimelines = {};  // 층별 1초 타임라인 — 재생 커서 시점 지표용
+  let drillOverrides = {};  // 층별 적용 중인 편집본 (서버가 돌려준 것)
   let liveAtCursor = true;  // 재생 시점값으로 지표를 따라가게 할지 (끄면 최종값 고정)
   let site = null;          // 세션 당시 공간요소 (배경 렌더)
 
@@ -190,6 +191,7 @@ Views.replay = (() => {
     drillFrames = resp.frames_by_floor || {};
     drillSites = resp.site_by_floor || {};
     drillTimelines = resp.timeline_by_floor || {};
+    drillOverrides = resp.overrides_by_floor || {};
     const floors = drill.floors || [];
     $("rpFloorSel").innerHTML = floors.map((f) =>
       `<option value="${f}">${floorName(f)}</option>`).join("");
@@ -233,6 +235,7 @@ Views.replay = (() => {
     } else {
       goTo(0);
     }
+    geoReset(drillOverrides[floor]);    // 편집 사본 = 저장된 편집본 ?? 스냅샷
     renderRpBn();                       // 층 전환·재계산 후 그 층 병목 기준으로 갱신
     if (mc) mc.render();
   }
@@ -375,6 +378,9 @@ Views.replay = (() => {
 
   function clearMetrics() {
     ["rpSei","rpEpfi","rpCbs","rpIdr"].forEach((id) => { $(id).textContent = "—"; });
+    eGeo = null; eDraft = null; eUndo = []; eDirty = false;
+    if ($("rpGeoList")) $("rpGeoList").innerHTML = `<div class="mnote">세션을 선택하세요</div>`;
+    ["rpEdApply","rpEdReset","rpEdUndo"].forEach((id) => { if ($(id)) $(id).disabled = true; });
     $("rpBase").innerHTML = "";
     if ($("rpObjTbl")) $("rpObjTbl").innerHTML = "";
     if ($("rpObjCnt")) $("rpObjCnt").textContent = "0";
@@ -431,16 +437,17 @@ Views.replay = (() => {
     if (mc) mc.render();
   }
 
-  async function recomputeDrill() {
+  async function recomputeDrill(extra) {
     if (!selId) return;
     $("rpMsg").textContent = "건물 재계산 중…"; $("rpApply").disabled = true;
     const keepFloor = curDrillFloor, keepIdx = frameIndexAt(cursor);
     try {
-      const resp = await API.drillReplay(selId, collectOverrides());
+      const resp = await API.drillReplay(selId, { ...collectOverrides(), ...(extra || {}) });
       drill = resp.drill;
       drillFrames = resp.frames_by_floor || {};
       drillSites = resp.site_by_floor || {};
       drillTimelines = resp.timeline_by_floor || {};
+      drillOverrides = resp.overrides_by_floor || {};
       showBuildingMetrics(drill, "재계산값");
       const floors = drill.floors || [];
       const fl = floors.includes(keepFloor) ? keepFloor : floors[0];
@@ -477,6 +484,7 @@ Views.replay = (() => {
     site = data.site || null;
     prepPlayback();
     fillThresholds(site && site.thresholds);
+    geoReset(data.overrides);
     showMetrics(data.result, "현재값");
     setControlsEnabled(true);
     $("rpReset").disabled = false; $("rpApply").disabled = false;
@@ -571,6 +579,7 @@ Views.replay = (() => {
 
   function overlay(g) {
     if (site) drawSiteElements(g, site, { state: dataState() });
+    drawEdit(g);                                   // 편집 추가/제외 표시
     drawAlarmOrigins(g);
     if (!data || !data.frames || !data.frames.length) return;
     const { ctx, TX, TY } = g;
@@ -611,6 +620,385 @@ Views.replay = (() => {
       ctx.font = "13px Pretendard, sans-serif";
       ctx.fillText(os.length > 1 ? `🔔${i + 1}` : "🔔", x + 12, y - 8);
     });
+  }
+
+
+  /* ================================================================ 도면 편집
+   * 리플레이에서 피난경로·병목을 고쳐 "그 도면이었으면 지표가 어땠을까"를 본다.
+   *
+   * 원칙
+   *  - 녹화본(.db 의 site_view)은 절대 건드리지 않는다. 편집본은 서버의
+   *    <session>.ov.json 사이드카에 따로 쌓이고, [원본 도면으로] 로 지운다.
+   *  - 출구·구역은 편집 대상이 아니다 — 출구는 카운팅 게이트라 바꾸면 통과
+   *    인원 자체가 달라져 "같은 관측, 다른 도면" 비교가 깨진다.
+   *  - 부채꼴 병목은 shape 파라미터만 보낸다. polygon 은 서버가 다시 만든다
+   *    (schema 의 _rebuild_from_shape) — 기하식이 한 곳에만 있게.
+   */
+  const SECTOR_SEG = 24;
+  let eTool = "pan";          // pan | route | bnsector | erase
+  let eDraft = null;          // {pts:[[x,y],...]}
+  let eHover = null;          // 부채꼴 미리보기 커서
+  let eGeo = null;            // {routes:[...], bottlenecks:[...]} — 편집 중인 사본
+  let eUndo = [];             // 편집 스냅샷 스택
+  let eDirty = false;         // 재계산 안 한 변경이 있나
+
+  const eFloor = () => (mode === "drill" ? curDrillFloor : API._floor());
+
+  /** 편집 사본 초기화 — 서버가 돌려준 편집본이 있으면 그것, 없으면 스냅샷. */
+  function geoReset(fromOverrides) {
+    const g = fromOverrides && fromOverrides.geometry;
+    const src = site || {};
+    eGeo = {
+      routes: JSON.parse(JSON.stringify((g && g.routes) || src.routes || [])),
+      bottlenecks: JSON.parse(JSON.stringify(
+        (g && g.bottlenecks) || src.bottlenecks || [])),
+    };
+    eUndo = []; eDraft = null; eHover = null; eDirty = false;
+    setETool("pan");
+    renderGeoList();
+    syncEditBar(!!(g && (g.routes || g.bottlenecks)));
+  }
+
+  function geoSnapshot() {
+    eUndo.push(JSON.stringify(eGeo));
+    if (eUndo.length > 40) eUndo.shift();
+    eDirty = true;
+    syncEditBar();
+  }
+
+  function geoUndo() {
+    if (eDraft && eDraft.pts.length) { eDraft.pts.pop(); refreshEdit(); return; }
+    const prev = eUndo.pop();
+    if (!prev) return;
+    eGeo = JSON.parse(prev);
+    eDirty = eUndo.length > 0;
+    refreshEdit();
+  }
+
+  function setETool(t) {
+    eTool = t;
+    eDraft = (t === "route" || t === "bnsector") ? { pts: [] } : null;
+    eHover = null;
+    if (mc) mc.freehand = (t === "route");
+    document.querySelectorAll("#rpTools .tag-btn").forEach((b) =>
+      b.classList.toggle("on", b.dataset.etool === t));
+    $("rpEdDone").classList.toggle("hidden", !eDraft);
+    $("rpEdCancel").classList.toggle("hidden", !eDraft);
+    const H = {
+      pan: "",
+      route: "피난경로: 클릭으로 꼭짓점 추가, 드래그로 자유곡선. 더블클릭 또는 [완료]로 종료 (2점 이상).",
+      bnsector: "병목 부채꼴: ① 중심 ② 반경·시작방향 ③ 끝방향 — 세 번째 클릭에 생성됩니다.",
+      erase: "제외할 경로·병목을 클릭하세요. [되돌리기]로 복구할 수 있습니다.",
+    };
+    if (H[t]) $("rpHint").textContent = H[t];
+    refreshEdit();
+  }
+
+  function refreshEdit() { renderGeoList(); syncEditBar(); if (mc) mc.render(); }
+
+  function syncEditBar(hasSaved) {
+    const on = !!(eGeo && (site || mode === "drill"));
+    $("rpEdUndo").disabled = !(eUndo.length || (eDraft && eDraft.pts.length));
+    $("rpEdApply").disabled = !(on && eDirty);
+    if (hasSaved !== undefined) $("rpEdReset").disabled = !hasSaved;
+    const nr = eGeo ? eGeo.routes.length : 0, nb = eGeo ? eGeo.bottlenecks.length : 0;
+    const base = site ? `${(site.routes || []).length}/${(site.bottlenecks || []).length}` : "—";
+    $("rpEdStat").textContent = eGeo
+      ? `경로 ${nr} · 병목 ${nb}${eDirty ? "  (원본 " + base + ")" : ""}` : "";
+    $("rpEdStat").classList.toggle("dirty", eDirty);
+    $("rpGeoTag").textContent = eDirty ? "편집 중 — 재계산 전"
+      : ($("rpEdReset").disabled ? "녹화 당시" : "편집본 적용됨");
+  }
+
+  // ---------------------------------------------------------------- 부채꼴
+  function sectorPoly(c, r, a0, sweep, seg, ri) {
+    seg = Math.max(3, Math.min(180, seg || SECTOR_SEG));
+    const arc = [];
+    for (let i = 0; i <= seg; i++) {
+      const a = a0 + sweep * i / seg;
+      arc.push([c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]);
+    }
+    if (ri > 0) {
+      for (let i = seg; i >= 0; i--) {
+        const a = a0 + sweep * i / seg;
+        arc.push([c[0] + ri * Math.cos(a), c[1] + ri * Math.sin(a)]);
+      }
+      return arc;
+    }
+    return [[c[0], c[1]]].concat(arc);
+  }
+  function sweepTo(c, a0, p) {
+    let sw = Math.atan2(p[1] - c[1], p[0] - c[0]) - a0;
+    while (sw > Math.PI) sw -= 2 * Math.PI;
+    while (sw < -Math.PI) sw += 2 * Math.PI;
+    return sw;
+  }
+  function draftSector(endPt) {
+    if (!eDraft || eDraft.pts.length < 2) return null;
+    const c = eDraft.pts[0], p1 = eDraft.pts[1];
+    const r = Math.hypot(p1[0] - c[0], p1[1] - c[1]);
+    if (r <= 0) return null;
+    const a0 = Math.atan2(p1[1] - c[1], p1[0] - c[0]);
+    return { kind: "sector", center: c, radius: r, a0: a0,
+             sweep: endPt ? sweepTo(c, a0, endPt) : 0,
+             segments: SECTOR_SEG, radius_in: 0 };
+  }
+
+  // ---------------------------------------------------------------- 입력
+  function nextId(list, pre) {
+    let n = 1;
+    const has = (id) => list.some((x) => x.id === id);
+    while (has(pre + n)) n++;
+    return pre + n;
+  }
+
+  function eOnClick(p) {
+    if (!eGeo) return;
+    if (eTool === "erase") { eraseAt(p); return; }
+    if (!eDraft) return;
+    eDraft.pts.push([p.x, p.y]);
+    if (eTool === "bnsector" && eDraft.pts.length >= 3) { eFinish(); return; }
+    refreshEdit();
+  }
+
+  function eOnDragDraw(p, first) {                  // 경로 자유곡선
+    if (!eDraft || eTool !== "route") return;
+    const last = eDraft.pts[eDraft.pts.length - 1];
+    if (first || !last || Math.hypot(p.x - last[0], p.y - last[1]) > 6 / mc.s) {
+      eDraft.pts.push([p.x, p.y]);
+    }
+  }
+
+  function eOnHover(p) {
+    if (eTool !== "bnsector" || !eDraft || eDraft.pts.length !== 2) {
+      if (eHover) { eHover = null; return true; }
+      return false;
+    }
+    eHover = [p.x, p.y];
+    return true;
+  }
+
+  function eFinish() {
+    if (!eDraft || !eGeo) return;
+    const pts = eDraft.pts;
+    if (eTool === "route") {
+      if (pts.length < 2) { $("rpHint").textContent = "경로는 2점 이상이어야 합니다."; return; }
+      geoSnapshot();
+      eGeo.routes.push({ id: nextId(eGeo.routes, "ed-r"), name: "", points: pts.slice() });
+    } else if (eTool === "bnsector") {
+      const sh = draftSector(pts[2] || eHover);
+      if (!sh || !sh.sweep) { $("rpHint").textContent = "부채꼴을 만들 수 없습니다 — 세 점을 다시 찍어주세요."; return; }
+      geoSnapshot();
+      const ref = (site && site.bottlenecks && site.bottlenecks[0]) || {};
+      eGeo.bottlenecks.push({
+        id: nextId(eGeo.bottlenecks, "ed-b"), name: "",
+        // polygon 은 서버가 shape 로 다시 만든다 — 여기 값은 미리보기용
+        polygon: sectorPoly(sh.center, sh.radius, sh.a0, sh.sweep, sh.segments, 0),
+        rho_crit: ref.rho_crit != null ? ref.rho_crit : 2.0,
+        weight: ref.weight != null ? ref.weight : 1.0,
+        shape: sh, group: "",
+      });
+    }
+    eDraft = { pts: [] }; eHover = null;
+    refreshEdit();
+  }
+
+  function eCancel() { if (eDraft) { eDraft = { pts: [] }; eHover = null; refreshEdit(); } }
+
+  /** 클릭 지점에서 가장 가까운 요소 하나를 제외. */
+  function eraseAt(p) {
+    if (!eGeo) return;
+    const tol = 14 / (mc ? mc.s : 1);
+    let best = null;
+    eGeo.bottlenecks.forEach((b, i) => {
+      if (pointInPoly([p.x, p.y], b.polygon)) best = { k: "b", i, d: 0 };
+    });
+    if (!best) {
+      eGeo.routes.forEach((r, i) => {
+        const d = distToPolyline([p.x, p.y], r.points);
+        if (d <= tol && (!best || d < best.d)) best = { k: "r", i, d };
+      });
+    }
+    if (!best) { $("rpHint").textContent = "그 자리에 경로·병목이 없습니다."; return; }
+    geoSnapshot();
+    if (best.k === "b") eGeo.bottlenecks.splice(best.i, 1);
+    else eGeo.routes.splice(best.i, 1);
+    refreshEdit();
+  }
+
+  function pointInPoly(pt, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      if ((yi > pt[1]) !== (yj > pt[1])
+          && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi + 1e-12) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  function distToPolyline(pt, pts) {
+    let best = Infinity;
+    for (let i = 1; i < pts.length; i++) {
+      const [x1, y1] = pts[i - 1], [x2, y2] = pts[i];
+      const dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
+      let t = L2 ? ((pt[0] - x1) * dx + (pt[1] - y1) * dy) / L2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      best = Math.min(best, Math.hypot(pt[0] - (x1 + t * dx), pt[1] - (y1 + t * dy)));
+    }
+    return best;
+  }
+
+  // ---------------------------------------------------------------- 렌더
+  function drawEdit(g) {
+    if (!eGeo) return;
+    const { ctx, TX, TY } = g;
+    // 편집으로 **추가된** 요소만 강조 (원본 요소는 drawSiteElements 가 그린다)
+    const baseR = new Set(((site && site.routes) || []).map((r) => r.id));
+    const baseB = new Set(((site && site.bottlenecks) || []).map((b) => b.id));
+    ctx.save();
+    eGeo.routes.forEach((r) => {
+      if (baseR.has(r.id)) return;
+      ctx.strokeStyle = "#30DCFB"; ctx.lineWidth = 2.5; ctx.setLineDash([]);
+      ctx.beginPath();
+      r.points.forEach((p, i) => i ? ctx.lineTo(TX(p[0]), TY(p[1]))
+                                   : ctx.moveTo(TX(p[0]), TY(p[1])));
+      ctx.stroke();
+    });
+    eGeo.bottlenecks.forEach((b) => {
+      if (baseB.has(b.id)) return;
+      ctx.fillStyle = "rgba(48,220,251,.18)"; ctx.strokeStyle = "#30DCFB"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      b.polygon.forEach((p, i) => i ? ctx.lineTo(TX(p[0]), TY(p[1]))
+                                    : ctx.moveTo(TX(p[0]), TY(p[1])));
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    });
+    // 제외된 원본 요소 — 흐린 빨간 점선으로 "빠졌음"을 보인다
+    const curR = new Set(eGeo.routes.map((r) => r.id));
+    const curB = new Set(eGeo.bottlenecks.map((b) => b.id));
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = "rgba(224,107,107,.75)"; ctx.lineWidth = 2;
+    ((site && site.routes) || []).forEach((r) => {
+      if (curR.has(r.id)) return;
+      ctx.beginPath();
+      r.points.forEach((p, i) => i ? ctx.lineTo(TX(p[0]), TY(p[1]))
+                                   : ctx.moveTo(TX(p[0]), TY(p[1])));
+      ctx.stroke();
+    });
+    ((site && site.bottlenecks) || []).forEach((b) => {
+      if (curB.has(b.id)) return;
+      ctx.beginPath();
+      b.polygon.forEach((p, i) => i ? ctx.lineTo(TX(p[0]), TY(p[1]))
+                                    : ctx.moveTo(TX(p[0]), TY(p[1])));
+      ctx.closePath(); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    // 그리는 중인 드래프트
+    if (eDraft && eDraft.pts.length) {
+      ctx.strokeStyle = "#ffd166"; ctx.fillStyle = "rgba(255,209,102,.2)"; ctx.lineWidth = 2;
+      if (eTool === "bnsector" && eDraft.pts.length >= 2) {
+        const sh = draftSector(eDraft.pts[2] || eHover);
+        if (sh) {
+          const poly = sectorPoly(sh.center, sh.radius, sh.a0, sh.sweep, sh.segments, 0);
+          ctx.beginPath();
+          poly.forEach((p, i) => i ? ctx.lineTo(TX(p[0]), TY(p[1]))
+                                   : ctx.moveTo(TX(p[0]), TY(p[1])));
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+      } else {
+        ctx.beginPath();
+        eDraft.pts.forEach((p, i) => i ? ctx.lineTo(TX(p[0]), TY(p[1]))
+                                       : ctx.moveTo(TX(p[0]), TY(p[1])));
+        ctx.stroke();
+      }
+      eDraft.pts.forEach((p) => {
+        ctx.fillStyle = "#ffd166";
+        ctx.beginPath(); ctx.arc(TX(p[0]), TY(p[1]), 3.5, 0, 7); ctx.fill();
+      });
+    }
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------- 목록
+  function renderGeoList() {
+    const box = $("rpGeoList");
+    if (!box) return;
+    if (!eGeo) { box.innerHTML = `<div class="mnote">세션을 선택하세요</div>`; return; }
+    const baseR = new Set(((site && site.routes) || []).map((r) => r.id));
+    const baseB = new Set(((site && site.bottlenecks) || []).map((b) => b.id));
+    const row = (kind, o, isNew) =>
+      `<div class="rpgeorow${isNew ? " isnew" : ""}">
+         <span class="rpgeok">${kind}</span>
+         <span class="rpgeoid" title="${o.id}">${o.name || o.id}</span>
+         <span class="rpgeometa">${kind === "경로"
+            ? `${o.points.length}점`
+            : `ρ${o.rho_crit}${o.shape ? " · 부채꼴" : ""}`}</span>
+         <button class="tag-btn xs" data-del="${kind === "경로" ? "r" : "b"}:${o.id}"
+                 title="제외">제외</button>
+       </div>`;
+    const dropped = [
+      ...((site && site.routes) || []).filter((r) => !eGeo.routes.some((x) => x.id === r.id))
+        .map((r) => ["경로", r]),
+      ...((site && site.bottlenecks) || []).filter((b) => !eGeo.bottlenecks.some((x) => x.id === b.id))
+        .map((b) => ["병목", b]),
+    ];
+    box.innerHTML =
+      eGeo.routes.map((r) => row("경로", r, !baseR.has(r.id))).join("")
+      + eGeo.bottlenecks.map((b) => row("병목", b, !baseB.has(b.id))).join("")
+      + (dropped.length
+          ? `<div class="rpgeodrop">제외됨 ${dropped.length} — `
+            + dropped.map(([k, o]) =>
+                `<button class="tag-btn xs" data-add="${k === "경로" ? "r" : "b"}:${o.id}">${k} ${o.id} 되살리기</button>`).join(" ")
+            + `</div>`
+          : "");
+    box.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
+      const [k, id] = b.dataset.del.split(":");
+      geoSnapshot();
+      const arr = k === "r" ? eGeo.routes : eGeo.bottlenecks;
+      const i = arr.findIndex((x) => x.id === id);
+      if (i >= 0) arr.splice(i, 1);
+      refreshEdit();
+    });
+    box.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
+      const [k, id] = b.dataset.add.split(":");
+      geoSnapshot();
+      const src = k === "r" ? (site.routes || []) : (site.bottlenecks || []);
+      const o = src.find((x) => x.id === id);
+      if (o) (k === "r" ? eGeo.routes : eGeo.bottlenecks).push(JSON.parse(JSON.stringify(o)));
+      refreshEdit();
+    });
+  }
+
+  // ---------------------------------------------------------------- 적용·복귀
+  async function applyGeometry() {
+    if (!eGeo || !selId) return;
+    $("rpEdApply").disabled = true;
+    $("rpMsg").textContent = "편집한 도면으로 재계산 중…";
+    try {
+      const geo = { routes: eGeo.routes, bottlenecks: eGeo.bottlenecks };
+      if (mode === "drill") {
+        await recomputeDrill({ geometry: { [eFloor()]: geo }, save: true });
+      } else {
+        await recompute({ geometry: geo, save: true });
+      }
+      eDirty = false; eUndo = [];
+      $("rpEdReset").disabled = false;
+      $("rpMsg").textContent = "편집한 도면으로 재계산 완료 — 이 세션에 저장되었습니다. [원본 도면으로] 로 되돌릴 수 있습니다.";
+    } catch (e) {
+      $("rpMsg").textContent = "재계산 실패: " + e.message;
+    } finally { syncEditBar(); }
+  }
+
+  async function resetGeometry() {
+    if (!selId) return;
+    if (!confirm("편집한 도면을 지우고 녹화 당시 도면으로 되돌립니다.\n계속할까요?")) return;
+    $("rpEdReset").disabled = true;
+    try {
+      await API.clearReplayOverrides(selId);
+      if (mode === "drill") await recomputeDrill({});
+      else await recompute({});
+      $("rpMsg").textContent = "녹화 당시 도면으로 되돌렸습니다.";
+    } catch (e) {
+      $("rpMsg").textContent = "되돌리기 실패: " + e.message;
+      $("rpEdReset").disabled = false;
+    }
   }
 
   // ------------------------------------------------------------ 지표 패널
@@ -837,13 +1225,13 @@ Views.replay = (() => {
     return ov;
   }
 
-  async function recompute() {
-    if (mode === "drill") return recomputeDrill();
+  async function recompute(extra) {
+    if (mode === "drill") return recomputeDrill(extra);
     if (!selId || !data) return;
     $("rpMsg").textContent = "재계산 중…"; $("rpApply").disabled = true;
     const keepIdx = frameIndexAt(cursor);
     try {
-      data = await API.replaySession(selId, collectOverrides());
+      data = await API.replaySession(selId, { ...collectOverrides(), ...(extra || {}) });
       site = data.site || site;
       prepPlayback();
       showMetrics(data.result, "재계산값");
@@ -875,8 +1263,20 @@ Views.replay = (() => {
   function init() {
     if (inited) return;
     inited = true;
-    mc = new MapCanvas($("rpCv"), { draw: overlay });
+    mc = new MapCanvas($("rpCv"), {
+      draw: overlay,
+      onClick: eOnClick, onDragDraw: eOnDragDraw, onHover: eOnHover,
+      onDragEnd: () => refreshEdit(),
+      onDblClick: () => { if (eDraft) eFinish(); },
+    });
     window.addEventListener("resize", () => { if (active) drawSparks(); });
+    document.querySelectorAll("#rpTools .tag-btn").forEach((b) =>
+      b.onclick = () => setETool(b.dataset.etool));
+    $("rpEdDone").onclick = eFinish;
+    $("rpEdCancel").onclick = eCancel;
+    $("rpEdUndo").onclick = geoUndo;
+    $("rpEdApply").onclick = applyGeometry;
+    $("rpEdReset").onclick = resetGeometry;
     if (window.CbsBnPanel) bnPanel = CbsBnPanel($("rpBn"));
     $("rpPlay").onclick = togglePlay;
     $("rpToStart").onclick = () => { pause(); goTo(0); if (mc) mc.render(); };
