@@ -46,9 +46,9 @@ def fig_assignment():
         ax.set_title(PKG_LABEL[pkg], fontsize=11, pad=8)
     axes[0].set_ylabel("그 시나리오의 최대 이탈거리 (m)")
     axes[0].legend(frameon=False, fontsize=9.5, loc="upper left")
-    fig.suptitle("그림 1.  경로 배정 단위가 이탈거리를 가린다 — 카메라가 바뀔 때마다 0 으로 리셋",
+    fig.suptitle("부록 그림 A.  경로 배정 단위가 이탈거리를 가린다 (수정 전 구현)",
                  fontsize=12.5, y=1.02)
-    fig.savefig(OUT / "fig1_assignment_gap.png"); plt.close(fig)
+    fig.savefig(OUT / "figA_assignment_gap.png"); plt.close(fig)
 
 
 # ------------------------------------------------ 그림 2. 양성·음성 대조
@@ -75,9 +75,9 @@ def fig_control():
                                  markeredgecolor="#111", markersize=10,
                                  label="의도한 상위 k명")],
                    frameon=False, fontsize=9, loc="upper left", ncol=2)
-    fig.suptitle("그림 2.  양성(경로 이탈 각본) · 음성(속도만 이상) 대조 — 사람별 이탈거리",
+    fig.suptitle("그림 2.  사람별 이탈거리(절대값) — 패키지마다 기준선이 다르다",
                  fontsize=12.5, y=1.02)
-    fig.savefig(OUT / "fig2_control_contrast.png"); plt.close(fig)
+    fig.savefig(OUT / "fig2_control_abs.png"); plt.close(fig)
 
 
 # ------------------------------------------------ 그림 3. 의도 인원 대조
@@ -102,9 +102,9 @@ def fig_topk():
     ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=9)
     ax.set_ylabel("인원 (명)"); ax.set_ylim(0, max(detected + intended) + 1.2)
     ax.legend(frameon=False, fontsize=9.5, loc="upper left")
-    ax.set_title("그림 3.  각본상 이탈 인원 vs 측정된 이탈자 수\n"
+    ax.set_title("그림 4.  각본상 이탈 인원 vs 측정된 이탈자 수\n"
                  "판정선: 중앙값의 2배 또는 d_allow 이상", fontsize=11.5, pad=10)
-    fig.savefig(OUT / "fig3_intended_vs_detected.png"); plt.close(fig)
+    fig.savefig(OUT / "fig4_intended_vs_detected.png"); plt.close(fig)
 
 
 # ------------------------------------------------ 그림 4. EPFI 분포
@@ -123,9 +123,73 @@ def fig_dist():
         ax.set_xticklabels([f"{S(r)}\n{r['role']}" for r in rs], fontsize=9)
         ax.set_title(PKG_LABEL[pkg], fontsize=11, pad=8)
     axes[0].set_ylabel(f"사람별 EPFI (d_allow {D_ALLOW}m)")
-    fig.suptitle("그림 4.  사람별 EPFI 분포 — 0 점에 몰려 하한이 포화한다",
+    fig.suptitle("그림 5.  사람별 EPFI 분포 — 0 점에 몰려 하한이 포화한다",
                  fontsize=12.5, y=1.02)
-    fig.savefig(OUT / "fig4_epfi_distribution.png"); plt.close(fig)
+    fig.savefig(OUT / "fig5_epfi_distribution.png"); plt.close(fig)
+
+
+
+# ------------------------------------------------ 그림 1. 이탈 배수 (본문 핵심)
+def fig_ratio():
+    """이탈 배수 = 그 사람의 이탈 ÷ 그 시나리오 중앙값.
+
+    절대 이탈거리는 패키지·매핑에 따라 기준선이 달라(1·3층 중앙 2.2m vs
+    3층1차 6.9m) 그대로 비교할 수 없다. 중앙값으로 정규화하면 "이 시나리오에서
+    누가 유독 벗어났나"만 남는다 — 각본이 묻는 바로 그 질문이다.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(12.6, 4.8), sharey=True)
+    for ax, pkg in zip(axes, PKGS):
+        rs = sorted(rows_of(pkg), key=lambda r: r["scen"])
+        for i, r in enumerate(rs):
+            ds = sorted((p["dev_person"] for p in r["people"]), reverse=True)
+            med = float(np.median(ds))
+            rt = [d / med for d in ds]
+            ax.scatter([i] * len(rt), rt, s=26, color=ROLE_COL[r["role"]],
+                       alpha=.75, zorder=3)
+            if r["k"]:
+                ax.scatter([i] * r["k"], rt[:r["k"]], s=120, facecolors="none",
+                           edgecolors="#111", linewidths=1.3, zorder=4)
+            ax.text(i, rt[0] + .18, f"{rt[0]:.1f}×", ha="center", fontsize=8.5,
+                    color=ROLE_COL[r["role"]])
+        ax.axhline(3.0, color="#2a7d3f", ls="--", lw=1.2)
+        ax.set_xticks(range(len(rs)))
+        ax.set_xticklabels([f"{S(r)}\n{r['role']}" + (f" k={r['k']}" if r["k"] else "")
+                            for r in rs], fontsize=9)
+        ax.set_title(PKG_LABEL[pkg], fontsize=11, pad=8)
+    axes[0].set_ylabel("이탈 배수 (그 사람 ÷ 시나리오 중앙값)")
+    axes[0].text(-0.4, 3.12, "3배", fontsize=9, color="#2a7d3f")
+    axes[0].legend(handles=[Patch(color=v, label=k) for k, v in ROLE_COL.items()]
+                   + [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="none",
+                                 markeredgecolor="#111", markersize=10,
+                                 label="각본상 이탈 k명")],
+                   frameon=False, fontsize=9, loc="upper right", ncol=2)
+    fig.suptitle("그림 1.  이탈 배수로 본 양성·음성 대조 — 재구성(사람) 기준",
+                 fontsize=12.5, y=1.02)
+    fig.savefig(OUT / "fig1_deviation_ratio.png"); plt.close(fig)
+
+
+# ------------------------------------------------ 그림 3. 대피 소요시간
+def fig_evac():
+    fig, axes = plt.subplots(1, 2, figsize=(12.6, 4.4), sharey=True)
+    for ax, pkg in zip(axes, PKGS):
+        rs = sorted(rows_of(pkg), key=lambda r: r["scen"])
+        data, lab = [], []
+        for r in rs:
+            ev = [p["evac_sec"] for p in r["people"] if p.get("evac_sec") is not None]
+            data.append(ev or [0]); lab.append(f"{S(r)}\n{r['role']} ({len(ev)}명)")
+        bp = ax.boxplot(data, patch_artist=True, widths=.55,
+                        medianprops=dict(color="#222"))
+        for b, r in zip(bp["boxes"], rs):
+            b.set_facecolor(ROLE_COL[r["role"]]); b.set_alpha(.35)
+        for i, (vals, r) in enumerate(zip(data, rs), start=1):
+            ax.scatter([i] * len(vals), vals, s=16, color=ROLE_COL[r["role"]],
+                       alpha=.8, zorder=3)
+        ax.set_xticklabels(lab, fontsize=8.5)
+        ax.set_title(PKG_LABEL[pkg], fontsize=11, pad=8)
+    axes[0].set_ylabel("대피 소요시간 (초) — 첫 관측 → 출구 통과")
+    fig.suptitle("그림 3.  개인별 대피 소요시간 — 같은 재구성에서 함께 나오는 값",
+                 fontsize=12.5, y=1.02)
+    fig.savefig(OUT / "fig3_evac_time.png"); plt.close(fig)
 
 
 # ------------------------------------------------ CSV
@@ -146,5 +210,7 @@ def csv_out():
                             p["route"]])
 
 
-fig_assignment(); fig_control(); fig_topk(); fig_dist(); csv_out()
+fig_ratio(); fig_control(); fig_evac(); fig_topk(); fig_dist()
+fig_assignment()      # 부록 — 수정 전 구현 기록
+csv_out()
 print("완료:", sorted(os.listdir(OUT)))
