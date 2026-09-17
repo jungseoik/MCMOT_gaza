@@ -688,13 +688,32 @@ Views.replay = (() => {
       pan: "",
       route: "피난경로: 클릭으로 꼭짓점 추가, 드래그로 자유곡선. 더블클릭 또는 [완료]로 종료 (2점 이상).",
       bnsector: "병목 부채꼴: ① 중심 ② 반경·시작방향 ③ 끝방향 — 세 번째 클릭에 생성됩니다.",
-      erase: "제외할 경로·병목을 클릭하세요. [되돌리기]로 복구할 수 있습니다.",
+      erase: "지우개 — 맵에서 제외할 경로·병목을 클릭하세요. [되돌리기]로 복구됩니다.",
     };
     if (H[t]) $("rpHint").textContent = H[t];
     refreshEdit();
   }
 
   function refreshEdit() { renderGeoList(); syncEditBar(); if (mc) mc.render(); }
+
+  /* 우측 패널 탭 — 지표 / 도면 편집.
+   * 편집 요소 목록을 지표 사이에 끼워 두면 읽기 화면이 지저분해진다.
+   * 탭을 나누고, **도면 편집 탭일 때만** 맵 위 편집 툴바를 띄운다
+   * (= 그 탭이 곧 편집 모드다). 지표 탭으로 돌아가면 도구는 [보기]로 되돌린다. */
+  let rpTab = "metrics";
+  function setRpTab(t) {
+    rpTab = t;
+    $("rpBodyMetrics").classList.toggle("hidden", t !== "metrics");
+    $("rpBodyGeo").classList.toggle("hidden", t !== "geo");
+    $("rpEditBar").classList.toggle("hidden", t !== "geo");
+    $("rpDens").classList.toggle("hidden", t !== "metrics");
+    $("rpDensNote").classList.toggle("hidden", t !== "metrics");
+    document.querySelectorAll("#rpTabs .tag-btn").forEach((b) =>
+      b.classList.toggle("on", b.dataset.rptab === t));
+    if (t !== "geo") setETool("pan");
+    else if (!eGeo && site) geoReset(null);
+    if (mc) { setTimeout(() => { mc.resize(); drawSparks(); }, 0); }
+  }
 
   function syncEditBar(hasSaved) {
     const on = !!(eGeo && (site || mode === "drill"));
@@ -1272,6 +1291,8 @@ Views.replay = (() => {
     window.addEventListener("resize", () => { if (active) drawSparks(); });
     document.querySelectorAll("#rpTools .tag-btn").forEach((b) =>
       b.onclick = () => setETool(b.dataset.etool));
+    document.querySelectorAll("#rpTabs .tag-btn").forEach((b) =>
+      b.onclick = () => setRpTab(b.dataset.rptab));
     $("rpEdDone").onclick = eFinish;
     $("rpEdCancel").onclick = eCancel;
     $("rpEdUndo").onclick = geoUndo;

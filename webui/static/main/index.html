@@ -579,13 +579,13 @@
           <span class="fieldlab" title="객체 위치 보간 렌더링 목표 fps">보간
             <input id="rpFps" type="number" min="1" max="30" step="1" value="20" style="width:46px" /> fps</span>
         </div>
-        <div class="toolbar rpedit" id="rpEditBar">
+        <div class="toolbar rpedit hidden" id="rpEditBar">
           <span class="fieldlab">도면 편집</span>
           <span class="seg" id="rpTools">
             <button class="tag-btn on" data-etool="pan" title="편집 안 함 — 줌·팬만">보기</button>
-            <button class="tag-btn" data-etool="route" title="피난경로 그리기 — 클릭으로 꼭짓점, 드래그로 자유곡선, 더블클릭/[완료]로 종료">경로 추가</button>
-            <button class="tag-btn" data-etool="bnsector" title="병목 부채꼴 — 중심 → 반경·시작방향 → 끝방향 3점">병목 추가(부채꼴)</button>
-            <button class="tag-btn" data-etool="erase" title="요소를 클릭하면 제외합니다 (되돌릴 수 있음)">클릭 제외</button>
+            <button class="tag-btn" data-etool="route" title="피난경로 그리기 — 클릭으로 꼭짓점, 드래그로 자유곡선, 더블클릭/[완료]로 종료">경로 그리기</button>
+            <button class="tag-btn" data-etool="bnsector" title="병목 부채꼴 — ① 중심 ② 반경·시작방향 ③ 끝방향, 세 번째 클릭에 생성">병목 그리기</button>
+            <button class="tag-btn" data-etool="erase" title="지우개 — 맵에서 경로·병목을 클릭하면 그 요소를 제외합니다. [되돌리기]로 복구">지우개</button>
           </span>
           <button class="tag-btn hidden" id="rpEdDone">완료 ⏎</button>
           <button class="tag-btn hidden" id="rpEdCancel">취소</button>
@@ -601,7 +601,10 @@
 
       <aside class="side metrics" id="rpSide">
         <div class="sidehead">
-          <span>지표 · 재계산</span>
+          <span class="seg" id="rpTabs">
+            <button class="tag-btn on" data-rptab="metrics" title="4대 지표·표·그래프">지표</button>
+            <button class="tag-btn" data-rptab="geo" title="피난경로·병목을 고쳐 재계산 — 녹화본은 그대로">도면 편집</button>
+          </span>
           <span class="sp"></span>
           <span class="seg dens" id="rpDens" title="무엇까지 보여줄지">
             <button class="tag-btn" data-dens="num"
@@ -614,7 +617,7 @@
           <button class="tag-btn sidefold" id="rpFold" title="패널 접기 — 맵을 전체 폭으로">⟩</button>
         </div>
         <div class="densnote" id="rpDensNote"></div>
-        <div class="sidebody">
+        <div class="sidebody" id="rpBodyMetrics">
           <div class="group" id="rpGrpKpi">
             <div class="gtitle">4대 지표 <span class="mtag" id="rpTag">현재값</span>
               <span class="sp"></span>
@@ -630,10 +633,6 @@
               <div class="mcard2"><div class="mh2"><b>IDR</b> 평균 <span class="t-num" id="rpIdrProg" style="opacity:.6">—</span></div><div class="mbig t-num" id="rpIdr">—</div><canvas class="rpspark" id="rpSparkIdr"></canvas></div>
             </div>
             <div class="grow" id="rpBase"></div>
-          </div>
-          <div class="group" id="rpGrpGeo">
-            <div class="gtitle">도면 요소 <span class="mtag" id="rpGeoTag">녹화 당시</span></div>
-            <div id="rpGeoList" class="rpgeolist"></div>
           </div>
           <div class="group" id="rpGrpSei">
             <div class="gtitle">SEI 출구별 <span class="mtag" id="rpSeiTag">실제 분담 vs 설계 분담</span></div>
@@ -676,6 +675,30 @@
               <button class="btn primary sm" id="rpApply" disabled>이 값으로 재계산 ↻</button>
             </div>
             <div class="grow" id="rpMsg"></div>
+          </div>
+        </div>
+
+        <!-- 도면 편집 탭 — 지표와 섞이면 지저분해서 따로 뺐다 -->
+        <div class="sidebody hidden" id="rpBodyGeo">
+          <div class="group">
+            <div class="gtitle">도면 요소 <span class="mtag" id="rpGeoTag">녹화 당시</span></div>
+            <div class="gnote">
+              이 세션의 <b>피난경로·병목</b>을 고쳐 지표를 다시 계산합니다.
+              <b>녹화본은 바뀌지 않습니다</b> — 편집본은 이 세션에만 따로 저장되고,
+              [원본 도면으로] 를 누르면 언제든 녹화 당시 도면으로 돌아갑니다.<br/>
+              맵 위 도구 — <b>경로 그리기</b>·<b>병목 그리기</b> 로 추가하고, <b>지우개</b> 로 맵에서 요소를 클릭하면 제외됩니다.
+            </div>
+            <div id="rpGeoList" class="rpgeolist"></div>
+          </div>
+          <div class="group">
+            <div class="gtitle">영향 범위</div>
+            <div class="gnote">
+              <b>경로</b>를 바꾸면 <b>EPFI</b>(이탈거리 기준선)와 <b>IDR</b>(정렬도가 최근접
+              경로 접선 기준)이 함께 바뀝니다.<br/>
+              <b>병목</b>을 바꾸면 <b>CBS</b> 만 바뀝니다 — 면적이 달라지면 밀도가 달라집니다.<br/>
+              <b>출입구·구역은 편집하지 않습니다</b> — 출입구는 통과 인원을 세는 게이트라
+              바꾸면 관측 자체가 달라져 비교가 성립하지 않습니다.
+            </div>
           </div>
         </div>
       </aside>
