@@ -1077,3 +1077,15 @@ body.rehearsing .rhbanner{ display:block; }
 
 /* 숫자 모드에선 출구 표도 숨긴다 */
 .side.metrics.dens-num #rpGrpSei{ display:none; }
+
+/* ── ④ 리플레이 패널 섹션 구분 ────────────────────────────────────────────
+   4대 지표 / SEI 출구별 / IDR 구역별 / 객체별 / CBS 병목 / 임계값 조정이
+   간격만으로 이어져 어디서 끊기는지 안 보였다. 구분선 + 충분한 상하 여백.
+   (① 맵 설정의 #mapSetPanel .group 과 같은 규칙) */
+#rpSide .sidebody{ gap:0; padding:0 16px 28px; }
+#rpSide .sidebody > .group{
+  padding:26px 0 6px; border-top:1px solid var(--stroke-2); }
+#rpSide .sidebody > .group:first-child{ border-top:none; padding-top:18px; }
+#rpSide .sidebody > .group > .gtitle{ margin-bottom:6px; }
+/* 접힌 섹션은 제목만 남으므로 아래 여백을 줄인다 */
+#rpSide .sidebody > .group.folded{ padding-bottom:2px; }
