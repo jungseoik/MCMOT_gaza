@@ -44,7 +44,7 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 | `docs/이관가이드-다른-GPU-서버로.md` | **다른 GPU 서버 이관 체크리스트** — 현 기준은 전부 Blackwell(sm_120). 다른 아키텍처(RTX 5000 Ada 등)면 TRT 엔진 재빌드·한계 재측정·`GPU_DEVICES` 실인덱스 확인 필수 |
 | `docs/현장-NVR-RTSP-수집-대응계획.md` | **PoC 현장(CJ제일제당) NVR 수집 계획** — H.265/VBR/RTSP 세션 개념 정리 + 수집 아키텍처 3안 비교(권장: 로컬 mediamtx 허브) + 현장 진단 체크리스트·업체 요청서 |
 | `docs/RTSP-송출서버-구성.md` | **RTSP 테스트 송출** — WebRTC 호환 인코딩·mediamtx·pm2 절차 + HF `backseollgi/MCMOT`(model, `videos/`, 비공개→`HF_TOKEN` 필요)에서 받아 재현하는 `tools/rtsp/setup_rtsp_streams.sh` |
-| `media/vsource/` | **리허설 패키지** — `<site>/<set>/rehearsal.json`(git) + 영상(HF). 준비 CLI `tools/rehearsal_prep.py`, 오프라인 진단 `tools/rehearsal_viz.py`. 설계 `docs/architecture/09-리허설-패키지-구조.md`. **AI hub 시나리오별 출구 통과 실측**: `media/vsource/aihub/rehearsal/docs/출구-통과-측정결과.md` (**시나리오 09 는 cam09 미촬영 — 검증 제외**). 패키지 3개: `aihub/rehearsal`(3층) · `aihub/drill-1f3f`(**1층+3층 합동, 신규**) · `cj/rehearsal`(10F) |
+| `media/vsource/` | **리허설 패키지** — `<site>/<set>/rehearsal.json`(git) + 영상(HF). 준비 CLI `tools/rehearsal_prep.py`, 오프라인 진단 `tools/rehearsal_viz.py`, **세션 시각화 `tools/session_viz.py`**(녹화본 .db 기반 — 좌 도면·우 그리드(원본 fps)·하 4대지표, 추론 재실행 없이 ④ 리플레이와 같은 수치). 설계 `docs/architecture/09-리허설-패키지-구조.md`. **AI hub 시나리오별 출구 통과 실측**: `media/vsource/aihub/rehearsal/docs/출구-통과-측정결과.md` (**시나리오 09 는 cam09 미촬영 — 검증 제외**). 패키지 3개: `aihub/rehearsal`(3층) · `aihub/drill-1f3f`(**1층+3층 합동, 신규**) · `cj/rehearsal`(10F) |
 | `data/seed_versions/` | **디폴트 세팅(seed) 버전 보관** — [Reset] 이 복원하는 상태를 이름 붙여 저장·복원. `tools/seed_version.py` (save/list/show/restore) |
 | `system/README.md` | 멀티카메라 2D맵 시스템 실행·환경변수·pm2·모듈별 소유 정보 |
 
