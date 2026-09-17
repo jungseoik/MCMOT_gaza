@@ -644,6 +644,7 @@ Views.replay = (() => {
   function fillThresholds(th) {
     th = th || {};
     TH_KEYS.forEach(([id, key]) => { if (th[key] != null) $(id).value = th[key]; });
+    $("rpMeanA").checked = !!th.idr_mean_align;   // 불리언이라 value 로 못 넣는다
     // ρcrit — 세션 병목들의 대표값(첫 병목) 또는 2.0
     const bns = (site && site.bottlenecks) || [];
     $("rpRho").value = bns.length ? bns[0].rho_crit : 2.0;
@@ -655,6 +656,7 @@ Views.replay = (() => {
       const v = parseFloat($(id).value);
       if (!isNaN(v)) thresholds[key] = v;
     });
+    thresholds.idr_mean_align = $("rpMeanA").checked;
     const ov = { thresholds, fps: 5 };
     const rho = parseFloat($("rpRho").value);
     if (!isNaN(rho)) ov.rho_crit = rho;

@@ -434,6 +434,44 @@ class TestIDR:
         assert zm.idr == pytest.approx(zm.graph_distance / 6.0)
         assert zm.participant_ratio == pytest.approx(1.0)
 
+    def feed_mixed(self, eng, t0, t1, move_from, dt=0.2):
+        """3명 — 2명은 +x(경로 순방향), 1명은 -x(역행). 전원 1 m/s.
+
+        a_i 는 +1·+1·-1 → 평균 a_e = 0.33 (a_th 0.7 미달)이지만
+        조건 충족 비율 r_e = 2/3 (r_th 0.5 이상)이다. 두 판정식이 갈린다.
+        """
+        steps = int(round((t1 - t0) / dt))
+        for i in range(steps + 1):
+            ts = round(t0 + i * dt, 6)
+            m0 = max(0.0, ts - move_from)
+            fwd = 200 + 100 * m0
+            bwd = 800 - 100 * m0
+            eng.on_tracks("cam01", ts, [tr("cam01", 1, fwd, 470, ts),
+                                        tr("cam01", 2, fwd, 500, ts),
+                                        tr("cam01", 3, bwd, 530, ts)])
+
+    def test_reverse_walker_does_not_cancel_majority(self):
+        """역행자 1명이 순행자 2명을 지우지 않는다 — a_e 제외(요구사항 §3.6 v1.13).
+
+        a_e = (1+1-1)/3 = 0.33 < a_th 0.7 이지만 r_e = 2/3 >= r_th 0.5 라
+        개시 판정이 선다. a_e 를 곱하던 v1.12 였다면 미판정이었다.
+        """
+        eng = MetricsEngine(make_idr_site(), [make_cam()])
+        eng.start_session((100, 500), t_alarm=100.0)
+        self.feed_mixed(eng, 100.0, 112.0, move_from=105.0)
+        zm = eng.stop_session().zone_metrics[0]
+        assert zm.status == "started"
+        assert zm.participant_ratio == pytest.approx(2 / 3)
+
+    def test_idr_mean_align_flag_restores_old_rule(self):
+        """idr_mean_align=True 면 a_e 조건이 부활해 같은 입력이 미판정이 된다."""
+        site = make_idr_site(
+            thresholds=Thresholds(idr_mean_align=True))
+        eng = MetricsEngine(site, [make_cam()])
+        eng.start_session((100, 500), t_alarm=100.0)
+        self.feed_mixed(eng, 100.0, 112.0, move_from=105.0)
+        assert eng.stop_session().zone_metrics[0].status == "not_started"
+
     def test_stationary_not_started(self):
         """이동 없음 → not_started, idr=None (§8 예외)."""
         eng = MetricsEngine(make_idr_site(), [make_cam()])

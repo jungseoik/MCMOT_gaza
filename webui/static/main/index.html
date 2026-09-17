@@ -148,11 +148,16 @@
                 </div>
                 <div class="th-param">
                   <label>r_th <input id="thR" type="number" step="0.05" /></label>
-                  <div class="th-pdesc">동시만족 비율 임계 — 구역 내 v_th·a_th 동시 충족 인원 비율 (0~1)</div>
+                  <div class="th-pdesc">동시만족 비율 임계 — 구역 내 <b>개별 객체</b>가 v_th·a_th 를 동시 충족하는 인원 비율 (0~1). IDR 판정의 핵심 조건</div>
                 </div>
                 <div class="th-param">
                   <label>dt_hold <input id="thDt" type="number" step="0.5" /> s</label>
-                  <div class="th-pdesc">연속 유지 시간 — 세 조건이 이 시간 이상 지속돼야 피난개시 확정</div>
+                  <div class="th-pdesc">연속 유지 시간 — 조건이 이 시간 이상 지속돼야 피난개시 확정</div>
+                </div>
+                <div class="th-param">
+                  <label><input id="thMeanA" type="checkbox" /> 구역 평균 정렬도(a_e)도 요구</label>
+                  <div class="th-pdesc">끄면(기본) 개별 객체 정렬도 비율 r_th 만 본다. 켜면 구역 평균
+                    코사인도 a_th 이상이어야 한다 — 역행자 1명이 순행자를 상쇄해 판정이 잘 안 선다(옛 방식)</div>
                 </div>
               </div>
             </div>
@@ -273,8 +278,10 @@
               <div class="htitle"><i class="mtag">IDR</i> 구역 피난 반응 확산</div>
               <div class="hbody">
                 경보 위치에서 각 <b>구역</b>까지의 거리 ÷ 그 구역의 <b>반응 지연시간</b>.<br/>
-                <b>피난개시 판정</b>: 구역 안 사람들의 평균속도(v_th)·경로 방향 정렬도(a_th)·
-                동시만족 비율(r_th)이 <b>dt_hold초 연속 유지</b>된 최초 시점.<br/>
+                <b>피난개시 판정</b>: 구역 안 사람들의 평균속도(v_th)와, <b>개별</b> 객체가
+                속도·경로 정렬도(a_th)를 동시 충족하는 <b>인원 비율(r_th)</b>이
+                <b>dt_hold초 연속 유지</b>된 최초 시점.
+                (구역 <b>평균</b> 정렬도 a_e 요구는 ①설정에서 선택 — 기본 꺼짐)<br/>
                 거리 산출: <b>격자 BFS</b>(맵 축척 있을 때) → 수동 공간그래프 → 직선거리 순 폴백.<br/>
                 N개 경보 발생원 각각 IDR 산출 후 평균 적용.<br/>
                 필요한 요소: <b>구역</b>(판정 단위) + <b>피난경로</b>(방향 기준) + 맵 <b>축척</b>(실거리 변환)
@@ -621,6 +628,8 @@
               <label>a_th <input id="rpA" type="number" step="0.05" /><i>cos</i></label>
               <label>r_th <input id="rpR" type="number" step="0.05" /><i></i></label>
               <label>dt_hold <input id="rpDt" type="number" step="0.5" /><i>s</i></label>
+              <label title="켜면 구역 평균 정렬도 a_e >= a_th 도 요구(옛 판정식). 끄면 개별 비율 r_th 만."
+                >a_e 요구 <input id="rpMeanA" type="checkbox" /><i></i></label>
               <label title="EPFI 허용 이탈거리 — 중심선 한쪽 반경(m), 좌우 합 폭은 ×2">d_allow <input id="rpD" type="number" step="0.5" /><i>m</i></label>
               <label title="모든 병목에 일괄 적용">ρcrit <input id="rpRho" type="number" step="0.1" /><i>명/㎡</i></label>
               <label>q_design <input id="rpQd" type="number" step="5" /><i>인/분/m</i></label>

@@ -1,0 +1,11 @@
+{
+  "cam_id": "cam10",
+  "name": "1F 동측 출구",
+  "rtsp": "rtsp://127.0.0.1:8554/field_1f_exit_e",
+  "enabled": false,
+  "analyze_fps": 5.0,
+  "floor_id": "floor3",
+  "mapping": null,
+  "valid_roi": null,
+  "min_conf": null
+}

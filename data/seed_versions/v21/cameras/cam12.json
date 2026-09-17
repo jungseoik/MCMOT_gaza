@@ -1,0 +1,11 @@
+{
+  "cam_id": "cam12",
+  "name": "1F 서측 게이트",
+  "rtsp": "rtsp://127.0.0.1:8554/field_1f_gate_w",
+  "enabled": false,
+  "analyze_fps": 5.0,
+  "floor_id": "floor3",
+  "mapping": null,
+  "valid_roi": null,
+  "min_conf": null
+}

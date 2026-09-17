@@ -73,11 +73,48 @@ $$0 \leq r_e(t) \leq 1$$
 
 ---
 
-### 3.6 이진 판정값 (세 조건 동시)
+### 3.6 이진 판정값 (두 조건 동시) — **v1.13 개정**
 
-$$S_e(t) = \mathbb{1}\!\left[v_e(t)\geq v_{\mathrm{th}}\right] \cdot \mathbb{1}\!\left[a_e(t)\geq a_{\mathrm{th}}\right] \cdot \mathbb{1}\!\left[r_e(t)\geq r_{\mathrm{th}}\right]$$
+$$S_e(t) = \mathbb{1}\!\left[v_e(t)\geq v_{\mathrm{th}}\right] \cdot \mathbb{1}\!\left[r_e(t)\geq r_{\mathrm{th}}\right]$$
 
-$S_e(t) = 1$이면 세 조건 모두 만족.
+$S_e(t) = 1$이면 두 조건 모두 만족.
+
+**방향 정렬은 $r_e$ 안에서 개별 객체 단위로만 본다** — $a_i(t)\geq a_{\mathrm{th}}$ (§3.5).
+구역 평균 $a_e$ (§3.4)는 판정에서 빠졌고, 표출·진단용 참고값으로만 남는다.
+
+#### 개정 근거
+
+v1.12까지는 $\mathbb{1}\left[a_e\geq a_{\mathrm{th}}\right]$ 가 곱해져 있었다. 이를 뺀 이유:
+
+1. **$r_e$ 와 중복** — $r_e$ 는 이미 객체마다 $a_i\geq a_{\mathrm{th}}$ 를 검사한다.
+   $a_e$ 는 같은 $a_i$ 를 다시 평균 낸 값이라 독립 정보를 더하지 않는다.
+2. **코사인 평균은 상쇄된다** — $a_i$ 는 부호 있는 스칼라라, 역행자 1명($-1$)이
+   순행자 1명($+1$)을 지워 $a_e\approx 0$ 을 만든다. "다수가 출구로 향한다"는
+   판정 의도와 어긋난다. 비율 $r_e$ 는 역행자를 분모에만 넣어 상쇄가 없다.
+3. **실측상 평균 조건이 더 빡빡했다** — AI hub 3층 s01 구역 z1, 346개 1초 샘플:
+
+   | 조건 | 충족 비율 |
+   |---|---:|
+   | $v_e\geq 0.5$ | 89% |
+   | $a_e\geq 0.866$ | **1%** |
+   | $r_e\geq 0.7$ | 2% |
+
+   평균 조건이 사실상 단독 병목이었다.
+
+4. **실측 개시 판정 수** — AI hub 세션 23건(1·3층 14 + 3층 1차 9),
+   $v_{\mathrm{th}}\,0.5 / r_{\mathrm{th}}\,0.7 / \Delta t_{\mathrm{hold}}\,3\mathrm{s}$:
+
+   | $a_{\mathrm{th}}$ | $a_e$ 요구 (v1.12) | $a_e$ 미요구 (v1.13) |
+   |---|---:|---:|
+   | 0.866 (30°) | 4/23 | 7/23 |
+   | 0.707 (45°) | 8/23 | **9/23** |
+
+#### 되돌리기
+
+`Thresholds.idr_mean_align` 로 v1.12 판정식을 복원할 수 있다 (기본 `false`).
+`true` 면 $\mathbb{1}\left[a_e\geq a_{\mathrm{th}}\right]$ 가 다시 곱해진다.
+①설정 탭 체크박스 · ④리플레이 임계값 오버라이드 양쪽에서 켤 수 있어,
+같은 녹화본을 두 판정식으로 재계산해 비교할 수 있다.
 
 ---
 
@@ -89,7 +126,7 @@ $$t_{e,\mathrm{start}} = \inf\left\{t\geq t_{\mathrm{alarm}}\;\middle|\;S_e(\tau
 
 $$t_{e,\mathrm{start}} = \inf\left\{t\geq t_{\mathrm{alarm}}\;\middle|\;\int_{t-\Delta t_{\mathrm{hold}}}^{t}S_e(\tau)\,d\tau\geq\Delta t_{\mathrm{hold}}\right\}$$
 
-> **직관**: 속도·정렬도·비율 세 조건이 한 번이라도 깨지면 카운터 리셋. $\Delta t_{\mathrm{hold}}$ 동안 연속 만족이 최초로 확인된 순간을 개시 시점으로 확정.
+> **직관**: 속도·비율 두 조건이 한 번이라도 깨지면 카운터 리셋. $\Delta t_{\mathrm{hold}}$ 동안 연속 만족이 최초로 확인된 순간을 개시 시점으로 확정.
 
 ---
 
@@ -101,7 +138,7 @@ $$K_{\mathrm{hold}} = \left\lceil\frac{\Delta t_{\mathrm{hold}}}{\Delta t}\right
 
 프레임 $k$의 조건:
 
-$$S_e[k] = \mathbb{1}\!\left[v_e[k]\geq v_{\mathrm{th}}\right]\cdot\mathbb{1}\!\left[a_e[k]\geq a_{\mathrm{th}}\right]\cdot\mathbb{1}\!\left[r_e[k]\geq r_{\mathrm{th}}\right]$$
+$$S_e[k] = \mathbb{1}\!\left[v_e[k]\geq v_{\mathrm{th}}\right]\cdot\mathbb{1}\!\left[r_e[k]\geq r_{\mathrm{th}}\right]$$
 
 피난 개시 판정:
 
@@ -125,7 +162,9 @@ for each timestamp t:
     r_e = sum(1 for i in objects
               if norm(V_i) >= v_th and cosine(V_i, G_i) >= a_th) / len(objects)
 
-    if v_e >= v_th and a_e >= a_th and r_e >= r_th:
+    # a_e 는 참고값 — 판정에는 쓰지 않는다 (§3.6 개정).
+    # idr_mean_align=True 면 `and a_e >= a_th` 가 다시 붙는다 (v1.12 복원).
+    if v_e >= v_th and r_e >= r_th:
         if cond_since is None:
             cond_since = t
         if t - cond_since >= dt_hold:
@@ -185,7 +224,7 @@ $$D(e,\, S_j) = \frac{1}{|\mathcal{C}_e|} \sum_{k \in \mathcal{C}_e} d_{\mathrm{
 > | 반대편 구석에 몰림 | 79.1 m | **114.9 m** |
 >
 > 기준 시점은 **경보 시각**이다 — 경보가 울린 순간 어디에 있었는지가
-> "얼마나 멀리서 반응했나"의 기준이기 때문. 개시 판정($v_e\cdot a_e\cdot r_e$)은
+> "얼마나 멀리서 반응했나"의 기준이기 때문. 개시 판정($v_e\cdot r_e$)은
 > **바뀌지 않는다** — $r_{\mathrm{th}}$ 의 잡음 방어가 그대로 유지된다.
 > 구현: `system/spatial/grid.py:points_grid_distance_m`
 - 격자/축척 미설정: 수동 SpatialGraph Dijkstra → 직선거리 순으로 폴백
@@ -223,7 +262,7 @@ $$\mathrm{IDR}_e = \frac{1}{N} \sum_{j=1}^{N} \mathrm{IDR}_{e,j}$$
 | $\mathbf{G}_i(t)$ | 객체 $i$ 위치에서의 권장 피난 경로 방향 벡터 |
 | $a_i(t)$ | 객체 $i$의 이동 방향 정렬도 (cosine) |
 | $v_e(t)$ | 구역 $e$의 평균 이동 속도 |
-| $a_e(t)$ | 구역 $e$의 평균 이동 방향 정렬도 |
+| $a_e(t)$ | 구역 $e$의 평균 이동 방향 정렬도 — **판정 미사용**(§3.6), 참고값 |
 | $r_e(t)$ | 속도·정렬도 동시 만족 객체 비율 |
 | $v_{\mathrm{th}}$ | 속도 임계값 (기본 0.5 m/s) |
 | $a_{\mathrm{th}}$ | 정렬도 임계값 (기본 0.7) |
@@ -307,7 +346,7 @@ $D$ 를 사람 위치 기준으로 바꾼 뒤(§4.1 개정), **IDR 값 자체는
 | 다중 구역 polygon 정의·저장 | ✅ | `system/config/schema.py:Zone` |
 | 구역별 객체 포함 판정 | ✅ | `system/metrics/session.py:point_in_polygon` |
 | 속도·정렬도 계산 | ✅ | `system/metrics/engine.py:_obj_kinematics()` |
-| 피난개시 판정 (v_e·a_e·r_e·dt_hold) | ✅ | `system/metrics/session.py:_sample()` |
+| 피난개시 판정 (v_e·r_e·dt_hold) | ✅ | `system/metrics/session.py:_sample()` |
 | **N개 경보 발생원** 스키마·맵 도구 | ✅ | `schema.py:AlarmOrigin`, `view_map.js:alarm_origin 도구` |
 | **격자 BFS 거리** (Option C) | ✅ | `system/spatial/grid.py:zone_grid_distance_m()` |
 | **N-origin IDR 평균** 산출 | ✅ | `session.py:_zone_metric_now()` → `idr_per_origin[]` + `idr` avg |

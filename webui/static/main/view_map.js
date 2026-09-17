@@ -648,6 +648,7 @@ Views.map = (() => {
     $("thC").value = t.min_conf != null ? t.min_conf : 0.35;
     $("thBh").value = t.min_box_h != null ? t.min_box_h : 0;
     $("thQd").value = t.q_design != null ? t.q_design : 60;
+    $("thMeanA").checked = !!t.idr_mean_align;
   }
 
   function refresh() { refreshLists(); renderFloorPanel(); syncUndoBtn(); if (mc) mc.render(); }
@@ -844,6 +845,7 @@ Views.map = (() => {
       // 0 이 유효값(끔)이라 `|| 기본` 을 쓰면 안 된다 — 저장할 때마다 되살아난다.
       min_box_h: (() => { const v = parseFloat($("thBh").value); return isNaN(v) ? 0 : v; })(),
       q_design: parseFloat($("thQd").value) || 60.0,
+      idr_mean_align: $("thMeanA").checked,
     };
     // 격자 셀 크기
     const cellM = parseFloat($("gridCellSize").value);

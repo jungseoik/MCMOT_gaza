@@ -369,8 +369,13 @@ class EvaluationSession:
                 r_e = sum(1 for s, a in members
                           if s is not None and a is not None
                           and s >= th.v_th and a >= th.a_th) / len(members)
-                cond = (v_e is not None and a_e is not None
-                        and v_e >= th.v_th and a_e >= th.a_th
+                # a_e(구역 평균 정렬도)는 기본적으로 보지 않는다 — r_e 가 이미
+                # 객체별 a_i >= a_th 를 세고 있어 중복이고, 코사인 평균은 역행자가
+                # 순행자를 상쇄해 버린다. th.idr_mean_align=True 면 옛 판정식 복귀.
+                need_a = getattr(th, "idr_mean_align", False)
+                cond = (v_e is not None
+                        and v_e >= th.v_th
+                        and (not need_a or (a_e is not None and a_e >= th.a_th))
                         and r_e >= th.r_th)
             if cond:
                 if zacc.cond_since is None:
