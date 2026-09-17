@@ -10,13 +10,43 @@ meta 스냅샷에서 복원하고 트랙을 call_seq 순서로 재생하면 원�
 """
 from __future__ import annotations
 
-from system.config.schema import CameraConfig, SiteConfig
+from system.config.schema import Bottleneck, CameraConfig, Route, SiteConfig
 from system.metrics import recorder
 from system.metrics.engine import MetricsEngine
 
 
+def _apply_geometry(site: SiteConfig, geo: dict) -> list[str]:
+    """도면 요소(피난경로·병목) 교체. 반환값은 사람이 읽을 변경 요약.
+
+    왜 교체인가: 리플레이는 "그 도면이었으면 지표가 어땠을까"를 보는 자리다.
+    녹화본(.db)의 site_view 는 그대로 두고, 여기서 만든 사본의 요소만 갈아끼운다.
+    엔진은 reload() 에서 기하를 전부 재파생하므로(면적·polyline) 부작용이 없다.
+
+    출구·구역은 받지 않는다 — 출구는 카운팅 게이트(화면 좌표·dwell 상태)라
+    바꾸면 통과 인원 자체가 달라져 "같은 관측, 다른 도면" 비교가 깨진다.
+    구역은 IDR 판정 단위라 별개 논의.
+
+    부채꼴 병목은 shape 파라미터만 받으면 Bottleneck 모델이 polygon 을 다시
+    만든다(schema._rebuild_from_shape) — 프런트와 기하식이 어긋날 수 없다.
+    """
+    notes: list[str] = []
+    if geo.get("routes") is not None:
+        before = len(site.routes)
+        site.routes = [Route.model_validate(r) for r in geo["routes"]]
+        notes.append(f"경로 {before} → {len(site.routes)}")
+    if geo.get("bottlenecks") is not None:
+        before = len(site.bottlenecks)
+        site.bottlenecks = [Bottleneck.model_validate(b)
+                            for b in geo["bottlenecks"]]
+        notes.append(f"병목 {before} → {len(site.bottlenecks)}")
+    return notes
+
+
 def _apply_overrides(site: SiteConfig, ov: dict) -> None:
     """오버라이드를 복원된 site에 적용 (in-place). 미지정 필드는 스냅샷 유지."""
+    # 도면 요소는 임계값보다 **먼저** — 아래의 C_j 파생이 바뀐 기하를 봐야 한다.
+    if ov.get("geometry"):
+        _apply_geometry(site, ov["geometry"])
     th = ov.get("thresholds") or {}
     for k, v in th.items():
         if v is not None and hasattr(site.thresholds, k):

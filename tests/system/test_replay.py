@@ -90,6 +90,69 @@ def test_recompute_rho_crit_changes_cbs(tmp_path):
     assert r_lo.cbs_total > r_hi.cbs_total
 
 
+def test_geometry_override_replaces_bottlenecks(tmp_path):
+    """도면 편집: 병목을 넓히면 밀도가 떨어져 CBS 가 준다 (녹화본은 불변)."""
+    bn = Bottleneck(id="b1", polygon=[(400, 400), (600, 400), (600, 600), (400, 600)],
+                    rho_crit=1.0)
+    site, cam = make_site(bottlenecks=[bn]), make_cam()
+    db = tmp_path / "sess.db"
+
+    def feed(e):
+        for k in range(30):                       # 2m×2m 안에 5명 → 1.25명/m²
+            ts = 100.0 + k * 0.2
+            e.on_tracks("cam01", ts, [tr("cam01", i, 450 + i * 20, 500, ts)
+                                      for i in range(5)])
+    _record(db, site, cam, feed)
+
+    base, *_ = run_replay(db, {}, 5.0)
+    wide = [{"id": "b1", "rho_crit": 1.0,        # 같은 사람, 4배 넓은 병목
+             "polygon": [(300, 300), (700, 300), (700, 700), (300, 700)]}]
+    r_wide, *_ = run_replay(db, {"geometry": {"bottlenecks": wide}}, 5.0)
+    assert base.cbs_total > 0
+    assert r_wide.cbs_total < base.cbs_total
+    # 녹화본은 그대로 — 오버라이드 없이 다시 돌리면 원래 값
+    again, *_ = run_replay(db, {}, 5.0)
+    assert again.cbs_total == base.cbs_total
+
+
+def test_geometry_override_sector_rebuilds_polygon(tmp_path):
+    """부채꼴은 shape 파라미터만 보내면 서버가 polygon 을 다시 만든다.
+
+    프런트가 그린 polygon 을 그대로 믿지 않는다는 뜻 — 기하식이 한 곳(백엔드)
+    에만 있으므로 클라이언트와 어긋날 수 없다.
+    """
+    site, cam = make_site(bottlenecks=[]), make_cam()
+    db = tmp_path / "sess.db"
+    _record(db, site, cam, lambda e: _feed_line(e, 1, 200, 500, 100, 100.0, 104.0))
+    sector = [{"id": "b1", "rho_crit": 1.0,
+               "polygon": [(0, 0), (1, 0), (1, 1)],      # 엉뚱한 값 — 무시돼야 한다
+               "shape": {"kind": "sector", "center": (500, 500), "radius": 100,
+                         "a0": 0.0, "sweep": 3.14, "segments": 24}}]
+    r, *_ = run_replay(db, {"geometry": {"bottlenecks": sector}}, 5.0)
+    assert len(r.bottleneck_metrics) == 1
+    # polygon 이 부채꼴(25점 이상)로 다시 만들어졌는지 — 3점짜리 입력이 아니다
+    meta_free = run_replay(db, {"geometry": {"bottlenecks": [
+        {"id": "b2", "rho_crit": 1.0,
+         "polygon": [(400, 400), (600, 400), (600, 600), (400, 600)]}]}}, 5.0)
+    assert len(meta_free[0].bottleneck_metrics) == 1   # 자유 다각형은 그대로
+
+
+def test_geometry_override_routes_change_epfi(tmp_path):
+    """경로를 바꾸면 EPFI 가 따라 바뀐다 — 경로는 EPFI 의 기준선이다."""
+    site, cam = make_site(routes=[ROUTE]), make_cam()   # ROUTE: y=500 수평선
+    db = tmp_path / "sess.db"
+    _record(db, site, cam,                              # 궤적은 y=600
+            lambda e: _feed_line(e, 1, 200, 600, 100, 100.0, 106.0))
+    base, *_ = run_replay(db, {"thresholds": {"d_allow": 2.0}}, 5.0)
+    on_path = [{"id": "r1", "points": [(100, 600), (900, 600)]}]   # 궤적 위로 옮김
+    moved, *_ = run_replay(db, {"thresholds": {"d_allow": 2.0},
+                                "geometry": {"routes": on_path}}, 5.0)
+    assert moved.epfi_avg > base.epfi_avg               # 이탈 0 → 만점에 가깝다
+    # 경로를 모두 지우면 EPFI 자체가 산출되지 않는다
+    none, *_ = run_replay(db, {"geometry": {"routes": []}}, 5.0)
+    assert none.epfi_avg is None
+
+
 def test_replay_camera_zone_exit_needs_bbox(tmp_path):
     """화면 영역 출입구(ZoneGate) 카운트가 리플레이에서 재현된다 (v1.12).
 

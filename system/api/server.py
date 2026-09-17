@@ -1310,6 +1310,51 @@ def _drill_meta(sid: str) -> dict | None:
         return None
 
 
+# ---------------------------------------------------------------- 리플레이 편집본
+# 녹화본(.db 의 site_view)은 **절대 건드리지 않는다.** 리플레이에서 도면 요소를
+# 바꿔 보고 싶을 때, 그 편집본만 세션 옆 사이드카(.ov.json)에 따로 남긴다.
+#   · 원본 = .db 스냅샷 (영구)
+#   · 편집본 = <session_id>.ov.json (지우면 즉시 원본으로 복귀)
+# 층별로 따로 둔다 — 건물 훈련은 층마다 도면이 다르기 때문.
+OV_SUFFIX = ".ov.json"
+
+
+def _overrides_path(session_id: str, floor_id: str) -> Path:
+    return _sessions_dir(floor_id) / f"{session_id}{OV_SUFFIX}"
+
+
+def _overrides_load(session_id: str, floor_id: str) -> dict:
+    p = _overrides_path(session_id, floor_id)
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        logger.exception("리플레이 편집본 읽기 실패 — 원본으로 진행: %s", p)
+        return {}
+
+
+def _overrides_save(session_id: str, floor_id: str, ov: dict) -> None:
+    """빈 dict 면 파일을 지운다 = [원본으로] 되돌리기."""
+    p = _overrides_path(session_id, floor_id)
+    if not ov:
+        p.unlink(missing_ok=True)
+        return
+    p.write_text(json.dumps(ov, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _merge_overrides(session_id: str, floor_id: str, body: dict) -> dict:
+    """요청 본문 + 저장된 편집본. 본문에 온 키가 이긴다.
+
+    본문이 geometry 를 안 보내면 저장본의 geometry 가 그대로 산다 — 화면을
+    다시 열어도 편집한 도면으로 계속 보이게 하려면 이 승계가 필요하다.
+    """
+    saved = _overrides_load(session_id, floor_id)
+    if not saved:
+        return dict(body or {})
+    merged = dict(saved)
+    merged.update({k: v for k, v in (body or {}).items() if v is not None})
+    return merged
+
+
 def _drill_floors(sid: str) -> list[str]:
     """드릴의 참여 층 — 레코드가 있으면 그것, 없으면(예전 드릴) 지금 참여 층."""
     m = _drill_meta(sid)
@@ -1617,9 +1662,13 @@ async def drill_replay(session_id: str, request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    overrides = {k: body[k] for k in ("thresholds", "rho_crit", "bottlenecks", "exits")
-                 if k in body and body[k] is not None}
+    OV_KEYS = ("thresholds", "rho_crit", "bottlenecks", "exits", "geometry")
+    overrides = {k: body[k] for k in OV_KEYS if k in body and body[k] is not None}
     fps = float(body.get("fps", 5.0))
+    # geometry 는 층마다 다르다 — 본문이 지정한 층에만 적용하고, 나머지 층은
+    # 저장된 편집본을 그대로 쓴다. 본문의 geometry 는 {floor_id: {...}} 형태.
+    geo_by_floor = overrides.pop("geometry", None)
+    save = bool(body.get("save"))          # true 면 이번 오버라이드를 편집본으로 영구 저장
 
     part = _drill_floors(session_id)        # 레코드 기준 — 리허설 층은 종료 후 참여 층이 아니다
     dbs = [(f, _session_db_path(session_id, f)) for f in part]
@@ -1631,9 +1680,17 @@ async def drill_replay(session_id: str, request: Request):
     frames_by_floor: dict[str, list] = {}
     site_by_floor: dict[str, dict] = {}
     timeline_by_floor: dict[str, list] = {}
+    ov_by_floor: dict[str, dict] = {}
     for f, db in dbs:
+        per = dict(overrides)
+        if geo_by_floor is not None and f in geo_by_floor:
+            per["geometry"] = geo_by_floor[f]
+        per = _merge_overrides(session_id, f, per)
+        if save:
+            _overrides_save(session_id, f, per)
+        ov_by_floor[f] = per
         result, timeline, frames, meta = await anyio.to_thread.run_sync(
-            run_replay, db, overrides, fps)
+            run_replay, db, per, fps)
         floors.append((f, result.model_dump()))
         frames_by_floor[f] = frames
         site_by_floor[f] = meta.get("site_view")
@@ -1645,7 +1702,9 @@ async def drill_replay(session_id: str, request: Request):
     return {"drill": DrillResult.model_validate(roll).model_dump(),
             "label": (m or {}).get("label"), "rehearsal": (m or {}).get("rehearsal"),
             "frames_by_floor": frames_by_floor, "site_by_floor": site_by_floor,
-            "timeline_by_floor": timeline_by_floor}
+            "timeline_by_floor": timeline_by_floor,
+            # 지금 적용된 편집본 — 화면을 다시 열어도 같은 도면이 보이게 한다
+            "overrides_by_floor": ov_by_floor}
 
 
 @app.get("/api/session")
@@ -1745,9 +1804,13 @@ async def session_replay(session_id: str, request: Request,
         body = await request.json()
     except Exception:
         body = {}
-    overrides = {k: body[k] for k in ("thresholds", "rho_crit", "bottlenecks", "exits")
+    overrides = {k: body[k] for k in
+                 ("thresholds", "rho_crit", "bottlenecks", "exits", "geometry")
                  if k in body and body[k] is not None}
     fps = float(body.get("fps", 5.0))
+    overrides = _merge_overrides(session_id, fid, overrides)
+    if body.get("save"):
+        _overrides_save(session_id, fid, overrides)
 
     import anyio  # replay는 CPU 바운드 → 워커 스레드로 오프로드 (이벤트루프 보호)
     from system.metrics.replay import run_replay
@@ -1755,6 +1818,7 @@ async def session_replay(session_id: str, request: Request,
         run_replay, db, overrides, fps)
     return {
         "result": result.model_dump(),
+        "overrides": overrides,               # 지금 적용된 편집본
         "timeline": [t.model_dump() for t in timeline],
         "frames": frames,
         "site": meta.get("site_view"),        # 세션 당시 공간요소(배경 렌더용)
@@ -1762,6 +1826,46 @@ async def session_replay(session_id: str, request: Request,
                  ("session_id", "floor_id", "alarm_ts", "alarm_origins",
                   "site_version", "call_count", "track_row_count")},
     }
+
+
+@app.get("/api/replay/{session_id}/overrides")
+def replay_overrides_get(session_id: str, floor: str | None = None):
+    """세션의 리플레이 편집본 조회. floor 미지정이면 그 세션의 전 층."""
+    fls = [rt.resolve_floor(floor)] if floor else _drill_floors(session_id)
+    return {"session_id": session_id,
+            "by_floor": {f: _overrides_load(session_id, f) for f in fls}}
+
+
+@app.put("/api/replay/{session_id}/overrides")
+async def replay_overrides_put(session_id: str, request: Request):
+    """편집본 저장. body = {by_floor: {floor_id: {geometry:..., thresholds:...}}}.
+
+    빈 dict 를 주면 그 층의 편집본을 지운다 = 녹화 당시 도면으로 복귀.
+    녹화본(.db)은 어느 경우에도 손대지 않는다.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    by = body.get("by_floor") or {}
+    if not isinstance(by, dict):
+        raise HTTPException(400, "by_floor 는 {floor_id: overrides} 형태여야 합니다")
+    known = set(_drill_floors(session_id)) | {f.id for f in rt.site().floors}
+    for f, ov in by.items():
+        if f not in known:
+            raise HTTPException(400, f"알 수 없는 층: {f}")
+        _overrides_save(session_id, rt.resolve_floor(f), ov or {})
+    return {"ok": True, "by_floor": {f: _overrides_load(session_id, rt.resolve_floor(f))
+                                     for f in by}}
+
+
+@app.delete("/api/replay/{session_id}/overrides")
+def replay_overrides_delete(session_id: str, floor: str | None = None):
+    """편집본 삭제 = [원본으로]. floor 미지정이면 그 세션의 전 층."""
+    fls = [rt.resolve_floor(floor)] if floor else _drill_floors(session_id)
+    for f in fls:
+        _overrides_save(session_id, f, {})
+    return {"ok": True, "cleared": fls}
 
 
 @app.get("/api/session/export")
