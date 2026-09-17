@@ -1478,10 +1478,20 @@ const Session = (() => {
     return h;
   }
 
-  /** 트랙렛 단위 person_metrics(EPFI·이탈)를 사람 단위로 접는다.
-   *  엔진이 계산한 값을 그대로 쓰고 관측 수로 가중평균한다 — 여기서 EPFI 를
-   *  다시 계산하면 엔진과 따로 놀아 두 화면의 숫자가 어긋난다. */
+  /** 사람 단위 EPFI·이탈.
+   *
+   *  서버(여정 재구성)가 person.epfi 를 주면 **그걸 쓴다** — 사람당 경로를
+   *  한 번만 배정해 정의식대로 다시 적분한 값이다.
+   *  엔진의 person_metrics 는 gid=카메라별 트랙 조각 단위라 카메라가 바뀔 때마다
+   *  경로가 재배정돼, 우회한 사람일수록 이탈이 0 으로 리셋된다(실측 최대 4.5배
+   *  과소평가 — MACS-EVAC-VR-2026-004). 조각값을 평균해도 각 조각이 서로 다른
+   *  경로 기준이라 의미가 섞인다.
+   *  옛 서버 응답(epfi 없음)일 때만 조각값 가중평균으로 물러난다. */
   function jyFoldMetrics(person, pmByKey) {
+    if (person && person.epfi != null) {
+      return { epfi: person.epfi, dev: person.dev_m, devMax: person.dev_max_m,
+               route: person.route_id || null, routeSplit: false, server: true };
+    }
     let wsum = 0, epfi = 0, dev = 0, devMax = null;
     const routes = {};
     (person.segments || []).forEach((s) => {
@@ -1535,6 +1545,7 @@ const Session = (() => {
                  ? ` <i class="warn" title="이 사람 이름으로 게이트가 ${p.exit_count}번 셌다 — 서로 다른 사람이 하나로 묶였을 수 있다">×${p.exit_count}</i>`
                  : "")
             : `<i class="dim" title="이 사람의 조각 중 출구 게이트를 통과한 것이 없다">—</i>`}</td>
+        <td class="t-num">${p.evac_sec != null ? f(p.evac_sec, 1) : "—"}</td>
         <td class="t-num">${f(p.t1 - p.t0, 1)}</td>
         <td>${m.route ? m.route.replace("auto-evac-", "ae") : "—"}${m.routeSplit ? ' <i title="조각마다 배정 경로가 달랐다 — 경로를 오갔을 수 있음">↔</i>' : ""}</td>
       </tr>`;
@@ -1543,8 +1554,11 @@ const Session = (() => {
       ? `출구 게이트 ${ex.events}건 → 사람 ${ex.persons_with_exit}명 귀속`
         + (ex.unowned ? ` · ${ex.unowned}건 미귀속(재구성에서 빠진 조각)` : "")
       : "";
+    const srv = ps.length && jyFoldMetrics(ps[0], pm).server;
     return `<div class="jybar">사람별 지표
-        <i>재구성된 ${ps.length}명(global id) · EPFI·이탈은 조각값을 관측 수로 가중평균</i></div>`
+        <i>재구성된 ${ps.length}명(global id) · ${srv
+            ? `EPFI 는 사람당 경로 1개로 재적분${jy.d_allow ? ` (d_allow ${jy.d_allow}m)` : ""}`
+            : "EPFI·이탈은 조각값을 관측 수로 가중평균"}</i></div>`
       + (note ? `<div class="jynote">${note} — 게이트는 <b>트랙렛 단위</b>로 세므로
           한 사람이 조각나면 여러 번, 재구성에서 빠진 조각은 아무에게도 안 붙는다.
           사람 수와 통과 수가 다른 것 자체가 품질 신호다.</div>` : "")
@@ -1560,6 +1574,7 @@ const Session = (() => {
           <th title="1초 창 속도의 상위 5% — 단발 이상치에 흔들리지 않게">빠른 구간 m/s</th>
           <th title="속도 변화율의 상위 5%">가속 m/s²</th>
           <th title="경보 이후 출구 통과까지 걸린 시간">출구 통과</th>
+          <th title="처음 화면에 보인 때부터 출구를 통과하기까지 — 개인의 실제 이동 시간">대피 s</th>
           <th title="처음 보인 때부터 마지막까지">추적 s</th>
           <th title="가장 많이 배정된 대피 경로">경로</th>
         </tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -1609,8 +1624,13 @@ const Session = (() => {
     if (!JY_SID || JY_BUSY) return;
     JY_BUSY = true; jyPaint();
     try {
+      // d_allow 는 ④ 리플레이의 [임계값 조정] 현재값을 넘긴다 — 사람별 EPFI 를
+      // 서버가 그 값으로 재적분하므로, 안 넘기면 녹화 당시 값으로 계산돼
+      // 화면의 다른 EPFI 와 숫자가 어긋난다.
+      const rpD = parseFloat((document.getElementById("rpD") || {}).value);
       const r = await API.drillJourney(JY_SID,
-        { floor: JY_FLOOR, viz: true, refine: JY_REFINE, ...(JY_PARAMS || {}) });
+        { floor: JY_FLOOR, viz: true, refine: JY_REFINE,
+          ...(isNaN(rpD) ? {} : { d_allow: rpD }), ...(JY_PARAMS || {}) });
       const by = r.by_floor || {};
       JY = by[JY_FLOOR] || Object.values(by).find((x) => x && x.ok) || Object.values(by)[0] || null;
       if (JY && JY.ok && JY.floor_id) JY_FLOOR = JY.floor_id;   // 썸네일 URL 이 맞도록

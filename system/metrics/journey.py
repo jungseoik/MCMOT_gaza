@@ -41,6 +41,7 @@ from pathlib import Path
 import numpy as np
 
 from system.metrics import recorder
+from system.spatial import nearest_on_polyline
 
 logger = logging.getLogger("system.metrics.journey")
 
@@ -92,6 +93,9 @@ class Params:
     # 같은 성격의 물리 제약. 피난 훈련에서 한 번 나간 사람은 돌아오지 않는다.
     # 시간이 안 겹쳐 기존 제약으로 못 막던 오병합을 이게 잡는다.
     exit_unique: bool = True
+    # EPFI 재계산용 허용 이탈거리(m). None 이면 녹화 스냅샷의 thresholds.d_allow.
+    # ④ 리플레이에서 값을 바꿔 재계산 중이면 그 값을 넘겨야 화면과 숫자가 맞는다.
+    d_allow: float | None = None
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "Params":
@@ -116,6 +120,7 @@ class Params:
             min_obs=num("min_obs", 1, 1000, int),
             link_tol=num("link_tol", 0.0, 1.0),
             exit_unique=bool(d.get("exit_unique", True)),
+            d_allow=(num("d_allow", 0.1, 100.0) if d.get("d_allow") is not None else None),
         )
 
 
@@ -379,8 +384,49 @@ def _exit_times(db_path: Path, persons: list, meta: dict) -> None:
         pid = pp["person_id"]
         pp["exit_at"] = {eid: round(ts - base, 1) for (q, eid), ts in first.items() if q == pid}
         pp["exit_count"] = sum(v for (q, _), v in cnt.items() if q == pid)
+        # 대피 소요시간 — **처음 관측된 순간부터 출구를 통과하기까지**.
+        # exit_at 은 경보 기준이라, 경보 후 늦게 화면에 나타난 사람은 그만큼
+        # 부풀려진다. 개인의 실제 이동 시간을 보려면 첫 관측을 기준선으로 잡는다.
+        if pp["exit_at"]:
+            t_exit = min(pp["exit_at"].values())
+            pp["evac_sec"] = round(t_exit - (pp["t0"] - base), 1)
+            pp["exit_first"] = min(pp["exit_at"], key=pp["exit_at"].get)
     return {"events": len(out), "unowned": unowned,
             "persons_with_exit": len({q for q, _ in first})}
+
+def _epfi_of(path: list, routes_m: list, d_allow: float) -> dict:
+    """사람 궤적 → EPFI. **경로는 첫 관측에서 한 번만 배정한다.**
+
+    왜 여기서 다시 재는가: 엔진의 person_metrics 는 gid=카메라별 트랙 조각 단위라
+    카메라가 바뀔 때마다 그 자리 최근접 경로로 **재배정**된다. 그래서 경로를 벗어나
+    다른 통로로 간 사람도 그 통로 경로에 새로 붙어 이탈이 0 으로 리셋된다 —
+    크게 우회할수록 더 잘 가려진다(실측 최대 4.5배 과소평가, MACS-EVAC-VR-2026-004).
+    조각 EPFI 를 평균해도 각 조각이 **서로 다른 경로** 기준이라 의미가 섞인다.
+
+    path: [(ts, (x_m, y_m))] — 맵 좌표(m). routes_m: [(id, ndarray(N,2) m)].
+    """
+    if not path or len(path) < 2 or not routes_m or not d_allow:
+        return {}
+    pts = sorted(path)
+    x0, y0 = pts[0][1]
+    rid, rp = min(routes_m, key=lambda r: nearest_on_polyline((x0, y0), r[1]).dist_px)
+    acc = 0.0
+    dmax = None
+    pt = pd = None
+    for ts, (x, y) in pts:
+        d = nearest_on_polyline((x, y), rp).dist_px      # 이미 m 단위 (경로도 m)
+        dmax = d if dmax is None else max(dmax, d)
+        if pt is not None and ts > pt:
+            acc += 0.5 * (d + pd) * (ts - pt)
+        pt, pd = ts, d
+    T = pts[-1][0] - pts[0][0]
+    if T <= 0:
+        return {}
+    dev = acc / T
+    return {"epfi": round(max(0.0, 1 - dev / d_allow) * 100, 1),
+            "dev_m": round(dev, 3), "dev_max_m": round(dmax, 3),
+            "route_id": rid, "epfi_dur_sec": round(T, 1)}
+
 
 def _kinematics(path: list, mps_cap: float = 12.0) -> dict:
     """궤적(초, (x,y) m) → 이동거리·속도·가속도.
@@ -699,6 +745,15 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
     for i in range(n):
         groups[find(i)].append(i)
 
+    # EPFI 재계산 준비 — 경로를 맵 px → m 로 (궤적이 m 라 단위를 맞춘다)
+    sv = meta.get("site_view") or {}
+    _mpp = float(((sv.get("map") or {}).get("m_per_px") or 0)) or None
+    _dallow = (float(pr.d_allow) if pr.d_allow
+               else float(((sv.get("thresholds") or {}).get("d_allow") or 0)) or None)
+    routes_m = ([(r["id"], np.asarray(r["points"], float) * _mpp)
+                 for r in (sv.get("routes") or []) if len(r.get("points") or []) >= 2]
+                if _mpp else [])
+
     persons = []
     for gi, (_, idxs) in enumerate(sorted(groups.items(),
                                           key=lambda kv: min(tls[i]["t0"] for i in kv[1])), 1):
@@ -713,6 +768,7 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
             path.extend(tls[i].get("path") or [])
         path = _merge_path(path)
         kin = _kinematics(path)
+        epf = _epfi_of(path, routes_m, _dallow) if routes_m and _dallow else {}
         persons.append({
             "person_id": f"p{gi}",
             "fragment": obs_n < pr.fragment_obs,
@@ -722,6 +778,7 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
             "obs": sum(s["n"] for s in segs),
             "segments": segs,
             **kin,
+            **epf,                  # epfi · dev_m · dev_max_m · route_id (사람 단위)
             "exit_at": {},          # 아래에서 엔진과 같은 판정기로 채운다
         })
     # 출구 통과 — 엔진과 같은 판정기로 시간순 1패스 (사람 단위 키)
@@ -763,6 +820,7 @@ def reconstruct(db_path: str | Path, params: "Params | dict | None" = None,
         # 미귀속 = 재구성에서 빠진 조각이 문을 통과).
         "exit_summary": exinfo,
         "refined": refined,      # crop 재임베딩을 썼는가
+        "d_allow": _dallow,      # EPFI 재계산에 쓴 허용 이탈거리(m)
         "params": asdict(pr),                       # 무엇으로 계산했는지 그대로 반환
         "defaults": asdict(Params()),               # UI 가 "기본값으로" 를 그릴 수 있게
         "cos_th": pr.cos_th, "rerank": pr.rerank, "viz": vizdata,
