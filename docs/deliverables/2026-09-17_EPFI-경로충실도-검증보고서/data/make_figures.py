@@ -75,9 +75,9 @@ def fig_control():
                                  markeredgecolor="#111", markersize=10,
                                  label="의도한 상위 k명")],
                    frameon=False, fontsize=9, loc="upper left", ncol=2)
-    fig.suptitle("그림 2.  사람별 이탈거리(절대값) — 패키지마다 기준선이 다르다",
+    fig.suptitle("그림 3.  사람별 이탈거리(절대값) — 패키지마다 기준선이 다르다",
                  fontsize=12.5, y=1.02)
-    fig.savefig(OUT / "fig2_control_abs.png"); plt.close(fig)
+    fig.savefig(OUT / "fig3_control_abs.png"); plt.close(fig)
 
 
 # ------------------------------------------------ 그림 3. 의도 인원 대조
@@ -104,7 +104,7 @@ def fig_topk():
     ax.legend(frameon=False, fontsize=9.5, loc="upper left")
     ax.set_title("그림 4.  각본상 이탈 인원 vs 측정된 이탈자 수\n"
                  "판정선: 중앙값의 2배 또는 d_allow 이상", fontsize=11.5, pad=10)
-    fig.savefig(OUT / "fig4_intended_vs_detected.png"); plt.close(fig)
+    fig.savefig(OUT / "figC_intended_vs_detected.png"); plt.close(fig)
 
 
 # ------------------------------------------------ 그림 4. EPFI 분포
@@ -129,7 +129,71 @@ def fig_dist():
 
 
 
-# ------------------------------------------------ 그림 1. 이탈 배수 (본문 핵심)
+
+# ------------------------------------------------ 그림 1. EPFI 최저값 — 이탈하면 낮아지는가
+DALLOWS = [4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30]
+
+
+def _epfi(dev, da):
+    return max(0.0, 1 - dev / da) * 100
+
+
+def fig_minepfi():
+    """시나리오별 **EPFI 최저값**이 양성에서 더 낮아지는가 — 이 지표의 존재 이유.
+
+    누가 이탈했는지는 각본으로만 알 수 있고 영상 재확인도 안 했다. 검증할 수 있는
+    것은 "이탈 각본이 있는 시나리오에서 값이 실제로 내려가는가" 하나다.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(12.6, 4.8), sharey=True)
+    for ax, pkg in zip(axes, PKGS):
+        for r in sorted(rows_of(pkg), key=lambda q: q["scen"]):
+            worst = max(p["dev_person"] for p in r["people"])
+            ys = [_epfi(worst, d) for d in DALLOWS]
+            ax.plot(DALLOWS, ys, color=ROLE_COL[r["role"]], lw=2.2 if r["role"] != "기준" else 1.4,
+                    ls="-" if r["role"] == "양성" else ("--" if r["role"] == "음성" else ":"),
+                    marker="o", ms=3.5, label=f"{S(r)} {r['role']}")
+        ax.axvline(20, color="#666", ls=":", lw=1)
+        ax.set_xlabel("허용 이탈거리  d_allow (m)")
+        ax.set_title(PKG_LABEL[pkg], fontsize=11, pad=8)
+        ax.legend(frameon=False, fontsize=8.5, ncol=2, loc="upper left")
+    axes[0].set_ylabel("그 시나리오의 EPFI 최저값")
+    axes[0].set_ylim(-3, 100)
+    fig.suptitle("그림 1.  이탈 각본이 있으면 EPFI 최저값이 내려가는가 — 실선=양성 · 파선=음성",
+                 fontsize=12.5, y=1.02)
+    fig.savefig(OUT / "fig1_min_epfi.png"); plt.close(fig)
+
+
+# ------------------------------------------------ 그림 2. 분리 마진
+def fig_margin():
+    """분리 마진 = (음성 시나리오의 EPFI 최저값 중 가장 낮은 것)
+                   − (양성 시나리오의 EPFI 최저값 중 가장 높은 것).
+    양수면 '양성이 모두 음성보다 낮다' = 각본대로 갈린다."""
+    fig, ax = plt.subplots(figsize=(8.6, 4.4))
+    for pkg, c in zip(PKGS, ("#c0504d", "#2f6fb0")):
+        rs = rows_of(pkg)
+        pos = [max(p["dev_person"] for p in r["people"]) for r in rs if r["role"] == "양성"]
+        neg = [max(p["dev_person"] for p in r["people"]) for r in rs if r["role"] == "음성"]
+        m = [min(_epfi(d, da) for d in neg) - max(_epfi(d, da) for d in pos)
+             for da in DALLOWS]
+        ax.plot(DALLOWS, m, color=c, lw=2.4, marker="o", ms=4.5, label=PKG_LABEL[pkg])
+        ax.annotate(f"{m[DALLOWS.index(20)]:+.0f}점", (20, m[DALLOWS.index(20)]),
+                    textcoords="offset points", xytext=(8, 4), fontsize=9.5, color=c)
+    ax.axhline(0, color="#222", lw=1.2)
+    ax.axvline(20, color="#666", ls=":", lw=1)
+    ax.fill_between([DALLOWS[0], DALLOWS[-1]], 0, 40, color="#2a7d3f", alpha=.07)
+    ax.text(DALLOWS[0] + 0.5, 34, "양성이 모두 음성보다 낮다 (각본대로)",
+            fontsize=9, color="#2a7d3f")
+    ax.text(DALLOWS[0] + 0.5, -22, "역전 — 음성이 더 낮다", fontsize=9, color="#b03030")
+    ax.set_xlabel("허용 이탈거리  d_allow (m)")
+    ax.set_ylabel("분리 마진 (점)")
+    ax.set_ylim(-40, 40)
+    ax.legend(frameon=False, fontsize=9.5, loc="lower right")
+    ax.set_title("그림 2.  양성·음성 분리 마진 — 0 보다 커야 지표가 각본을 읽은 것",
+                 fontsize=11.5, pad=10)
+    fig.savefig(OUT / "fig2_separation_margin.png"); plt.close(fig)
+
+
+# ------------------------------------------------ 그림 6(부록). 이탈 배수
 def fig_ratio():
     """이탈 배수 = 그 사람의 이탈 ÷ 그 시나리오 중앙값.
 
@@ -163,9 +227,9 @@ def fig_ratio():
                                  markeredgecolor="#111", markersize=10,
                                  label="각본상 이탈 k명")],
                    frameon=False, fontsize=9, loc="upper right", ncol=2)
-    fig.suptitle("그림 1.  이탈 배수로 본 양성·음성 대조 — 재구성(사람) 기준",
+    fig.suptitle("부록 그림 B.  이탈 배수로 본 대조 (참고)",
                  fontsize=12.5, y=1.02)
-    fig.savefig(OUT / "fig1_deviation_ratio.png"); plt.close(fig)
+    fig.savefig(OUT / "figB_deviation_ratio.png"); plt.close(fig)
 
 
 # ------------------------------------------------ 그림 3. 대피 소요시간
@@ -187,9 +251,9 @@ def fig_evac():
         ax.set_xticklabels(lab, fontsize=8.5)
         ax.set_title(PKG_LABEL[pkg], fontsize=11, pad=8)
     axes[0].set_ylabel("대피 소요시간 (초) — 첫 관측 → 출구 통과")
-    fig.suptitle("그림 3.  개인별 대피 소요시간 — 같은 재구성에서 함께 나오는 값",
+    fig.suptitle("그림 4.  개인별 대피 소요시간 — 같은 재구성에서 함께 나오는 값",
                  fontsize=12.5, y=1.02)
-    fig.savefig(OUT / "fig3_evac_time.png"); plt.close(fig)
+    fig.savefig(OUT / "fig4_evac_time.png"); plt.close(fig)
 
 
 # ------------------------------------------------ CSV
@@ -210,7 +274,8 @@ def csv_out():
                             p["route"]])
 
 
-fig_ratio(); fig_control(); fig_evac(); fig_topk(); fig_dist()
+fig_minepfi(); fig_margin(); fig_control(); fig_evac(); fig_dist()
+fig_ratio(); fig_topk()   # 부록
 fig_assignment()      # 부록 — 수정 전 구현 기록
 csv_out()
 print("완료:", sorted(os.listdir(OUT)))
