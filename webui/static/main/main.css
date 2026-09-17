@@ -862,3 +862,102 @@ body.rehearsing .rhbanner{ display:block; }
 /* 건물 — 층을 묶는 단위 (v1.17) */
 .bldnote{ font-style:normal; font-size:10.5px; color:var(--text-3); }
 .floor-edit.hidden{ display:none; }
+
+/* ─────────────────────────────────────────────────────────────
+   우측 지표 패널 — 표출 형태(기본·카드·요약) · 섹션 접기 · 패널 접기
+
+   왜: 4대 지표 카드가 1열로 쌓이고 그 아래 목록 4개가 붙어 스크롤이 길었다.
+   맵이 주인공인 시연에선 한 화면에 다 들어오는 게 낫다.
+   **기본은 손대기 전 그대로** — 카드·요약은 고를 수 있는 선택지다.
+   선택은 보는 사람 취향이라 localStorage 에 기억한다(레이어 토글과 같은 규칙).
+   ───────────────────────────────────────────────────────────── */
+
+/* 머리띠 — 버튼이 늘어 좁은 폭에서 '지표' 글자가 세로로 쪼개졌다. 줄바꿈 허용. */
+.sidehead{ flex-wrap:wrap; gap:8px 10px; }
+.sidehead > span:first-child{ flex:0 0 auto; white-space:nowrap; }
+.sidehead .seg.dens{ flex:0 0 auto; }
+.sidehead .seg.dens .tag-btn{ padding:3px 9px; font-size:11px; }
+.sidehead .sidefold{ padding:3px 9px; font-size:12px; line-height:1.2; flex:0 0 auto; }
+/* 스페이서가 flex:1 로 버티면 접기 버튼이 혼자 다음 줄로 밀린다 — 0 까지 줄게 */
+.sidehead .sp{ flex:1 1 0; min-width:0; }
+
+/* 패널 접기 — 머리띠만 남기고 맵이 전체 폭.
+   폭 규칙이 dens-*.sesswide 보다 뒤·길어야 이긴다. */
+.side.metrics.folded,
+.side.metrics.folded.sesswide,
+.side.metrics.dens-sum.folded.sesswide,
+.side.metrics.dens-card.folded.sesswide{ width:38px; min-width:38px; }
+.side.metrics.folded .sidebody,
+.side.metrics.folded .sidehead > span:not(.sp){ display:none; }
+.side.metrics.folded .sidehead{ padding:8px 6px; justify-content:center; }
+.side.metrics.folded .sidefold{ transform:rotate(180deg); }
+
+/* ── 카드 — 2×2. 내용은 기본과 같다(길면 스크롤) ── */
+.side.metrics.dens-card .mgrid{ grid-template-columns:1fr 1fr; }
+
+/* ── 요약 — 2×2. 4개를 **시각화까지** 한 화면에, 스크롤 없이 ──
+   카드마다 [이름 · 값 · 대표 시각화 1개]만 남긴다. 목록(출구별 분포·병목 행)과
+   보조 차트(히스토그램·이탈곡선)는 뺀다 — 자세히 볼 땐 '카드'·'기본'으로 간다. */
+.side.metrics.dens-sum .mgrid,
+.side.metrics.dens-sum .mgrid2{ grid-template-columns:1fr 1fr; gap:8px; }
+.side.metrics.dens-sum.sesswide{ width:400px; }
+@media (max-width:1600px){ .side.metrics.dens-sum.sesswide{ width:360px; } }
+
+.side.metrics.dens-sum .mcard,
+.side.metrics.dens-sum .mcard2{
+  min-height:0; padding:10px 12px 11px; gap:4px; border-top-width:3px; }
+.side.metrics.dens-sum .mhead,
+.side.metrics.dens-sum .mh2{ display:flex; align-items:baseline; gap:6px; }
+.side.metrics.dens-sum .mhead b,
+.side.metrics.dens-sum .mh2 b{ font-size:15px; letter-spacing:.2px; }
+.side.metrics.dens-sum .msub,
+.side.metrics.dens-sum .mela{ display:none !important; }
+.side.metrics.dens-sum .mbig{ font-size:23px; line-height:1.1; }
+
+.side.metrics.dens-sum .mbnlist,
+.side.metrics.dens-sum .mhistwrap,
+.side.metrics.dens-sum .mgaugewrap,
+.side.metrics.dens-sum #devWrap,
+.side.metrics.dens-sum .sei-legend,
+.side.metrics.dens-sum .sei-delta-hd,
+.side.metrics.dens-sum #seiDeltas{ display:none !important; }
+
+/* 시각화가 카드 남은 높이를 채운다 — 한 행의 카드 높이는 grid 가 맞추므로
+   고정 높이면 짧은 카드(EPFI)에 빈 공간이 생긴다. */
+.side.metrics.dens-sum #seiBars{ flex:1 1 92px; min-height:78px; overflow:hidden; }
+.side.metrics.dens-sum #seiChartCv{ height:100% !important; }
+.side.metrics.dens-sum .mspark{ flex:1 1 92px; min-height:78px; height:auto; }
+/* IDR 은 구역 표가 시각화다 — 행을 압축해 여러 줄 보이게 */
+.side.metrics.dens-sum .mtblwrap{ flex:1 1 92px; min-height:78px; overflow:hidden; }
+.side.metrics.dens-sum .idr-colhd{ font-size:10px; padding:1px 0; }
+.side.metrics.dens-sum .idr-row.det{ height:auto; min-height:0; padding:1px 0; font-size:10.5px; }
+/* 요약은 400px 로 좁다 — '지표' 라벨을 빼 접기 버튼이 같은 줄에 들어가게 한다.
+   어느 패널인지는 탭(③ 운영 뷰 / ④ 리플레이)이 이미 말해 준다. */
+.side.metrics.dens-sum .sidehead > span:first-child{ display:none; }
+
+/* ── 섹션 접기 — .gtitle 클릭 ── */
+.group > .gtitle.foldable{ cursor:pointer; user-select:none;
+  display:flex; align-items:center; gap:6px; }
+.group > .gtitle.foldable::before{ content:"▾"; font-size:10px; opacity:.6;
+  transition:transform .12s ease; }
+.group.folded > .gtitle.foldable::before{ transform:rotate(-90deg); }
+.group.folded > *:not(.gtitle){ display:none !important; }
+.gtitle .fcount{ margin-left:auto; font-size:11px; opacity:.55; font-variant-numeric:tabular-nums; }
+
+/* 목록 행의 삭제 버튼 — **항상 보이되** 흐릿하게. 행에 올리면 또렷해진다.
+   숨겨 두면(opacity 0) 있는 줄 몰라서 못 찾는다 — 실사용에서 확인됨. */
+.camrow.rpsess{ position:relative; }
+.camrow.rpsess .rpdel{
+  position:absolute; top:6px; right:6px; width:24px; height:24px; padding:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:13px; line-height:1; cursor:pointer;
+  background:var(--bg-2); color:var(--text-3);
+  border:1px solid var(--stroke-2); border-radius:var(--r-md);
+  opacity:.55; transition:opacity .12s ease, color .12s ease, border-color .12s ease; }
+.camrow.rpsess:hover .rpdel,
+.camrow.rpsess .rpdel:focus-visible{ opacity:1; }
+.camrow.rpsess .rpdel:hover{ color:var(--bad, #ef4444); border-color:var(--bad, #ef4444);
+  background:color-mix(in srgb, var(--bad, #ef4444) 12%, transparent); }
+.camrow.rpsess .rpdel:disabled{ opacity:.4; cursor:default; }
+/* 버튼 자리를 비워 제목이 밑으로 안 파고들게 */
+.camrow.rpsess .r1{ padding-right:26px; }

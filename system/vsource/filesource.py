@@ -216,7 +216,7 @@ class FileSourceRunner:
                 continue
             # 카메라별 analyze_fps (매니페스트). 없으면 공통값.
             cam_fps = float((cam_fps_map or {}).get(cam) or fps)
-            c = _Cam(vpkg.cam_id_of(cam), vpkg.stream_path(pkg, cam),
+            c = _Cam(vpkg.cam_id_of(cam, pkg), vpkg.stream_path(pkg, cam),
                      str(root / st["file"]), cam_fps)
             c.open()
             c.snapshot_candidates = vpkg.snapshot_times(pkg, scen_id, cam)

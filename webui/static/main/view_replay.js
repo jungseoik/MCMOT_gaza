@@ -83,10 +83,31 @@ Views.replay = (() => {
         <div class="r1"><span class="nm">${t}</span>${rec}</div>
         <div class="r2"><span>SEI ${fmtVal(s.sei,0)}</span>
           <span>EPFI ${fmtVal(s.epfi_avg,0)}</span>
-          <span>CBS ${fmtVal(s.cbs_total,1)}</span></div></div>`;
+          <span>CBS ${fmtVal(s.cbs_total,1)}</span></div>
+        <button class="rpdel" title="이 세션 이력 삭제" aria-label="삭제">🗑</button></div>`;
     }).join("");
+    wireDelete(box, async (id) => {
+      if (!confirm(`세션 ${id}\n\n이 세션 이력을 삭제할까요?\n`
+        + `녹화(.db)와 결과가 함께 지워지며 되돌릴 수 없습니다.`)) return;
+      await API.deleteSession(id, curFloor());
+      if (selId === id) { selId = null; clearMetrics(); setControlsEnabled(false); }
+      await loadList();
+    });
     box.querySelectorAll(".rpsess").forEach((el) => {
       el.onclick = () => selectSession(el.dataset.id);
+    });
+  }
+
+  /** 목록 행의 🗑 버튼 배선 — 행 선택과 섞이지 않게 전파를 끊는다. */
+  function wireDelete(box, onDelete) {
+    box.querySelectorAll(".rpdel").forEach((btn) => {
+      btn.onclick = async (ev) => {
+        ev.stopPropagation();
+        const id = btn.closest(".rpsess").dataset.id;
+        btn.disabled = true;
+        try { await onDelete(id); }
+        catch (e) { alert("삭제 실패: " + (e.message || e)); btn.disabled = false; }
+      };
     });
   }
 
@@ -119,8 +140,18 @@ Views.replay = (() => {
       return `<div class="camrow rpsess${d.session_id === selId ? " sel" : ""}" data-id="${d.session_id}">
         <div class="r1"><span class="nm" title="${(d.label || "") + " · " + d.session_id}">${title}</span>${gidb}${rec}</div>
         <div class="r2"><span class="cid" title="${tFull}">${t}</span><span>${floors}</span>
-          <span class="mtr">EPFI ${fmtVal(d.epfi_avg,0)} · CBS ${fmtVal(d.cbs_total,1)} · 통과 ${d.total_passed || 0}</span></div></div>`;
+          <span class="mtr">EPFI ${fmtVal(d.epfi_avg,0)} · CBS ${fmtVal(d.cbs_total,1)} · 통과 ${d.total_passed || 0}</span></div>
+        <button class="rpdel" title="이 훈련 이력 삭제" aria-label="삭제">🗑</button></div>`;
     }).join("");
+    wireDelete(box, async (id) => {
+      const d = drills.find((x) => x.session_id === id);
+      const what = (d && d.label) ? `"${d.label}"` : id;
+      if (!confirm(`${what}\n\n이 건물 훈련 이력을 삭제할까요?\n`
+        + `녹화(.db)와 결과가 함께 지워지며 되돌릴 수 없습니다.`)) return;
+      await API.deleteDrill(id);
+      if (selId === id) { selId = null; clearMetrics(); setControlsEnabled(false); }
+      await loadList();
+    });
     box.querySelectorAll(".rpsess").forEach((el) => {
       el.onclick = () => {
         const d = drills.find((x) => x.session_id === el.dataset.id);
@@ -710,8 +741,23 @@ Views.replay = (() => {
     };
   }
 
+  let _rpPanelWired = false;
+  /** 우측 지표 패널 — 밀도(요약·카드·표)·패널 접기 배선(1회). */
+  function wireRpPanel() {
+    if (_rpPanelWired || typeof PanelView === "undefined") return;
+    _rpPanelWired = true;
+    PanelView.wire("rpSide", "rpDens", "rpFold", [
+      { el: "#rpGrpKpi", key: "rp.kpi" },
+      // 기본은 전부 펼침(기존 화면). 길면 보는 사람이 접는다.
+      { el: "#rpGrpIdr", key: "rp.idr" },
+      { el: "#rpGrpObj", key: "rp.obj" },
+      { el: "#rpGrpBn",  key: "rp.bn" },
+    ]);
+  }
+
   function enter() {
     init();
+    wireRpPanel();
     active = true;
     // 상단바 전역 층 셀렉터 숨김은 App.renderFloorSelector 가 책임진다
     // (App.view === "replay" 조건). 여기서만 숨기면 그 함수가 다시 불릴 때 되살아난다.

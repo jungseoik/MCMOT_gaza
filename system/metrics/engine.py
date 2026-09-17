@@ -190,8 +190,11 @@ class MetricsEngine:
                 # 카운터는 출입구당 하나뿐이라 맵/화면이 동시에 세는 일은 없다.
                 in_cam = ex.counts_in_camera()
                 if ex.camera_zone_mode():          # 화면 **영역** (선보다 우선)
-                    key = (tuple(map(tuple, ex.cam_zone)), ex.cam_zone_dwell, "zone")
-                    line = ZoneGate(ex.cam_zone, dwell=ex.cam_zone_dwell)
+                    key = (tuple(map(tuple, ex.cam_zone)), ex.cam_zone_dwell,
+                           ex.cam_zone_overlap, "zone")
+                    line = ZoneGate(ex.cam_zone, dwell=ex.cam_zone_dwell,
+                                    **({} if ex.cam_zone_overlap is None
+                                       else {"overlap": ex.cam_zone_overlap}))
                 else:
                     geo_line = ex.cam_line if in_cam else ex.line
                     geo_inside = ex.cam_inside if in_cam else ex.inside
@@ -517,8 +520,11 @@ class MetricsEngine:
         for ex in self._site.exits:
             in_cam = ex.counts_in_camera()
             if ex.camera_zone_mode():
-                gate = ZoneGate(ex.cam_zone, dwell=ex.cam_zone_dwell)
-                key = (tuple(map(tuple, ex.cam_zone)), ex.cam_zone_dwell, "zone")
+                gate = ZoneGate(ex.cam_zone, dwell=ex.cam_zone_dwell,
+                                **({} if ex.cam_zone_overlap is None
+                                   else {"overlap": ex.cam_zone_overlap}))
+                key = (tuple(map(tuple, ex.cam_zone)), ex.cam_zone_dwell,
+                       ex.cam_zone_overlap, "zone")
             else:
                 geo_line = ex.cam_line if in_cam else ex.line
                 geo_inside = ex.cam_inside if in_cam else ex.inside

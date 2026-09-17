@@ -6,8 +6,8 @@
   "_규칙": "stream path = <rtsp_prefix>_<cam> (예 aihub_cam05). 같은 cam 번호는 전 시나리오에서 같은 경로.",
   "floors": [
     {
-      "id": "floor4",
-      "name": "AI hub 3층",
+      "id": "floor6",
+      "name": "AI hub 3층(1차 리허설)",
       "note": "사이트 층 빙의 — 도면·구역·출구·경로는 :8900 ① 맵설정(CAD 편집기)에서 관리. 이 항목은 '이 층이 있어야 한다'는 선언. 전 시나리오(01~09) 공통 **AI hub 3층** 촬영 — 사용자 확인(2026-09-08)."
     }
   ],
@@ -16,7 +16,7 @@
       "cam": "cam01",
       "path": "aihub_cam01",
       "name": "AI hub cam01",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -97,7 +97,7 @@
       "cam": "cam02",
       "path": "aihub_cam02",
       "name": "AI hub cam02",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -166,7 +166,7 @@
       "cam": "cam03",
       "path": "aihub_cam03",
       "name": "AI hub cam03",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -246,7 +246,7 @@
       "cam": "cam04",
       "path": "aihub_cam04",
       "name": "AI hub cam04",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -315,7 +315,7 @@
       "cam": "cam05",
       "path": "aihub_cam05",
       "name": "AI hub cam05",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -384,7 +384,7 @@
       "cam": "cam06",
       "path": "aihub_cam06",
       "name": "AI hub cam06",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -453,7 +453,7 @@
       "cam": "cam07",
       "path": "aihub_cam07",
       "name": "AI hub cam07",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -522,7 +522,7 @@
       "cam": "cam08",
       "path": "aihub_cam08",
       "name": "AI hub cam08",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -591,7 +591,7 @@
       "cam": "cam09",
       "path": "aihub_cam09",
       "name": "AI hub cam09",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -660,7 +660,7 @@
       "cam": "cam10",
       "path": "aihub_cam10",
       "name": "AI hub cam10",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -747,7 +747,7 @@
       "cam": "cam11",
       "path": "aihub_cam11",
       "name": "AI hub cam11",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": null,
       "valid_roi": null,
@@ -758,7 +758,7 @@
       "cam": "cam12",
       "path": "aihub_cam12",
       "name": "AI hub cam12",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -827,7 +827,7 @@
       "cam": "cam13",
       "path": "aihub_cam13",
       "name": "AI hub cam13",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -896,7 +896,7 @@
       "cam": "cam14",
       "path": "aihub_cam14",
       "name": "AI hub cam14",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -965,7 +965,7 @@
       "cam": "cam15",
       "path": "aihub_cam15",
       "name": "AI hub cam15",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -1034,7 +1034,7 @@
       "cam": "cam16",
       "path": "aihub_cam16",
       "name": "AI hub cam16",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -1103,7 +1103,7 @@
       "cam": "cam17",
       "path": "aihub_cam17",
       "name": "AI hub cam17",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": null,
       "valid_roi": null,
@@ -1114,7 +1114,7 @@
       "cam": "cam18",
       "path": "aihub_cam18",
       "name": "AI hub cam18",
-      "floor": "floor4",
+      "floor": "floor6",
       "analyze_fps": 5.0,
       "mapping": {
         "cctv_pts": [
@@ -1497,7 +1497,11 @@
           "cam12",
           "cam13"
         ]
-      }
+      },
+      "cam_fps": {
+        "cam12": 10.0
+      },
+      "cam_fps_note": "exit-1 담당 cam12 만 10fps. 5fps 에서 10명 중 6명만 세어졌고 dwell·overlap·min_conf 전 조합(378개)으로도 10 이 안 나왔다 — 게이트가 아니라 관측 밀도 문제라 판단해 촘촘히 본다."
     },
     {
       "id": "scenario_06",
@@ -1589,7 +1593,13 @@
           "cam12",
           "cam13"
         ]
-      }
+      },
+      "exit_overrides": {
+        "exit-0": {
+          "cam_zone_overlap": 0.38
+        }
+      },
+      "exit_overrides_note": "exit-0 이 1명을 더 센다(6/5, GT 5/5). 겹침 임계를 0.30 → 0.38 로 올리면 5/5. 0.45 부터는 실제 1명이 깎여 4/5 가 된다 — 0.35~0.40 구간이 맞다."
     },
     {
       "id": "scenario_07",
@@ -1656,7 +1666,13 @@
           "cam09",
           "cam08"
         ]
-      }
+      },
+      "exit_overrides": {
+        "exit-1": {
+          "cam_zone_overlap": 0.6
+        }
+      },
+      "exit_overrides_note": "exit-1 이 2명을 더 센다(10/2, GT 10/0). exit-0 으로 나가는 사람이 cam12 화면의 영역을 스쳐 잡힌다. 겹침 임계를 0.30 → 0.60 으로 올리면 0/2 → 0. exit-0 은 10 유지. 0.40~0.50 으로는 안 떨어지고 0.60 부터 걸린다."
     },
     {
       "id": "scenario_08",
@@ -2892,5 +2908,6 @@
         "duration": 502.0
       }
     }
-  }
+  },
+  "floor_note": "이 패키지(2026-09-04 촬영)는 drill-1f3f 와 **카메라 화각·번호 체계가 다르다**. 런타임 id 가 rh_cam10~18 에서 9개 겹치는데 서로 다른 실제 카메라라, 같은 층을 쓰면 매핑과 출입구 담당(count_cam·cam_zone)이 서로를 덮어쓴다. 그래서 같은 도면·같은 축척의 별도 층 floor6('AI hub 3층(1차 리허설)')을 쓴다. 공간요소(경로·구역·병목·출입구 기하)는 floor4 에서 복사했고, 화면 집계 담당은 비워 이 패키지 화각으로 다시 그린다."
 }

@@ -87,6 +87,10 @@ const API = {
   drillStop: () => API._post("/api/drill/stop"),
   drillResult: (id) => API._j(`/api/drill/${encodeURIComponent(id)}/result`),
   getDrills: () => API._j("/api/drills"),
+  // 이력 삭제 — 파일을 지우므로 되돌릴 수 없다. 호출부가 확인을 받는다.
+  deleteDrill: (id) => API._j(`/api/drill/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  deleteSession: (id, floor) =>
+    API._j(`/api/sessions/${encodeURIComponent(id)}?` + API._fq(floor), { method: "DELETE" }),
   // 건물 드릴 재계산(Phase 3) — 전 층 .db를 같은 오버라이드로 리플레이 → 재산출 롤업.
   drillReplay: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/replay`, body || {}),
   // 여정 재구성 — 끝난 세션의 트랙 조각을 ReID 로 사람 단위로 다시 묶는다

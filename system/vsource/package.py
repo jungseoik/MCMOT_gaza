@@ -118,6 +118,22 @@ def scenario_ids(pkg: dict) -> list[str]:
             for s in pkg.get("scenarios", []) if s.get("id")]
 
 
+def scenario_exit_overrides(pkg: dict, scen_id: str | None) -> dict:
+    """{exit_id: {필드: 값}} — 시나리오별 **출입구 설정** 오버라이드.
+
+    카메라(cam_fps·cam_min_conf)와 달리 출입구는 사이트 설정이라, 리허설이 층을
+    빙의하는 동안에만 읽기 전용 뷰에 얹는다(`_site_plus_rehearsal`). 사이트 파일은
+    건드리지 않는다.
+
+    매니페스트 표기 — scenario 에 선택적으로:
+        "exit_overrides": {"exit-0": {"cam_zone_overlap": 0.15}}
+    지원 필드: cam_zone_dwell · cam_zone_overlap · cam_zone_min_conf 등 ExitLine 필드.
+    """
+    sid = (scen_id or "").split(":")[-1]
+    raw = next((s for s in pkg.get("scenarios", []) if s.get("id") == sid), None)
+    return dict((raw or {}).get("exit_overrides") or {})
+
+
 def scenario_cam_min_conf(pkg: dict, scen_id: str | None) -> dict:
     """{cam: min_conf} — 카메라 기본값에 **시나리오 오버라이드**를 얹은 값.
 
@@ -173,7 +189,7 @@ def scenario_cam_ids(pkg: dict, scen_id: str) -> set[str]:
     """
     for s in pkg.get("scenarios", []):
         if s.get("id") == scen_id:
-            return {cam_id_of(st["cam"]) for st in s.get("streams", []) if st.get("cam")}
+            return {cam_id_of(st["cam"], pkg) for st in s.get("streams", []) if st.get("cam")}
     return set()
 
 
@@ -208,8 +224,38 @@ def snapshot_times(pkg: dict, scen_id: str, cam: str) -> list[float]:
 
 
 # ------------------------------------------------------------------ 가상 카메라·층
-def cam_id_of(cam: str) -> str:
-    return f"{CAM_PREFIX}{cam}"
+def cam_ns(pkg: dict | None) -> str:
+    """패키지 네임스페이스 — 런타임 cam_id 를 패키지별로 갈라 놓는 조각.
+
+    rtsp_prefix 가 이미 패키지마다 다르다(aihub / aihub2) — 그걸 그대로 쓴다.
+    """
+    return (pkg or {}).get("rtsp_prefix") or (pkg or {}).get("id") or ""
+
+
+def cam_id_of(cam: str, pkg: dict | None = None) -> str:
+    """가상 카메라의 런타임 id.
+
+    **패키지 네임스페이스를 넣는다** — 안 넣으면 매니페스트의 `cam` 값만으로
+    id 가 정해져, 번호 체계가 다른 두 패키지가 같은 id 를 만든다.
+    실측: aihub-rehearsal(cam01~18) 과 drill-1f3f(cam1~18) 가 cam10~18 에서
+    9개 충돌 — 서로 다른 실제 카메라인데 같은 rh_cam12 가 됐다. 그러면 층별
+    출입구 담당(count_cam)·매핑이 서로를 덮어쓴다.
+
+    pkg 를 안 주면 옛 형식(rh_<cam>)을 낸다 — 과거 녹화·설정 호환용.
+    """
+    ns = cam_ns(pkg)
+    return f"{CAM_PREFIX}{ns}_{cam}" if ns else f"{CAM_PREFIX}{cam}"
+
+
+def cam_of_id(cam_id: str, pkg: dict | None = None) -> str:
+    """cam_id_of 의 역 — 런타임 id → 매니페스트 `cam` 값. 옛 형식도 받는다."""
+    if not cam_id.startswith(CAM_PREFIX):
+        return cam_id
+    rest = cam_id[len(CAM_PREFIX):]
+    ns = cam_ns(pkg)
+    if ns and rest.startswith(ns + "_"):
+        return rest[len(ns) + 1:]
+    return rest
 
 
 def _own_floor_ids(pkg: dict) -> set[str]:
@@ -249,7 +295,7 @@ def virtual_cameras(pkg: dict, rtsp_host: str = RTSP_HOST_DEFAULT,
             continue
         try:
             out.append(CameraConfig(
-                cam_id=cam_id_of(cam),
+                cam_id=cam_id_of(cam, pkg),
                 name=c.get("name") or f"{pkg.get('name', pkg['id'])} {cam}",
                 rtsp=f"rtsp://{rtsp_host}/{c.get('path') or stream_path(pkg, cam)}",
                 enabled=True,
@@ -316,7 +362,7 @@ def save_camera(pkg_id: str, cam_id: str, patch: dict) -> bool:
     pkg = get(pkg_id)
     if not pkg:
         return False
-    cam = cam_id[len(CAM_PREFIX):] if cam_id.startswith(CAM_PREFIX) else cam_id
+    cam = cam_of_id(cam_id, pkg)
     f = Path(pkg["_root"]) / MANIFEST
     d = json.loads(f.read_text(encoding="utf-8"))     # 캐시 말고 원본에서
     hit = None

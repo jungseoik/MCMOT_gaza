@@ -470,18 +470,26 @@
             <button class="tag-btn" id="pmSess">4대 지표 평가</button>
             <button class="tag-btn on" id="pmRt">실시간</button>
           </span>
+          <span class="sp"></span>
+          <!-- 표출 밀도 — 맵이 주인공일 땐 요약, 값을 읽을 땐 표 (localStorage 기억) -->
+          <span class="seg dens" id="liveDens" title="지표 표출 밀도 — 기본이 원래 화면">
+            <button class="tag-btn on" data-dens="full" title="기본 — 차트·목록까지 그대로">기본</button>
+            <button class="tag-btn" data-dens="card" title="2×2 카드">카드</button>
+            <button class="tag-btn" data-dens="sum" title="4개를 시각화까지 한 화면에 — 스크롤 없음">요약</button>
+          </span>
+          <button class="tag-btn sidefold" id="liveFold" title="패널 접기 — 맵을 전체 폭으로">⟩</button>
         </div>
         <div class="sidebody">
           <div id="rtPanel">
-            <div class="group">
+            <div class="group" id="grpAll">
               <div class="gtitle">전체</div>
               <div class="metricrow"><span>맵 위 객체</span><b class="t-num" id="mObjects">0</b></div>
               <div class="metricrow"><span>사이트 버전</span><b class="t-num" id="mVersion">—</b></div>
               <div class="metricrow"><span>갱신 시각</span><b class="t-num" id="mTs">—</b></div>
             </div>
-            <div class="group"><div class="gtitle">구역 밀도</div><div id="mZones"></div></div>
-            <div class="group"><div class="gtitle">병목</div><div id="mBottlenecks"></div></div>
-            <div class="group"><div class="gtitle">출입구 통과</div><div id="mExits"></div></div>
+            <div class="group" id="grpZones"><div class="gtitle">구역 밀도</div><div id="mZones"></div></div>
+            <div class="group" id="grpBn"><div class="gtitle">병목</div><div id="mBottlenecks"></div></div>
+            <div class="group" id="grpExits"><div class="gtitle">출입구 통과</div><div id="mExits"></div></div>
           </div>
 
           <div id="sessPanel" class="hidden">
@@ -568,9 +576,18 @@
       </div>
 
       <aside class="side metrics" id="rpSide">
-        <div class="sidehead"><span>지표 · 재계산</span></div>
+        <div class="sidehead">
+          <span>지표 · 재계산</span>
+          <span class="sp"></span>
+          <span class="seg dens" id="rpDens" title="지표 표출 밀도 — 기본이 원래 화면">
+            <button class="tag-btn on" data-dens="full" title="기본 — 표까지 그대로">기본</button>
+            <button class="tag-btn" data-dens="card" title="2×2 카드">카드</button>
+            <button class="tag-btn" data-dens="sum" title="4개를 시각화까지 한 화면에 — 스크롤 없음">요약</button>
+          </span>
+          <button class="tag-btn sidefold" id="rpFold" title="패널 접기 — 맵을 전체 폭으로">⟩</button>
+        </div>
         <div class="sidebody">
-          <div class="group">
+          <div class="group" id="rpGrpKpi">
             <div class="gtitle">4대 지표 <span class="mtag" id="rpTag">현재값</span></div>
             <div class="mgrid2">
               <div class="mcard2"><div class="mh2"><b>SEI</b> 출구효율</div><div class="mbig t-num" id="rpSei">—</div></div>
@@ -580,11 +597,11 @@
             </div>
             <div class="grow" id="rpBase"></div>
           </div>
-          <div class="group">
+          <div class="group" id="rpGrpIdr">
             <div class="gtitle">IDR 구역별 <span class="mtag" id="rpIdrTag">재계산 시 변화 표시</span></div>
             <div id="rpIdrTbl" class="rpidrtbl"></div>
           </div>
-          <div class="group">
+          <div class="group" id="rpGrpObj">
             <div class="gtitle">객체별 지표 <span class="cnt" id="rpObjCnt">0</span>
               <span class="sp"></span>
               <button class="tag-btn xs" id="rpObjSort" title="정렬 기준 전환">EPFI↑</button>
@@ -593,7 +610,7 @@
             <div id="rpObjTbl" class="rpobjtbl"></div>
             <div class="mnote">ID 재구성(사람 단위)·썸네일은 [리포트] → [ID 재구성]</div>
           </div>
-          <div class="group">
+          <div class="group" id="rpGrpBn">
             <div class="gtitle">CBS 병목 선택 집계 <span class="mtag" id="rpBnTag"></span></div>
             <div class="mbnlist" id="rpBn"></div>
           </div>
@@ -767,6 +784,7 @@
 <script src="/static/main/view_live.js"></script>
 <script src="/static/main/view_replay.js"></script>
 <script src="/static/main/view_vsource.js"></script>
-<script src="/static/main/app.js"></script>
+<script src="/static/main/panel_view.js"></script>
+    <script src="/static/main/app.js"></script>
 </body>
 </html>

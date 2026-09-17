@@ -161,6 +161,10 @@ class ExitLine(BaseModel):
     # 영역 밖에서 본 적 있는 트랙이 영역 안으로 들어와 머물면 통과로 센다.
     cam_zone: list[Point] | None = None           # 그 카메라 화면 px 다각형(3점 이상)
     cam_zone_dwell: int = 2                       # 진입 후 이 프레임 수만큼 머물면 집계
+    # 영역 판정의 bbox 겹침 비율 — 발끝이 문틀에 잘려 튈 때 쓰는 보조 기준.
+    # dwell 과 같은 성격의 손잡이인데 코드에 박혀 있었다(0.3). 문 폭·화각에
+    # 따라 최적이 달라 출입구별로 뺀다. None = ZoneGate 기본(0.3).
+    cam_zone_overlap: float | None = Field(default=None, ge=0.0, le=1.0)
                                                   # (5fps 실측: 3이면 발끝 잘린 궤적을
                                                   #  놓친다 — 접촉이 2프레임뿐)
 

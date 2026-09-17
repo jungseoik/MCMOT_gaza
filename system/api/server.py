@@ -218,10 +218,19 @@ class Runtime:
             return site
         extra = [fl for fl in vpkg.virtual_floors(pkg)
                  if fl.id not in {f.id for f in site.floors}]
-        if not extra:
+        ov = vpkg.scenario_exit_overrides(pkg, self._rh_scen_id)
+        if not extra and not ov:
             return site
-        view = site.model_copy()
-        view.floors = list(site.floors) + extra
+        view = site.model_copy(deep=True)
+        view.floors = list(view.floors) + extra
+        if ov:
+            # 시나리오별 출입구 오버라이드 — 빙의 중에만, 읽기 전용 뷰에만 얹는다.
+            # 사이트 파일은 안 건드리므로 리허설이 끝나면 저절로 사라진다.
+            for holder in [view] + list(view.floors):
+                for ex in (holder.exits or []):
+                    for k, v in (ov.get(ex.id) or {}).items():
+                        if hasattr(ex, k):
+                            setattr(ex, k, v)
         return view
 
     def set_rehearsal(self, pkg_id: str | None, scen_id: str | None = None) -> None:
@@ -1426,6 +1435,50 @@ def _drill_session_ids() -> list[str]:
     return sorted((ids or set()) | rec, reverse=True)
 
 
+@app.delete("/api/drill/{session_id}")
+def drill_delete(session_id: str):
+    """건물 훈련 1건 삭제 — 메타 + 층별 녹화(.db)·결과(.json) 를 함께 지운다.
+
+    되돌릴 수 없다(파일을 지운다). UI 가 확인 팝업을 띄우고 부른다.
+    진행 중인 훈련은 지우지 않는다 — 먼저 종료해야 한다.
+    """
+    meta = _drill_meta(session_id)
+    if meta is None:
+        raise HTTPException(404, f"그런 건물 훈련이 없습니다: {session_id}")
+    for fid in (meta.get("floors") or []):
+        eng = rt.engines.get(fid)
+        if eng is not None and eng.session_live() is not None:
+            raise HTTPException(409, "진행 중인 훈련입니다 — 먼저 종료하세요")
+    removed = []
+    for fid in (meta.get("floors") or []):
+        for ext in ("db", "json"):
+            f = _sessions_dir(fid) / f"{session_id}.{ext}"
+            if f.is_file():
+                f.unlink()
+                removed.append(f"{fid}/{f.name}")
+    mp = _drills_dir() / f"{session_id}.json"
+    if mp.is_file():
+        mp.unlink()
+        removed.append(mp.name)
+    logger.info("건물 훈련 삭제: %s (%d개 파일)", session_id, len(removed))
+    return {"ok": True, "session_id": session_id, "removed": removed}
+
+
+@app.delete("/api/sessions/{session_id}")
+def session_delete(session_id: str, floor: str = DEFAULT_FLOOR_ID):
+    """개별 층 세션 1건 삭제 — 그 층의 녹화(.db)·결과(.json)."""
+    n = 0
+    for ext in ("db", "json"):
+        f = _sessions_dir(floor) / f"{session_id}.{ext}"
+        if f.is_file():
+            f.unlink()
+            n += 1
+    if not n:
+        raise HTTPException(404, f"그런 세션이 없습니다: {floor}/{session_id}")
+    logger.info("세션 삭제: %s/%s (%d개 파일)", floor, session_id, n)
+    return {"ok": True, "session_id": session_id, "floor": floor, "removed": n}
+
+
 @app.get("/api/drills")
 def drills_list():
     """드릴 이력 — 참여 층 전부에 공통 존재하는 session_id 기준(건물 롤업 요약)."""
@@ -1808,7 +1861,7 @@ def _rehearsal_bind_floor(sid: str, floor_id: str | None) -> None:
         raise HTTPException(404, f"사이트에 없는 층: {floor_id} — ① 맵설정에서 먼저 만드세요")
     # 카메라별 층은 ② 매핑에서 정한다(다층 리허설 — 10F+17F 등). 여기 "기본 층"은
     # 층이 비었거나 사이트에 없는 층을 가리키는 카메라에만 채워 넣는다.
-    by_cam = {vpkg.cam_id_of(c["cam"]): c for c in pkg.get("cameras", []) if c.get("cam")}
+    by_cam = {vpkg.cam_id_of(c["cam"], pkg): c for c in pkg.get("cameras", []) if c.get("cam")}
     for cid in sorted(vpkg.scenario_cam_ids(pkg, ps[1])):
         cur = (by_cam.get(cid) or {}).get("floor")
         if not cur or cur not in site_floors:
@@ -1997,7 +2050,7 @@ def vsource_status():
     # 패키지 가상 카메라(rh_*)는 매핑 정본이 rehearsal.json 이라 거기서 본다.
     ov = voverlay.load(st.get("scenario_id") or "")
     pkg = rt.rehearsal_pkg()
-    pkg_mapped = {vpkg.cam_id_of(c["cam"]) for c in (pkg or {}).get("cameras", [])
+    pkg_mapped = {vpkg.cam_id_of(c["cam"], pkg) for c in (pkg or {}).get("cameras", [])
                   if c.get("cam") and c.get("mapping")}
     stale: set[str] = set()
     if pkg:
@@ -2007,7 +2060,7 @@ def vsource_status():
             if c.get("mapping") and wh and fid:
                 fl = site_v.get_floor(fid)
                 if fl.id == fid and fl.map and [fl.map.w, fl.map.h] != list(wh):
-                    stale.add(vpkg.cam_id_of(c["cam"]))
+                    stale.add(vpkg.cam_id_of(c["cam"], pkg))
     for s2 in st.get("streams", []):
         cid = s2.get("cam_id")
         s2["own_mapping"] = bool(cid and (cid in pkg_mapped

@@ -3327,7 +3327,17 @@
           "file": "combo_02/cam39.mp4",
           "duration_sec": 127.0
         }
-      ]
+      ],
+      "cam_min_conf": {
+        "cam9": 0.4
+      },
+      "cam_min_conf_note": "scenario_02 상속 — combo_NN 은 scenario_NN(3층) + scenario_12(1층) 을 이어붙인 것이라 **3층 구간의 설정을 그대로 상속한다** — 파생본이 다른 값으로 돌면 수치가 안 맞는다.",
+      "exit_overrides": {
+        "exit-0": {
+          "cam_zone_overlap": 0.15
+        }
+      },
+      "exit_overrides_note": "콤보 클립은 단층보다 9배 낮은 비트레이트로 재인코딩돼(cam9 1.76 → 0.196 MB/s, PSNR 41dB) 문 앞 애매한 검출이 사라진다(실측 t=39s 8→6명 · t=43s 4→3명). 겹침 임계를 0.30 → 0.15 로 내려 남은 관측으로 세운다 — 실측 9 → 10. 단층 scenario_02 는 화질이 살아 있어 0.30 그대로 10 이다."
     },
     {
       "id": "combo_03",
@@ -3458,7 +3468,12 @@
           "file": "combo_03/cam39.mp4",
           "duration_sec": 159.0
         }
-      ]
+      ],
+      "cam_fps": {
+        "cam9": 5.0,
+        "cam12": 5.0
+      },
+      "cam_fps_note": "scenario_03 상속 — combo_NN 은 scenario_NN(3층) + scenario_12(1층) 을 이어붙인 것이라 **3층 구간의 설정을 그대로 상속한다** — 파생본이 다른 값으로 돌면 수치가 안 맞는다."
     },
     {
       "id": "combo_04",
@@ -3619,7 +3634,12 @@
           "file": "combo_04/cam39.mp4",
           "duration_sec": 137.0
         }
-      ]
+      ],
+      "cam_fps": {
+        "cam9": 5.0,
+        "cam12": 5.0
+      },
+      "cam_fps_note": "scenario_04 상속 — combo_NN 은 scenario_NN(3층) + scenario_12(1층) 을 이어붙인 것이라 **3층 구간의 설정을 그대로 상속한다** — 파생본이 다른 값으로 돌면 수치가 안 맞는다."
     },
     {
       "id": "combo_05",

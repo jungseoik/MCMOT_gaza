@@ -276,6 +276,11 @@ Views.live = (() => {
       ? state.exits.map((e) => row(nameOf(s.exits, e.id),
           `IN ${e.in_count} · OUT ${e.out_count}`)).join("")
       : `<div class="grow">출입구 없음</div>`;
+    if (typeof PanelView !== "undefined") {   // 접혀 있어도 개수는 제목에 보인다
+      PanelView.setCount(document.getElementById("grpZones"), state.zones.length);
+      PanelView.setCount(document.getElementById("grpBn"), state.bottlenecks.length);
+      PanelView.setCount(document.getElementById("grpExits"), state.exits.length);
+    }
   }
 
   function renderCams() {
@@ -431,8 +436,23 @@ Views.live = (() => {
     ["mZones", "mBottlenecks", "mExits"].forEach((id) => { $(id).innerHTML = ""; });
   }
 
+  /** 우측 지표 패널 — 밀도(요약·카드·표)·섹션 접기·패널 접기 배선(1회). */
+  let _panelWired = false;
+  function wirePanel() {
+    if (_panelWired || typeof PanelView === "undefined") return;
+    _panelWired = true;
+    PanelView.wire("liveSide", "liveDens", "liveFold", [
+      { el: "#grpAll",   key: "live.all" },
+      { el: "#grpZones", key: "live.zones" },
+      // 기본은 전부 펼침(기존 화면). 접는 건 보는 사람이 고른다 — 개수는 제목에 남는다.
+      { el: "#grpBn",    key: "live.bn" },
+      { el: "#grpExits", key: "live.exits" },
+    ]);
+  }
+
   function enter() {
     init();
+    wirePanel();
     active = true;
     // 층 전환 대비 — 이전 층의 객체·상태·보간 캐시 리셋
     state = null; prevObjects = {}; currObjects = {}; selGid = null;
