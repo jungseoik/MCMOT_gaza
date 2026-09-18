@@ -686,8 +686,11 @@
             </div>
 
             <div class="thsec">CBS <span>병목 혼잡 누적 — 병목이 임계밀도를 넘은 정도</span></div>
-            <div class="gnote sm">임계밀도 <b>ρcrit</b> 과 가중치 <b>w</b> 는 병목마다 다릅니다 —
-              <b>[도면 정보]</b> 탭의 병목 목록에서 값을 고치면 그대로 재계산됩니다.</div>
+            <div class="gnote sm">CBS = Σ <b>w</b> × ∫ max(0, ρ − <b>ρcrit</b>) dt 이고
+              ρ = <b>병목 안 인원 ÷ 병목 면적(m²)</b> 입니다. 즉 <b>도형 크기가 판정선을 정합니다</b> —
+              ρcrit 2.0 명/m²(= 1인당 0.5 m²)에 면적 2 m² 면 <b>동시 4명</b>부터 쌓입니다.<br/>
+              ρcrit·w·부채꼴 반경·각도는 병목마다 다릅니다 —
+              <b>[도면 정보]</b> 탭의 병목 목록에서 고치면 면적·필요 인원이 바로 갱신되고 그대로 재계산됩니다.</div>
 
             <div class="thsec">공통 <span>관측 필터 — 4대 지표 전부에 영향</span></div>
             <div class="rpgrid">

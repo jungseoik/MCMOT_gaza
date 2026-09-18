@@ -563,6 +563,10 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
   border:1px solid var(--stroke-3); background:var(--bg-3); color:var(--text-1);
   font-family:var(--font-num); font-size:12px; }
 .rpgeometa .sect{ margin-left:6px; }
+/* 병목 행 — 면적과 "몇 명부터 쌓이나". CBS 는 ρ=인원/면적 이라 도형 크기가 판정선을
+   정한다. 숫자가 안 보이면 "왜 안 울리지"가 된다. */
+.bnarea{ margin-left:8px; color:var(--text-3); font-variant-numeric:tabular-nums;
+  white-space:nowrap; }
 .rpbtns{ margin-top:14px !important; }
 .rpbtns{ display:flex; gap:8px; margin-top:10px; align-items:center; }
 .rpbtns .btn{ flex:1; }
@@ -1117,12 +1121,13 @@ body.rehearsing .rhbanner{ display:block; }
 .tag-btn.xs{ padding:2px 7px; font-size:10.5px; }
 
 .rpgeolist{ display:flex; flex-direction:column; gap:3px; font-size:12.5px; }
-.rpgeorow{ display:grid; grid-template-columns:34px minmax(0,1fr) auto auto; align-items:center;
+.rpgeorow{ display:grid; grid-template-columns:34px minmax(60px,1fr) auto auto; align-items:center;
   gap:9px; padding:6px 8px; background:var(--bg-3); border-radius:var(--r-sm); }
 .rpgeorow.isnew{ box-shadow:inset 2px 0 0 var(--brand,#30DCFB); }
 .rpgeok{ font-size:10.5px; color:var(--text-3); }
 .rpgeoid{ color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.rpgeometa{ font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.rpgeometa{ font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums;
+  display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:2px 0; }
 .rpgeodrop{ margin-top:7px; padding-top:7px; border-top:1px dashed var(--stroke-2);
   font-size:11.5px; color:#e06b6b; line-height:2; }
 

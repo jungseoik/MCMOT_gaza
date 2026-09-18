@@ -731,6 +731,26 @@ Views.replay = (() => {
   }
 
   // ---------------------------------------------------------------- 부채꼴
+  /** 이 세션 도면의 축척 (m/px). 없으면 null → 반경은 px 로 다룬다. */
+  function mPerPx() {
+    const mp = (site && site.map) || {};
+    if (mp.m_per_px) return mp.m_per_px;
+    if (mp.scale_m && mp.scale_px) return mp.scale_m / mp.scale_px;
+    return null;
+  }
+
+  /** 폴리곤 면적 (m²). 신발끈 공식 × (m/px)² — 서버 polygon_area_m2 와 같은 식. */
+  function polyAreaM2(poly) {
+    const k = mPerPx();
+    if (!k || !poly || poly.length < 3) return null;
+    let a = 0;
+    for (let i = 0, n = poly.length; i < n; i++) {
+      const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % n];
+      a += x1 * y2 - x2 * y1;
+    }
+    return Math.abs(a) / 2 * k * k;
+  }
+
   function sectorPoly(c, r, a0, sweep, seg, ri) {
     seg = Math.max(3, Math.min(180, seg || SECTOR_SEG));
     const arc = [];
@@ -969,6 +989,38 @@ Views.replay = (() => {
     ctx.restore();
   }
 
+  /** 병목 행의 입력칸 — ρcrit·w (+부채꼴이면 반경·각도) + 면적·필요인원.
+   *
+   * 면적을 같이 보여주는 이유: CBS 는 ρ = 인원/면적 이라 **도형 크기가 판정선을
+   * 정한다**. 1.4~2.0 m² 짜리 부채꼴이면 ρcrit 2.0 에 4명이 동시에 그 안에
+   * 있어야 울린다 — 숫자를 안 보여주면 "왜 안 울리지"가 된다.
+   * 반경·각도는 ① 맵 설정과 같은 방식으로 polygon 을 다시 만든다(다시 안 찍어도 된다).
+   */
+  function bnFields(o) {
+    const k = mPerPx();
+    const sec = o.shape && o.shape.kind === "sector" ? o.shape : null;
+    const area = polyAreaM2(o.polygon);
+    const need = area != null ? area * (o.rho_crit || 0) : null;
+    const rDisp = sec ? (k ? sec.radius * k : sec.radius) : 0;
+    return `<label title="임계밀도 (명/m²) — 이 밀도를 넘은 만큼만 CBS 에 쌓인다. 역수가 1인당 점유면적(m²/명)">ρ<input
+              class="rpbnum" type="number" step="0.1" min="0.1"
+              data-bn="rho:${o.id}" value="${o.rho_crit}" /></label>
+            <label title="가중치 — 이 병목의 CBS 기여 배수">w<input
+              class="rpbnum" type="number" step="0.1" min="0.1"
+              data-bn="w:${o.id}" value="${o.weight != null ? o.weight : 1}" /></label>`
+      + (sec
+          ? `<label title="부채꼴 반경">r<input class="rpbnum" type="number"
+               step="${k ? 0.1 : 5}" min="0.1" data-bn="rad:${o.id}"
+               value="${rDisp.toFixed(k ? 1 : 0)}" />${k ? "m" : "px"}</label>
+             <label title="부채꼴이 벌어진 각도">∠<input class="rpbnum" type="number"
+               step="5" min="1" max="360" data-bn="ang:${o.id}"
+               value="${Math.round(Math.abs(sec.sweep) * 180 / Math.PI)}" />°</label>`
+          : "")
+      + (area != null
+          ? `<span class="bnarea" title="면적 · 이 ρcrit 에서 CBS 가 쌓이기 시작하는 동시 인원 · 1인당 점유면적(ρcrit 의 역수)">${area.toFixed(1)}m² · ${need.toFixed(1)}명↑ · 1인 ${(1 / (o.rho_crit || 1)).toFixed(2)}m²</span>`
+          : "");
+  }
+
   // ---------------------------------------------------------------- 목록
   function renderGeoList() {
     const box = $("rpGeoList");
@@ -984,13 +1036,7 @@ Views.replay = (() => {
          <span class="rpgeoid" title="${o.id}">${o.name || o.id}</span>
          <span class="rpgeometa">${kind === "경로"
             ? `${o.points.length}점`
-            : `<label title="임계밀도 — 이 밀도를 넘은 만큼만 CBS 에 쌓인다">ρ<input
-                 class="rpbnum" type="number" step="0.1" min="0.1"
-                 data-bn="rho:${o.id}" value="${o.rho_crit}" /></label>
-               <label title="가중치 — 이 병목의 CBS 기여 배수">w<input
-                 class="rpbnum" type="number" step="0.1" min="0.1"
-                 data-bn="w:${o.id}" value="${o.weight != null ? o.weight : 1}" /></label>
-               ${o.shape ? `<span class="sect">부채꼴</span>` : ""}`}</span>
+            : bnFields(o)}</span>
          <button class="tag-btn xs" data-del="${kind === "경로" ? "r" : "b"}:${o.id}"
                  title="제외">제외</button>
        </div>`;
@@ -1014,9 +1060,19 @@ Views.replay = (() => {
         const [k, id] = inp.dataset.bn.split(":");
         const v = parseFloat(inp.value);
         const bn = eGeo.bottlenecks.find((x) => x.id === id);
-        if (!bn || isNaN(v) || v <= 0) { inp.value = bn ? (k === "rho" ? bn.rho_crit : (bn.weight != null ? bn.weight : 1)) : ""; return; }
+        if (!bn || isNaN(v) || v <= 0) { refreshEdit(); return; }   // 잘못된 값 → 원래값 복구
         geoSnapshot();
-        if (k === "rho") bn.rho_crit = v; else bn.weight = v;
+        if (k === "rho") { bn.rho_crit = v; }
+        else if (k === "w") { bn.weight = v; }
+        else if (bn.shape && bn.shape.kind === "sector") {
+          const mk = mPerPx();
+          if (k === "rad") bn.shape.radius = mk ? v / mk : v;
+          else bn.shape.sweep = Math.sign(bn.shape.sweep || 1)
+                                * Math.min(v, 360) * Math.PI / 180;
+          // polygon 은 shape 에서 다시 만든다 — 서버도 같은 식으로 재생성한다
+          bn.polygon = sectorPoly(bn.shape.center, bn.shape.radius, bn.shape.a0,
+                                  bn.shape.sweep, bn.shape.segments || SECTOR_SEG, 0);
+        }
         refreshEdit();
       };
       // 숫자칸 클릭이 목록 선택·지우개로 새지 않게
