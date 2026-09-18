@@ -1221,14 +1221,26 @@ def _save_session(result, timeline, person_series=None,
     tmp.rename(p)
 
 
+def _saved_session_files(floor_id: str):
+    """그 층의 **세션 저장본** 파일들. 편집본 사이드카(.ov.json)는 뺀다.
+
+    Path.stem 은 마지막 확장자 하나만 떼므로 "sess-….ov.json" 의 stem 이
+    "sess-….ov" 가 된다 — 이걸 세션 id 로 오해하면 그 이름의 파일이 실제로
+    존재하므로 _load_saved 가 편집본을 세션 결과로 읽고 KeyError('result') 로
+    /api/drills 가 통째로 500 이 난다(실측: 리플레이 목록이 통째로 빈 화면).
+    """
+    return [q for q in _sessions_dir(floor_id).glob("*.json")
+            if not q.name.endswith(OV_SUFFIX)]
+
+
 def _load_saved(session_id: str, floor_id: str = DEFAULT_FLOOR_ID) -> dict | None:
     p = _sessions_dir(floor_id) / f"{session_id}.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
 
 
 def _latest_saved(floor_id: str = DEFAULT_FLOOR_ID) -> dict | None:
-    # sessions/ 최상위만 스캔(하위 층 디렉토리 제외) — glob("*.json")로 충분
-    files = sorted(_sessions_dir(floor_id).glob("*.json"),
+    # sessions/ 최상위만 스캔(하위 층 디렉토리 제외). 편집본 사이드카는 제외.
+    files = sorted(_saved_session_files(floor_id),
                    key=lambda p: p.stat().st_mtime)
     return json.loads(files[-1].read_text(encoding="utf-8")) if files else None
 
@@ -1494,7 +1506,7 @@ def _drill_session_ids() -> list[str]:
     존재하는 session_id), 최신순."""
     ids = None
     for f in rt.participating_floors():
-        fids = {p.stem for p in _sessions_dir(f).glob("*.json")}
+        fids = {q.stem for q in _saved_session_files(f)}
         ids = fids if ids is None else (ids & fids)
     rec = {p.stem for p in _drills_dir().glob("*.json")}
     return sorted((ids or set()) | rec, reverse=True)
@@ -1792,7 +1804,7 @@ def session_person_series(floor: str = DEFAULT_FLOOR_ID):
 def sessions_list(floor: str = DEFAULT_FLOOR_ID):
     """세션 이력 목록 (요약) — 저장 파일 기반, 최신순 (계약 v1.3)."""
     out = []
-    for p in sorted(_sessions_dir(rt.resolve_floor(floor)).glob("*.json"),
+    for p in sorted(_saved_session_files(rt.resolve_floor(floor)),
                     key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             r = json.loads(p.read_text(encoding="utf-8"))["result"]
