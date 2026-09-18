@@ -657,19 +657,45 @@
           </div>
           <div class="group">
             <div class="gtitle">임계값 조정 <span class="mtag">도면 그대로 · 값만 변경</span></div>
+
+            <div class="thsec">IDR <span>피난 반응 확산 — 구역이 언제 대피를 개시했나</span></div>
             <div class="rpgrid">
-              <label>v_th <input id="rpV" type="number" step="0.1" /><i>m/s</i></label>
-              <label>a_th <input id="rpA" type="number" step="0.05" /><i>cos</i></label>
-              <label>r_th <input id="rpR" type="number" step="0.05" /><i></i></label>
-              <label>dt_hold <input id="rpDt" type="number" step="0.5" /><i>s</i></label>
-              <label title="켜면 구역 평균 정렬도 a_e >= a_th 도 요구(옛 판정식). 끄면 개별 비율 r_th 만."
-                >a_e 요구 <input id="rpMeanA" type="checkbox" /><i></i></label>
-              <label title="EPFI 허용 이탈거리 — 중심선 한쪽 반경(m), 좌우 합 폭은 ×2">d_allow <input id="rpD" type="number" step="0.5" /><i>m</i></label>
-              <label title="모든 병목에 일괄 적용">ρcrit <input id="rpRho" type="number" step="0.1" /><i>명/㎡</i></label>
-              <label>q_design <input id="rpQd" type="number" step="5" /><i>인/분/m</i></label>
-              <label>min_conf <input id="rpMc" type="number" step="0.05" min="0" max="1" /><i></i></label>
-              <label title="이 높이(카메라 px) 미만 박스는 표출·지표 제외. 0=끔">min_box_h <input id="rpMbh" type="number" step="10" min="0" /><i>px</i></label>
+              <label>v_th <input id="rpV" type="number" step="0.1" /><i>m/s</i>
+                <em>구역 평균속도가 이 값 이상이어야 '이동 중'. 올리면 느린 사람이 빠진다</em></label>
+              <label>a_th <input id="rpA" type="number" step="0.05" /><i>cos</i>
+                <em>개인 진행방향이 경로와 이만큼 맞아야. 0.707 = 45°</em></label>
+              <label>r_th <input id="rpR" type="number" step="0.05" /><i>0~1</i>
+                <em>구역 인원 중 위 둘을 <b>동시에</b> 만족해야 하는 비율</em></label>
+              <label>dt_hold <input id="rpDt" type="number" step="0.5" /><i>s</i>
+                <em>그 조건이 이만큼 <b>끊기지 않고</b> 유지돼야 개시로 본다</em></label>
+              <label class="chk">a_e 요구 <input id="rpMeanA" type="checkbox" /><i></i>
+                <em>구역 <b>평균</b> 정렬도도 함께 요구(v1.13 이전 판정식). 끄면 개별 비율 r_th 만 본다</em></label>
             </div>
+
+            <div class="thsec">EPFI <span>경로 충실도 — 권장경로를 얼마나 따라 걸었나</span></div>
+            <div class="rpgrid">
+              <label>d_allow <input id="rpD" type="number" step="0.5" /><i>m</i>
+                <em>허용 이탈거리 — 중심선에서 <b>한쪽 반경</b>. 통로 폭으로 읽으면 ×2</em></label>
+            </div>
+
+            <div class="thsec">SEI <span>비상구 활용 효율 — 출구별 실제·설계 통과량 분포</span></div>
+            <div class="rpgrid">
+              <label>q_design <input id="rpQd" type="number" step="5" /><i>인/분/m</i>
+                <em>단위 유효폭당 설계 통과기준. 출구별로 따로 주면 그 값이 우선</em></label>
+            </div>
+
+            <div class="thsec">CBS <span>병목 혼잡 누적 — 병목이 임계밀도를 넘은 정도</span></div>
+            <div class="gnote sm">임계밀도 <b>ρcrit</b> 과 가중치 <b>w</b> 는 병목마다 다릅니다 —
+              <b>[도면 정보]</b> 탭의 병목 목록에서 값을 고치면 그대로 재계산됩니다.</div>
+
+            <div class="thsec">공통 <span>관측 필터 — 4대 지표 전부에 영향</span></div>
+            <div class="rpgrid">
+              <label>min_conf <input id="rpMc" type="number" step="0.05" min="0" max="1" /><i>0~1</i>
+                <em>이 검출 신뢰도 미만은 표출·지표에서 제외</em></label>
+              <label>min_box_h <input id="rpMbh" type="number" step="10" min="0" /><i>px</i>
+                <em>이 높이(카메라 px) 미만 박스는 제외. 0 = 끔</em></label>
+            </div>
+
             <div class="rpbtns">
               <button class="tag-btn" id="rpReset" disabled>원래값</button>
               <button class="btn primary sm" id="rpApply" disabled>이 값으로 재계산 ↻</button>

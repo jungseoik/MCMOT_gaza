@@ -954,13 +954,21 @@ Views.replay = (() => {
     if (!eGeo) { box.innerHTML = `<div class="mnote">세션을 선택하세요</div>`; return; }
     const baseR = new Set(((site && site.routes) || []).map((r) => r.id));
     const baseB = new Set(((site && site.bottlenecks) || []).map((b) => b.id));
+    // 병목은 CBS 임계밀도(ρcrit)·가중치(w)를 여기서 바로 고친다 — 병목마다 값이
+    // 달라서 임계값 탭의 전역 하나로는 문별 차이를 못 준다. CBS = Σ w_k·∫max(0, ρ-ρcrit)dt
     const row = (kind, o, isNew) =>
       `<div class="rpgeorow${isNew ? " isnew" : ""}">
          <span class="rpgeok">${kind}</span>
          <span class="rpgeoid" title="${o.id}">${o.name || o.id}</span>
          <span class="rpgeometa">${kind === "경로"
             ? `${o.points.length}점`
-            : `ρ${o.rho_crit}${o.shape ? " · 부채꼴" : ""}`}</span>
+            : `<label title="임계밀도 — 이 밀도를 넘은 만큼만 CBS 에 쌓인다">ρ<input
+                 class="rpbnum" type="number" step="0.1" min="0.1"
+                 data-bn="rho:${o.id}" value="${o.rho_crit}" /></label>
+               <label title="가중치 — 이 병목의 CBS 기여 배수">w<input
+                 class="rpbnum" type="number" step="0.1" min="0.1"
+                 data-bn="w:${o.id}" value="${o.weight != null ? o.weight : 1}" /></label>
+               ${o.shape ? `<span class="sect">부채꼴</span>` : ""}`}</span>
          <button class="tag-btn xs" data-del="${kind === "경로" ? "r" : "b"}:${o.id}"
                  title="제외">제외</button>
        </div>`;
@@ -979,6 +987,19 @@ Views.replay = (() => {
                 `<button class="tag-btn xs" data-add="${k === "경로" ? "r" : "b"}:${o.id}">${k} ${o.id} 되살리기</button>`).join(" ")
             + `</div>`
           : "");
+    box.querySelectorAll("[data-bn]").forEach((inp) => {
+      inp.onchange = () => {
+        const [k, id] = inp.dataset.bn.split(":");
+        const v = parseFloat(inp.value);
+        const bn = eGeo.bottlenecks.find((x) => x.id === id);
+        if (!bn || isNaN(v) || v <= 0) { inp.value = bn ? (k === "rho" ? bn.rho_crit : (bn.weight != null ? bn.weight : 1)) : ""; return; }
+        geoSnapshot();
+        if (k === "rho") bn.rho_crit = v; else bn.weight = v;
+        refreshEdit();
+      };
+      // 숫자칸 클릭이 목록 선택·지우개로 새지 않게
+      inp.onclick = (e) => e.stopPropagation();
+    });
     box.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
       const [k, id] = b.dataset.del.split(":");
       geoSnapshot();
@@ -1238,9 +1259,8 @@ Views.replay = (() => {
     th = th || {};
     TH_KEYS.forEach(([id, key]) => { if (th[key] != null) $(id).value = th[key]; });
     $("rpMeanA").checked = !!th.idr_mean_align;   // 불리언이라 value 로 못 넣는다
-    // ρcrit — 세션 병목들의 대표값(첫 병목) 또는 2.0
-    const bns = (site && site.bottlenecks) || [];
-    $("rpRho").value = bns.length ? bns[0].rho_crit : 2.0;
+    // ρcrit·w 는 여기 없다 — 병목마다 값이 달라 대표값 하나로 일괄 적용하면
+    // 문별 차이가 뭉개진다. [도면 정보] 탭의 병목 목록에서 개별로 고친다.
   }
 
   function collectOverrides() {
@@ -1250,10 +1270,9 @@ Views.replay = (() => {
       if (!isNaN(v)) thresholds[key] = v;
     });
     thresholds.idr_mean_align = $("rpMeanA").checked;
-    const ov = { thresholds, fps: 5 };
-    const rho = parseFloat($("rpRho").value);
-    if (!isNaN(rho)) ov.rho_crit = rho;
-    return ov;
+    // ρcrit 전역 일괄값은 보내지 않는다 — 보내면 _apply_overrides 가 기하 적용
+    // **뒤에** 덮어써서 병목별 값이 통째로 날아간다(서버 순서: geometry → rho_crit).
+    return { thresholds, fps: 5 };
   }
 
   async function recompute(extra) {

@@ -543,6 +543,26 @@ body{ background:var(--bg-base); color:var(--text-1); font:var(--body-14, 14px/1
 .rpgrid label input[type="checkbox"]{ width:17px; height:17px; padding:0; justify-self:start;
   accent-color:var(--brand,#30DCFB); cursor:pointer; }
 .rpgrid label i{ font-style:normal; color:var(--text-3); font-size:11px; white-space:nowrap; }
+/* 항목마다 "이게 무슨 설정인가" 한 줄 — 값만 보고는 어느 지표용인지 알 수 없었다.
+   라벨/입력/단위가 1행, 설명이 2행을 통째로 차지한다(3칸 span). */
+.rpgrid label em{ grid-column:1 / -1; font-style:normal; font-size:11px; line-height:1.45;
+  color:var(--text-3); margin-top:-3px; }
+.rpgrid label em b{ color:var(--text-2); font-weight:600; }
+.rpgrid label.chk{ grid-template-columns:auto auto 1fr; }
+/* 임계값 조정 — 지표별 구분 머리 (① 맵설정의 그룹 제목과 같은 결) */
+.thsec{ display:flex; align-items:baseline; gap:8px; margin:16px 0 9px;
+  font-size:12px; font-weight:700; letter-spacing:.02em; color:var(--text-1); }
+.thsec:first-of-type{ margin-top:10px; }
+.thsec::before{ content:""; width:3px; height:12px; border-radius:2px;
+  background:var(--brand,#30DCFB); flex:none; }
+.thsec span{ font-weight:400; font-size:11.5px; color:var(--text-3); letter-spacing:0; }
+.gnote.sm{ font-size:11.5px; margin:0 0 2px; }
+/* 병목 행의 ρcrit·w 입력 — 목록 안에서 바로 고친다 */
+.rpgeometa label{ display:inline-flex; align-items:center; gap:3px; margin-left:6px; }
+.rpbnum{ width:52px; height:24px; padding:0 5px; border-radius:var(--r-sm,5px);
+  border:1px solid var(--stroke-3); background:var(--bg-3); color:var(--text-1);
+  font-family:var(--font-num); font-size:12px; }
+.rpgeometa .sect{ margin-left:6px; }
 .rpbtns{ margin-top:14px !important; }
 .rpbtns{ display:flex; gap:8px; margin-top:10px; align-items:center; }
 .rpbtns .btn{ flex:1; }
@@ -1097,7 +1117,7 @@ body.rehearsing .rhbanner{ display:block; }
 .tag-btn.xs{ padding:2px 7px; font-size:10.5px; }
 
 .rpgeolist{ display:flex; flex-direction:column; gap:3px; font-size:12.5px; }
-.rpgeorow{ display:grid; grid-template-columns:36px 1fr auto auto; align-items:center;
+.rpgeorow{ display:grid; grid-template-columns:34px minmax(0,1fr) auto auto; align-items:center;
   gap:9px; padding:6px 8px; background:var(--bg-3); border-radius:var(--r-sm); }
 .rpgeorow.isnew{ box-shadow:inset 2px 0 0 var(--brand,#30DCFB); }
 .rpgeok{ font-size:10.5px; color:var(--text-3); }
