@@ -281,9 +281,15 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
                 # 모달이 닫혀 있으면 [결과 다시 보기]로 재오픈
                 if pg.locator("#resultModal.hidden").count() and pg.locator("#resReopen").count():
                     pg.locator("#resReopen").click(); pg.wait_for_timeout(800)
-                s.shot("37_result_modal", "#resultModal .modalbox", "평가 결과 상세")
+                s.shot("37_result_modal", "#resultModal .modalbox", "평가 결과 상세(해석형 리포트)")
             except Exception as e2:
                 print(f"  ✗ 37_result_modal: {type(e2).__name__}")
+            # 모달을 닫아야 상단 탭이 클릭된다 (리포트 모달이 화면을 덮는다)
+            try:
+                if pg.locator("#resClose:visible").count():
+                    pg.locator("#resClose").click(); pg.wait_for_timeout(400)
+            except Exception:
+                pass
         except Exception as e:
             print(f"  ✗ 세션 종료/결과: {type(e).__name__}")
 
@@ -295,11 +301,23 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
     try:
         if pg.locator("#rpModeDrill").count():
             pg.locator("#rpModeDrill").click(); pg.wait_for_timeout(1200)
-        pg.locator(".rpsess").first.click(); pg.wait_for_timeout(3500)
+        # 첫 항목이 '측정 불가' 라벨일 수 있어 둘째 항목을 우선 선택
+        rows = pg.locator(".rpsess")
+        (rows.nth(1) if rows.count() > 1 else rows.first).click()
+        pg.wait_for_timeout(3500)
         s.shot("42_replay_drill", note="건물 훈련 재생 — 층 선택·건물 지표")
         if pg.locator("#rpReport").count():
             pg.locator("#rpReport").click(); pg.wait_for_timeout(900)
-            s.shot("43_drill_report", note="건물 훈련 롤업 리포트")
+            s.shot("43_drill_report", "#resultModal .modalbox", "건물 훈련 롤업 리포트 — [종합] 탭")
+            # [ID 재구성] 탭 — 여정 재구성은 리포트를 열 때 이미 돌기 시작한다
+            try:
+                if pg.locator('#resultModal [data-rt="jy"]').count():
+                    pg.locator('#resultModal [data-rt="jy"]').click()
+                    pg.wait_for_timeout(25000)
+                    s.shot("43b_report_reid", "#resultModal .modalbox",
+                           "롤업 리포트 — [ID 재구성](여정 재구성) 탭")
+            except Exception as e3:
+                print(f"  ✗ 43b_report_reid: {type(e3).__name__}")
             if pg.locator("#resClose").count():
                 pg.locator("#resClose").click(); pg.wait_for_timeout(400)
     except Exception as e:
@@ -310,8 +328,26 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
             pg.locator("#rpModeSess").click(); pg.wait_for_timeout(1200)
         pg.locator(".rpsess").first.click(); pg.wait_for_timeout(2500)
         s.shot("41_replay_play", note="세션 재생")
+        # 우측 [지표] 탭 — 재생 시점값·SEI 출구별·IDR 구역별·임계값(지표별 그룹)
+        s.shot("44_replay_metrics", "#rpSide", "리플레이 지표 패널")
+        # [도면 편집] 탭 — 경로·병목을 고쳐 재계산
+        try:
+            if pg.locator('#rpTabs [data-rptab="geo"]').count():
+                pg.locator('#rpTabs [data-rptab="geo"]').click(); pg.wait_for_timeout(900)
+                s.shot("45_replay_geo", note="리플레이 도면 편집 탭 — 도구 막대·요소 목록")
+                pg.locator('#rpTabs [data-rptab="metrics"]').click(); pg.wait_for_timeout(400)
+        except Exception as e:
+            print(f"  ✗ 45_replay_geo: {type(e).__name__}")
     except Exception:
         print("  ✗ 41_replay_play: 재생할 개별 층 세션이 없음")
+
+    # ⑤ 리허설 — 시나리오 선택·4단계 진행 표시
+    try:
+        tab("⑤ 리허설")
+        pg.wait_for_timeout(2000)
+        s.shot("50_rehearsal", note="⑤ 리허설 화면 전체")
+    except Exception as e:
+        print(f"  ✗ 50_rehearsal: {type(e).__name__}")
     b.close()
     return s
 
