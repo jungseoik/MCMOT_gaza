@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 import time
 from collections import deque
@@ -59,6 +60,10 @@ class _ObjState:
     local_id: int
     gid: str
     hist: deque = field(default_factory=deque)   # (ts, x, y) 맵 px
+    # 정지 판정용 병렬 버퍼 — (ts, foot_u, foot_v, box_h) **카메라 px**.
+    # hist 는 맵 px 이라 호모그래피가 bbox 흔들림을 증폭한다. 카메라 px 에서
+    # 자기 키(bbox 높이)로 정규화하면 거리·카메라와 무관한 단일 임계가 선다.
+    foothist: deque = field(default_factory=deque)
     last_ts: float = 0.0
     first_ts: float = 0.0                        # 첫 관측 (체류시간용, v1.5)
     conf: float = 0.0                            # 최근 검출 신뢰도
@@ -120,9 +125,17 @@ class MetricsEngine:
 
     def __init__(self, site: SiteConfig, cameras: list[CameraConfig], *,
                  window_sec: float = 1.0, min_move_m: float = 0.05,
-                 lost_timeout_sec: float = 3.0, margin_m: float = 0.1):
+                 lost_timeout_sec: float = 3.0, margin_m: float = 0.1,
+                 stationary_frac: float | None = None):
         self.window_sec = float(window_sec)
         self.min_move_m = float(min_move_m)
+        # 정지 게이트 임계 — 1초 동안 발끝이 **자기 키(bbox 높이)의 몇 배** 움직였나.
+        # 실측 분리(AI hub 14세션): 정지 유령의 95%분위 ≤0.017 vs 보행 관측 1%분위
+        # ≥0.056. 0.03 이 그 사이. 알고리즘 파라미터라 site.thresholds 가 아니다 —
+        # 현장에서 바꿔야 하면 METRICS_STATIONARY_FRAC 으로 덮는다.
+        self.stationary_frac = float(
+            stationary_frac if stationary_frac is not None
+            else os.environ.get("METRICS_STATIONARY_FRAC", "0.03"))
         self.lost_timeout_sec = float(lost_timeout_sec)
         self.margin_m = float(margin_m)
         self._lock = threading.Lock()
@@ -329,6 +342,10 @@ class MetricsEngine:
                 st.hist.append((ts, p.x, p.y))
                 while len(st.hist) > 1 and ts - st.hist[0][0] > self.window_sec:
                     st.hist.popleft()            # sliding window 유지
+                st.foothist.append((ts, tr.foot_uv[0], tr.foot_uv[1],
+                                    tr.bbox_xyxy[3] - tr.bbox_xyxy[1]))
+                while len(st.foothist) > 1 and ts - st.foothist[0][0] > self.window_sec:
+                    st.foothist.popleft()
                 st.last_ts = ts
                 st.in_bounds = p.in_bounds
                 if sess is not None and gid_eff != okey:
@@ -645,6 +662,20 @@ class MetricsEngine:
         dt는 실제 경과 초(window 양끝 ts 차) — fps 불균일·드랍에 무관
         (webui/speed.py._speed 이식, 거리만 맵 px→m 환산).
         """
+        # 정지 게이트 — 1초 동안 발끝(카메라 px)이 bbox 높이의 stationary_frac 미만으로만
+        # 움직였으면 정지로 보고 **벡터·속도·정렬도를 전부 0/None** 으로 낸다.
+        # 왜 맵이 아니라 카메라 px 인가: 정지 물체라도 검출 bbox 가 출렁이면 발끝
+        # 대표점이 흔들리고, 호모그래피가 그 흔들림을 증폭해 맵에서 가짜 방향벡터가
+        # 뜬다(실측 cam1:262 91초 동안 맵 이동 0.01m 인데 매 프레임 화살표).
+        # bbox 높이로 나눠 크기 정규화하므로 거리·카메라와 무관한 단일 임계면 되고,
+        # 창이 1초라 재출발 온셋 지연이 없다.
+        # box_h 는 median(한 프레임 튐 방어), 5개 원소라 np.median 은 27배 비싸다.
+        fh = st.foothist
+        if len(fh) >= 2:
+            box_h = sorted(f[3] for f in fh)[len(fh) // 2] or 1.0
+            foot_px = math.hypot(fh[-1][1] - fh[0][1], fh[-1][2] - fh[0][2])
+            if foot_px / box_h < self.stationary_frac:
+                return 0.0, 0.0, (0.0 if self._m_per_px is not None else None), None
         t1, x1, y1 = st.hist[-1]
         vx = vy = 0.0
         speed: float | None = 0.0 if self._m_per_px is not None else None
