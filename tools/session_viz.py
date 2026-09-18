@@ -218,6 +218,8 @@ def main() -> int:
     ap.add_argument("--out", default="results/session_viz", help="출력 폴더")
     ap.add_argument("--fps", type=float, default=0,
                     help="출력 fps (0=원본 영상 fps 그대로)")
+    ap.add_argument("--grid-t0", dest="grid_t0", type=float, default=None,
+                    help="경보가 클립 몇 초 지점인지 수동 지정 — 옛 녹화(source_t0 없음) 보정용")
     ap.add_argument("--width", type=int, default=1920, help="출력 가로 px")
     ap.add_argument("--sec", type=float, default=0, help="앞에서 N초만 (0=전체)")
     ap.add_argument("--no-overrides", action="store_true",
@@ -261,7 +263,15 @@ def main() -> int:
         print("영상을 하나도 열지 못했습니다"); return 1
     out_fps = a.fps or max(src_fps.values())
 
-    t0 = float(meta["alarm_ts"])                      # 영상 t=0 ↔ 경보 시각
+    t0 = float(meta["alarm_ts"])                      # 세션 시작(경보) 시각
+    # 그리드 영상의 0번 프레임 ts. 경보는 클립 중간에 걸릴 수 있으므로 alarm_ts 와
+    # 다르다 — 같다고 두면 그리드가 도면보다 (경보−클립시작)만큼 뒤처진다.
+    # 옛 녹화(source_t0 없음)는 예전 동작대로 경보를 클립 0프레임으로 본다.
+    grid_t0 = float(meta.get("source_t0") or t0)
+    if a.grid_t0 is not None:
+        grid_t0 = t0 - float(a.grid_t0)               # 수동 보정(초): 경보의 클립 내 위치
+    if abs(grid_t0 - t0) > 0.05:
+        print(f"[viz] 경보는 클립 {t0 - grid_t0:.1f}s 지점 — 그리드를 그만큼 앞당겨 맞춘다")
     t_end = max(frames[-1]["ts"], tl[-1]["ts"]) if frames else tl[-1]["ts"]
     dur = (t_end - t0) if not a.sec else min(a.sec, t_end - t0)
     n_out = int(dur * out_fps)
@@ -371,7 +381,7 @@ def main() -> int:
             # ── 우: 카메라 그리드 (원본 fps)
             right = np.zeros((PANE_H, RIGHT_W, 3), np.uint8)
             for i, cid in enumerate(caps):
-                want = int(round((t - t0) * src_fps[cid]))
+                want = int(round((t - grid_t0) * src_fps[cid]))
                 cap = caps[cid]
                 if want != pos[cid]:
                     if want != pos[cid] + 1:

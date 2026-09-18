@@ -1155,6 +1155,16 @@ def _session_db_path(session_id: str, floor_id: str = DEFAULT_FLOOR_ID) -> Path:
     return _sessions_dir(floor_id) / f"{session_id}.db"
 
 
+def _filesrc_t0() -> float | None:
+    """파일 소스가 재생 중이면 그 클립의 t=0 시각(= 0번 프레임의 ts). 아니면 None."""
+    fs = getattr(rt, "filesrc", None)
+    if fs is None:
+        return None
+    st = fs.status() if (fs.active or fs.mode == "done") else {}
+    t0 = st.get("t0")
+    return float(t0) if t0 else None
+
+
 def _attach_recorder(eng, floor_id: str, live) -> None:
     """세션 시작 시 녹화기 부착 — 그 층의 공간요소·카메라 스냅샷을 meta로 저장.
     스냅샷이 있어야 리플레이가 세션 당시 도면 기준으로 결정적 재생된다.
@@ -1176,6 +1186,11 @@ def _attach_recorder(eng, floor_id: str, live) -> None:
         "site_view": site.as_floor_view(floor_id).model_dump(),
         "cameras": [c.model_dump() for c in floor_cams],
         "global_id": bool(_gid_settings_now()["enabled"]),   # 이 세션의 측정 모드 (v1.13)
+        # 파일(리허설) 재생의 **클립 0프레임 ts** — 영상과 지표를 맞출 기준시각.
+        # 경보는 클립 중간에 걸릴 수 있어 alarm_ts 로는 영상 위치를 알 수 없다
+        # (실측: 배치 녹화 14건이 클립 0.9~8.0s 지점에서 경보 → 그리드 영상이
+        # 도면보다 그만큼 뒤처졌다). RTSP 라이브면 None.
+        "source_t0": _filesrc_t0(),
     }
     rec = SessionRecorder(_session_db_path(live.session_id, floor_id), meta)
     eng.attach_recorder(rec)

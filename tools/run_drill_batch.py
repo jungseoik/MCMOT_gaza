@@ -101,14 +101,22 @@ def run_one(scen: str, prefix: str, dry: bool) -> str | None:
     st = req("/api/vsource/standby", {"scenario_id": sid})
     floors = st.get("floors") or []
     time.sleep(3)
-    req("/api/vsource/start", {"scenario_id": sid})
-    time.sleep(1.5)
+    pl = req("/api/vsource/start", {"scenario_id": sid})
+    # 경보는 **클립 t=0**(= 응답의 alarm_at)에 건다. 예전처럼 start 뒤 sleep 하고
+    # 서버가 가상시각으로 잡게 두면, 파일 재생이 NODROP 으로 벽시계보다 1.6~2.3배
+    # 빨라 클립이 이미 0.9~8.0s 흘러간 뒤에 경보가 걸린다(실측 14건). 그러면
+    #   · 그리드 영상이 도면보다 그만큼 뒤처지고
+    #   · 개시 지연이 시나리오마다 다른 기준에서 재져 서로 비교가 안 된다.
+    t_alarm = pl.get("alarm_at")
     fo = {f: ORIGINS[f] for f in floors if f in ORIGINS}
     if not fo:
         print(f"  ! {scen}: 경보 원점 없는 층 {floors} — 건너뜀")
         req("/api/vsource/stop", {}) if True else None
         return None
-    d = req("/api/drill/start", {"floor_origins": fo, "floors": floors, "label": label})
+    body = {"floor_origins": fo, "floors": floors, "label": label}
+    if t_alarm:
+        body["t_alarm"] = float(t_alarm)      # 클립 0프레임 = 경보 (v1 녹화와 동일)
+    d = req("/api/drill/start", body)
     sess = d.get("session_id") or d.get("id")
     ok = wait_idle(floors)
     if not ok:
