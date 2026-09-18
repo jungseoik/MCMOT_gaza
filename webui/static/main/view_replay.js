@@ -635,7 +635,7 @@ Views.replay = (() => {
    *    (schema 의 _rebuild_from_shape) — 기하식이 한 곳에만 있게.
    */
   const SECTOR_SEG = 24;
-  let eTool = "pan";          // pan | route | bnsector | erase
+  let eTool = "pan";          // pan | route | bnpoly | bnsector | erase
   let eDraft = null;          // {pts:[[x,y],...]}
   let eHover = null;          // 부채꼴 미리보기 커서
   let eGeo = null;            // {routes:[...], bottlenecks:[...]} — 편집 중인 사본
@@ -677,7 +677,7 @@ Views.replay = (() => {
 
   function setETool(t) {
     eTool = t;
-    eDraft = (t === "route" || t === "bnsector") ? { pts: [] } : null;
+    eDraft = (t === "route" || t === "bnpoly" || t === "bnsector") ? { pts: [] } : null;
     eHover = null;
     if (mc) mc.freehand = (t === "route");
     document.querySelectorAll("#rpTools .tag-btn").forEach((b) =>
@@ -687,6 +687,7 @@ Views.replay = (() => {
     const H = {
       pan: "",
       route: "피난경로: 클릭으로 꼭짓점 추가, 드래그로 자유곡선. 더블클릭 또는 [완료]로 종료 (2점 이상).",
+      bnpoly: "병목 다각형: 클릭으로 꼭짓점 추가. 더블클릭 또는 [완료]로 닫습니다 (3점 이상).",
       bnsector: "병목 부채꼴: ① 중심 ② 반경·시작방향 ③ 끝방향 — 세 번째 클릭에 생성됩니다.",
       erase: "지우개 — 맵에서 제외할 경로·병목을 클릭하세요. [되돌리기]로 복구됩니다.",
     };
@@ -777,11 +778,12 @@ Views.replay = (() => {
     if (!eDraft) return;
     eDraft.pts.push([p.x, p.y]);
     if (eTool === "bnsector" && eDraft.pts.length >= 3) { eFinish(); return; }
+    // bnpoly 는 자동완료가 없다 — 더블클릭/[완료] 로 닫는다(꼭짓점 수가 자유)
     refreshEdit();
   }
 
   function eOnDragDraw(p, first) {                  // 경로 자유곡선
-    if (!eDraft || eTool !== "route") return;
+    if (!eDraft || (eTool !== "route" && eTool !== "bnpoly")) return;
     const last = eDraft.pts[eDraft.pts.length - 1];
     if (first || !last || Math.hypot(p.x - last[0], p.y - last[1]) > 6 / mc.s) {
       eDraft.pts.push([p.x, p.y]);
@@ -804,6 +806,19 @@ Views.replay = (() => {
       if (pts.length < 2) { $("rpHint").textContent = "경로는 2점 이상이어야 합니다."; return; }
       geoSnapshot();
       eGeo.routes.push({ id: nextId(eGeo.routes, "ed-r"), name: "", points: pts.slice() });
+    } else if (eTool === "bnpoly") {
+      // 문 앞이 아닌 통로·계단참처럼 부채꼴로 안 떨어지는 병목 — ① 맵 설정의
+      // '병목' 도구와 같은 자유 다각형이다(shape 없음 = polygon 이 곧 진실).
+      if (pts.length < 3) { $("rpHint").textContent = "병목 다각형은 3점 이상이어야 합니다."; return; }
+      geoSnapshot();
+      const ref0 = (site && site.bottlenecks && site.bottlenecks[0]) || {};
+      eGeo.bottlenecks.push({
+        id: nextId(eGeo.bottlenecks, "ed-b"), name: "",
+        polygon: pts.slice(),
+        rho_crit: ref0.rho_crit != null ? ref0.rho_crit : 2.0,
+        weight: ref0.weight != null ? ref0.weight : 1.0,
+        shape: null, group: "",
+      });
     } else if (eTool === "bnsector") {
       const sh = draftSector(pts[2] || eHover);
       if (!sh || !sh.sweep) { $("rpHint").textContent = "부채꼴을 만들 수 없습니다 — 세 점을 다시 찍어주세요."; return; }
@@ -924,6 +939,13 @@ Views.replay = (() => {
     // 그리는 중인 드래프트
     if (eDraft && eDraft.pts.length) {
       ctx.strokeStyle = "#ffd166"; ctx.fillStyle = "rgba(255,209,102,.2)"; ctx.lineWidth = 2;
+      if (eTool === "bnpoly" && eDraft.pts.length >= 2) {
+        ctx.beginPath();
+        eDraft.pts.forEach((q, i) => (i ? ctx.lineTo(TX(q[0]), TY(q[1]))
+                                        : ctx.moveTo(TX(q[0]), TY(q[1]))));
+        ctx.closePath();
+        ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2; ctx.stroke();
+      }
       if (eTool === "bnsector" && eDraft.pts.length >= 2) {
         const sh = draftSector(eDraft.pts[2] || eHover);
         if (sh) {

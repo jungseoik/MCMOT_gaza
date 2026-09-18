@@ -584,7 +584,8 @@
           <span class="seg" id="rpTools">
             <button class="tag-btn on" data-etool="pan" title="편집 안 함 — 줌·팬만">보기</button>
             <button class="tag-btn" data-etool="route" title="피난경로 그리기 — 클릭으로 꼭짓점, 드래그로 자유곡선, 더블클릭/[완료]로 종료">경로 그리기</button>
-            <button class="tag-btn" data-etool="bnsector" title="병목 부채꼴 — ① 중심 ② 반경·시작방향 ③ 끝방향, 세 번째 클릭에 생성">병목 그리기</button>
+            <button class="tag-btn" data-etool="bnpoly" title="병목 다각형 — 클릭으로 꼭짓점, 더블클릭/[완료]로 닫음 (3점 이상)">병목 다각형</button>
+            <button class="tag-btn" data-etool="bnsector" title="병목 부채꼴 — ① 중심 ② 반경·시작방향 ③ 끝방향, 세 번째 클릭에 생성">병목 부채꼴</button>
             <button class="tag-btn" data-etool="erase" title="지우개 — 맵에서 경로·병목을 클릭하면 그 요소를 제외합니다. [되돌리기]로 복구">지우개</button>
           </span>
           <button class="tag-btn hidden" id="rpEdDone">완료 ⏎</button>
@@ -712,7 +713,7 @@
               이 세션의 <b>피난경로·병목</b>을 고쳐 지표를 다시 계산합니다.
               <b>녹화본은 바뀌지 않습니다</b> — 편집본은 이 세션에만 따로 저장되고,
               [원본 도면으로] 를 누르면 언제든 녹화 당시 도면으로 돌아갑니다.<br/>
-              맵 위 도구 — <b>경로 그리기</b>·<b>병목 그리기</b> 로 추가하고, <b>지우개</b> 로 맵에서 요소를 클릭하면 제외됩니다.
+              맵 위 도구 — <b>경로 그리기</b>·<b>병목 다각형</b>·<b>병목 부채꼴</b> 로 추가하고, <b>지우개</b> 로 맵에서 요소를 클릭하면 제외됩니다.
             </div>
             <div id="rpGeoList" class="rpgeolist"></div>
           </div>
