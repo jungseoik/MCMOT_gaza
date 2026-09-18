@@ -211,6 +211,20 @@ def latest_at(seq, t, key=lambda x: x[0]):
     return ans
 
 
+def out_stem(session: str, floor: str, label: str | None) -> str:
+    """출력 파일명 — 세션 id 대신 **라벨**을 쓴다.
+
+    sess-1789693149252_floor4.mp4 만 보고는 뭘 재생할지 알 수 없다.
+    라벨이 "01 IDR 권장경로 · 우측 우회 2명" 이면
+    "01_IDR_권장경로_우측_우회_2명_floor4.mp4" 가 된다(정렬도 번호순).
+    라벨이 없는 옛 세션은 예전처럼 세션 id 를 쓴다.
+    """
+    if not label:
+        return f"{session}_{floor}"
+    stem = re.sub(r"[^\w가-힣]+", "_", label).strip("_")
+    return f"{stem}_{floor}" if stem else f"{session}_{floor}"
+
+
 # ------------------------------------------------------------------ 본체
 def main() -> int:
     ap = argparse.ArgumentParser(description="세션 녹화본 → 도면·그리드·4대지표 영상")
@@ -332,8 +346,9 @@ def main() -> int:
 
     outdir = ROOT / a.out
     outdir.mkdir(parents=True, exist_ok=True)
-    tmp = outdir / f"{a.session}_{floor}.tmp.mp4"
-    final = outdir / f"{a.session}_{floor}.mp4"
+    stem = out_stem(a.session, floor, label)
+    tmp = outdir / f"{stem}.tmp.mp4"
+    final = outdir / f"{stem}.mp4"
     vw = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (OW, OH))
 
     cur = {cid: None for cid in caps}
