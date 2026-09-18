@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT)); os.chdir(ROOT)
 from system.metrics.replay import run_replay                   # noqa: E402
 
-PREFIX = "경로v2"
+PREFIX = "대피경로"
 # 운영 기본값(v1.13 라이브)에서 dt_hold 만 내린 값 — 근거는 grid 결과(보고서 §2)
 BASE = {"v_th": 0.5, "a_th": 0.707, "r_th": 0.7, "dt_hold": 1.0}
 LIVE = {"v_th": 0.5, "a_th": 0.707, "r_th": 0.7, "dt_hold": 3.0}   # 현행 배포 기본값

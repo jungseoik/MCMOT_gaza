@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT)); os.chdir(ROOT)
 from system.metrics import journey as J                        # noqa: E402
 
-PREFIX = "경로v2"
+PREFIX = "대피경로"
 D_ALLOWS = [2, 4, 6, 8, 10, 12, 14, 16, 20, 25]
 BASE_D = 12.0
 # ReID 재구성 인자 — 기본값에서 하나씩만 바꾼다

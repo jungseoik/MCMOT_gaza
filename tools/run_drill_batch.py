@@ -8,8 +8,8 @@ UI(⑤ 리허설 [준비] → ③ 운영 뷰 [🎬 리허설 훈련 시작])와 
   3) /api/drill/start       경보 세션 — t_alarm 은 서버가 filesrc 가상시각으로 잡는다
   4) 재생이 끝나면 서버가 자동으로 세션을 닫는다(_on_rehearsal_done)
 
-    python tools/run_drill_batch.py --prefix "경로v2" --dry
-    python tools/run_drill_batch.py --prefix "경로v2"
+    python tools/run_drill_batch.py --prefix "대피경로" --dry
+    python tools/run_drill_batch.py --prefix "대피경로"
 """
 from __future__ import annotations
 
@@ -23,7 +23,8 @@ import urllib.request
 BASE = "http://127.0.0.1:8900"
 PKG = "pkg:aihub-drill-1f3f"
 
-# 각본 이름 — 세션 라벨에 붙는다. 나중에 무엇을 본 세션인지 알아보기 위해.
+# 각본 이름 — 실행 로그에만 쓴다. 세션 라벨은 "대피경로 NN" 으로 짧게 간다
+# (④ 리플레이 목록이 한 줄로 읽혀야 한다 — 긴 설명은 여기 표와 보고서에 있다).
 NAMES = {
     "scenario_01": "IDR 권장경로 2명+우측 우회 2명",
     "scenario_02": "IDR 매우 느린 속도",
@@ -94,9 +95,9 @@ def force_stop():
 
 def run_one(scen: str, prefix: str, dry: bool) -> str | None:
     sid = f"{PKG}:{scen}"
-    label = f"{prefix} {scen[-2:]} {NAMES.get(scen, scen)}"
+    label = f"{prefix} {scen[-2:]}"
     if dry:
-        print(f"  [dry] {sid}  →  {label}")
+        print(f"  [dry] {sid}  →  {label} · {NAMES.get(scen, '')}")
         return None
     st = req("/api/vsource/standby", {"scenario_id": sid})
     floors = st.get("floors") or []
@@ -121,14 +122,15 @@ def run_one(scen: str, prefix: str, dry: bool) -> str | None:
     ok = wait_idle(floors)
     if not ok:
         force_stop()                        # 타임아웃이면 강제로 닫고 다음으로
-    print(f"  {'ok  ' if ok else 'TIMEOUT'} {scen}  {label}  → {sess}", flush=True)
+    print(f"  {'ok  ' if ok else 'TIMEOUT'} {scen}  {label} · {NAMES.get(scen, '')}"
+          f"  → {sess}", flush=True)
     time.sleep(3)
     return sess
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--prefix", default="경로v2", help="세션 라벨 앞머리")
+    ap.add_argument("--prefix", default="대피경로", help="세션 라벨 앞머리")
     ap.add_argument("--only", help="쉼표로 시나리오 지정 (예: scenario_01,scenario_02)")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
