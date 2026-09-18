@@ -1668,6 +1668,22 @@ async def drill_thumb(session_id: str, cam: str, lid: int,
     raise HTTPException(status_code=404, detail="썸네일 없음 (녹화 schema ≤4 이거나 트랙렛 미존재)")
 
 
+def _effective_site_view(meta: dict, ov: dict | None) -> dict:
+    """배경 렌더용 도면 — 녹화 스냅샷에 **이번 재계산에 쓴 편집본**을 얹어 돌려준다.
+
+    스냅샷을 그대로 내려주면 지표는 편집본으로 계산되는데 맵에는 옛 도면이
+    그려진다 — 지운 병목이 계속 보이고 새로 그린 병목은 안 보여, 사용자에게는
+    "편집이 적용 안 됨"으로 보인다(실측: ed-b1 추가·b1 삭제 후 맵에 b1 잔존).
+    녹화본(.db)은 건드리지 않는다 — 여기서 만든 사본만 바꾼다.
+    """
+    sv = dict(meta.get("site_view") or {})
+    geo = (ov or {}).get("geometry") or {}
+    for k in ("routes", "bottlenecks"):
+        if geo.get(k) is not None:
+            sv[k] = geo[k]
+    return sv
+
+
 @app.post("/api/drill/{session_id}/replay")
 async def drill_replay(session_id: str, request: Request):
     """건물 드릴 재계산 — 참여 각 층의 녹화 db를 같은 오버라이드로 리플레이하고
@@ -1713,7 +1729,7 @@ async def drill_replay(session_id: str, request: Request):
             run_replay, db, per, fps)
         floors.append((f, result.model_dump()))
         frames_by_floor[f] = frames
-        site_by_floor[f] = meta.get("site_view")
+        site_by_floor[f] = _effective_site_view(meta, per)
         # 재생 커서 시점의 지표를 보여주려면 1초 타임라인이 필요하다 — 최종
         # result 만 내려보내면 재생 내내 같은 숫자가 박혀 있게 된다.
         timeline_by_floor[f] = [t.model_dump() for t in timeline]
@@ -1841,7 +1857,8 @@ async def session_replay(session_id: str, request: Request,
         "overrides": overrides,               # 지금 적용된 편집본
         "timeline": [t.model_dump() for t in timeline],
         "frames": frames,
-        "site": meta.get("site_view"),        # 세션 당시 공간요소(배경 렌더용)
+        # 세션 당시 공간요소 + 이번 편집본 (배경 렌더용)
+        "site": _effective_site_view(meta, overrides),
         "meta": {k: meta.get(k) for k in
                  ("session_id", "floor_id", "alarm_ts", "alarm_origins",
                   "site_version", "call_count", "track_row_count")},
