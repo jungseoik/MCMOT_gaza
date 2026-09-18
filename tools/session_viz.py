@@ -160,8 +160,11 @@ def resolve_clips(cam_ids: list[str], label: str,
         if m:
             scen_id = m.group(1)
         else:
-            # 라벨이 "경로v2 01 …" 처럼 번호만 있는 경우 — 앞머리 뒤 두 자리를 시나리오로 본다
-            m2 = re.match(r"^\S+\s+(\d{1,2})\b", label or "")
+            # scenario_NN 이 없는 라벨에서 시나리오 번호를 뽑는다.
+            #   "01 IDR 권장경로 · 우측 우회 2명"  → 맨 앞 두 자리 (현행)
+            #   "대피경로 01 …" / "경로v2 01 …"    → 앞머리 뒤 두 자리 (옛 라벨)
+            m2 = (re.match(r"^(\d{1,2})\b", label or "")
+                  or re.match(r"^\S+\s+(\d{1,2})\b", label or ""))
             if m2:
                 scen_id = f"scenario_{int(m2.group(1)):02d}"
     if not scen_id:

@@ -8,8 +8,8 @@ UI(⑤ 리허설 [준비] → ③ 운영 뷰 [🎬 리허설 훈련 시작])와 
   3) /api/drill/start       경보 세션 — t_alarm 은 서버가 filesrc 가상시각으로 잡는다
   4) 재생이 끝나면 서버가 자동으로 세션을 닫는다(_on_rehearsal_done)
 
-    python tools/run_drill_batch.py --prefix "대피경로" --dry
-    python tools/run_drill_batch.py --prefix "대피경로"
+    python tools/run_drill_batch.py --dry
+    python tools/run_drill_batch.py
 """
 from __future__ import annotations
 
@@ -23,22 +23,22 @@ import urllib.request
 BASE = "http://127.0.0.1:8900"
 PKG = "pkg:aihub-drill-1f3f"
 
-# 각본 이름 — 실행 로그에만 쓴다. 세션 라벨은 "대피경로 NN" 으로 짧게 간다
-# (④ 리플레이 목록이 한 줄로 읽혀야 한다 — 긴 설명은 여기 표와 보고서에 있다).
+# 세션 라벨 = "NN <각본>". ④ 리플레이 목록에서 각본이 바로 구분돼야 하므로
+# 번호만으로는 부족하고, 원래 각본 설명을 한 줄로 압축해 쓴다.
 NAMES = {
-    "scenario_01": "IDR 권장경로 2명+우측 우회 2명",
-    "scenario_02": "IDR 매우 느린 속도",
-    "scenario_03": "IDR 2초 멈췄다 이동",
-    "scenario_04": "EPFI 2명 완전 빙 돌아",
+    "scenario_01": "IDR 권장경로 · 우측 우회 2명",
+    "scenario_02": "IDR 권장경로 · 매우 느린 속도",
+    "scenario_03": "IDR 2초 멈췄다 이동 반복",
+    "scenario_04": "EPFI 2명 완전 우회 진입",
     "scenario_05": "EPFI 2명 시작점 복귀 후 재진입",
-    "scenario_06": "EPFI 1명 빙빙 돌기",
-    "scenario_07": "CBS 2열 진입(밀도 아님)",
-    "scenario_08": "CBS 문 근처 밀집 2회(밀도)",
-    "scenario_09": "CBS 5명+중간 5명 합류(밀도 아님)",
+    "scenario_06": "EPFI 1명 빙빙 돌아 진입",
+    "scenario_07": "CBS 2열 진입 (밀도 아님)",
+    "scenario_08": "CBS 문 앞 밀집 2회 (밀도)",
+    "scenario_09": "CBS 5명 + 중간 5명 합류 (밀도 아님)",
     "scenario_10": "SEI 7:3 분산",
-    "scenario_11": "SEI 7:3 + 2명 재진입(7+2=9)",
+    "scenario_11": "SEI 7:3 + 2명 재진입 (7+2=9)",
     "scenario_12": "1층 출구 나가기",
-    "scenario_13": "1층 출구→흡연장",
+    "scenario_13": "1층 출구 → 흡연장",
     "scenario_14": "1층 반반 나눠 나가기",
 }
 ORIGINS = {"floor4": [[775.0, 229.0]], "floor5": [[1040.0, 1040.0]]}
@@ -93,11 +93,11 @@ def force_stop():
             pass
 
 
-def run_one(scen: str, prefix: str, dry: bool) -> str | None:
+def run_one(scen: str, dry: bool) -> str | None:
     sid = f"{PKG}:{scen}"
-    label = f"{prefix} {scen[-2:]}"
+    label = f"{scen[-2:]} {NAMES.get(scen, scen)}"
     if dry:
-        print(f"  [dry] {sid}  →  {label} · {NAMES.get(scen, '')}")
+        print(f"  [dry] {sid}  →  {label}")
         return None
     st = req("/api/vsource/standby", {"scenario_id": sid})
     floors = st.get("floors") or []
@@ -122,28 +122,26 @@ def run_one(scen: str, prefix: str, dry: bool) -> str | None:
     ok = wait_idle(floors)
     if not ok:
         force_stop()                        # 타임아웃이면 강제로 닫고 다음으로
-    print(f"  {'ok  ' if ok else 'TIMEOUT'} {scen}  {label} · {NAMES.get(scen, '')}"
-          f"  → {sess}", flush=True)
+    print(f"  {'ok  ' if ok else 'TIMEOUT'} {scen}  {label}  → {sess}", flush=True)
     time.sleep(3)
     return sess
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--prefix", default="대피경로", help="세션 라벨 앞머리")
     ap.add_argument("--only", help="쉼표로 시나리오 지정 (예: scenario_01,scenario_02)")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     scens = ([s.strip() for s in a.only.split(",")] if a.only
              else [f"scenario_{i:02d}" for i in range(1, 15)])
-    print(f"[batch] {len(scens)}건 · 라벨 앞머리 {a.prefix!r}")
+    print(f"[batch] {len(scens)}건 · 라벨 = \"NN <각본>\"")
     done = []
     for i, s in enumerate(scens, 1):
         print(f"[{i}/{len(scens)}] {s}", flush=True)
         try:
             if not a.dry:
                 force_stop(); time.sleep(2)   # 앞 실행 잔여물 정리
-            r = run_one(s, a.prefix, a.dry)
+            r = run_one(s, a.dry)
             if r:
                 done.append(r)
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:

@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT)); os.chdir(ROOT)
 from system.metrics import journey as J                        # noqa: E402
 
-PREFIX = "대피경로"
+# 대상 세션 라벨은 "NN <지표> <각본>" 형태(앞 두 자리가 시나리오 번호)
+LABEL_RE = __import__("re").compile(r"^(\d{2})\s+\S")
 D_ALLOWS = [2, 4, 6, 8, 10, 12, 14, 16, 20, 25]
 BASE_D = 12.0
 # ReID 재구성 인자 — 기본값에서 하나씩만 바꾼다
@@ -36,9 +37,10 @@ def sessions():
     out = {}
     for p in sorted(glob.glob('data/sites/default/sessions/_drills/*.json')):
         d = json.load(open(p)); lab = d.get("label") or ""
-        if not lab.startswith(PREFIX):
+        m = LABEL_RE.match(lab)
+        if not m:
             continue
-        num = lab.split()[1]
+        num = m.group(1)
         for fl in ("floor4", "floor5"):
             db = f"data/sites/default/sessions/{fl}/{d['session_id']}.db"
             if os.path.exists(db):
