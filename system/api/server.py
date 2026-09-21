@@ -1387,10 +1387,25 @@ def _merge_overrides(session_id: str, floor_id: str, body: dict) -> dict:
     return merged
 
 
+def _floors_with_saved(sid: str) -> list[str]:
+    """그 session_id 의 **저장본이 실제로 있는** 층. 사이트 층 순서 유지."""
+    try:
+        order = [fl.id for fl in rt.site().floors]
+    except Exception:
+        order = []
+    return [f for f in order if (_sessions_dir(f) / f"{sid}.json").is_file()]
+
+
 def _drill_floors(sid: str) -> list[str]:
-    """드릴의 참여 층 — 레코드가 있으면 그것, 없으면(예전 드릴) 지금 참여 층."""
+    """드릴의 참여 층 — 레코드가 있으면 그것, 없으면 **저장본이 있는 층**.
+
+    예전에는 레코드가 없으면 rt.participating_floors()(=지금 카메라가 붙은 층)로
+    추정했다. 그 값은 런타임 상태다 — 리허설을 붙였다 뗄 때마다 바뀌므로, 같은
+    훈련이 목록에 나타났다 사라졌다 했다(실측: floor4 만 붙은 순간 61건, 두 층이
+    붙으면 50건). 저장본 위치는 파일이라 안 바뀐다.
+    """
     m = _drill_meta(sid)
-    return list(m["floors"]) if m and m.get("floors") else rt.participating_floors()
+    return list(m["floors"]) if m and m.get("floors") else _floors_with_saved(sid)
 
 
 def _drill_rollup(session_id: str) -> dict:
@@ -1502,14 +1517,27 @@ def drill_result(session_id: str):
 
 
 def _drill_session_ids() -> list[str]:
-    """드릴 id — 명시 레코드(sessions/_drills/*.json) ∪ 예전 방식(참여 층 전부에 공통
-    존재하는 session_id), 최신순."""
-    ids = None
-    for f in rt.participating_floors():
-        fids = {q.stem for q in _saved_session_files(f)}
-        ids = fids if ids is None else (ids & fids)
+    """건물 훈련 id — 명시 레코드(sessions/_drills/*.json) ∪ **2개 층 이상에
+    같은 session_id 저장본이 있는 것**(레코드 없던 예전 훈련), 최신순.
+
+    예전 규칙은 "지금 참여 중인 층 **전부**에 공통 존재하는 id" 였는데, 참여 층이
+    런타임 상태(리허설 부착·파킹)라 목록이 붙였다 뗄 때마다 달라졌다. 한 층짜리
+    저장본이 그 층만 붙은 순간 '건물 훈련'으로 승격돼 끼어들었다가 다음 순간
+    사라진다(실측 61 ↔ 50건). 건물 훈련의 정의는 "여러 층이 한 session_id 를
+    공유한다" 이므로, 층 수로 판정하면 파일만 보고 결정된다 — 상태 의존이 없다.
+    한 층짜리 세션은 ④ 리플레이의 **개별 세션** 목록에 그대로 남는다.
+    """
+    seen: dict[str, int] = {}
+    try:
+        order = [fl.id for fl in rt.site().floors]
+    except Exception:
+        order = []
+    for f in order:
+        for q in _saved_session_files(f):
+            seen[q.stem] = seen.get(q.stem, 0) + 1
+    multi = {sid for sid, n in seen.items() if n >= 2}
     rec = {p.stem for p in _drills_dir().glob("*.json")}
-    return sorted((ids or set()) | rec, reverse=True)
+    return sorted(multi | rec, reverse=True)
 
 
 @app.delete("/api/drill/{session_id}")

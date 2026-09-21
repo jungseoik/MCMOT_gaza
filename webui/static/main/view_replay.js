@@ -51,9 +51,20 @@ Views.replay = (() => {
   async function loadList() {
     $("rpConn").textContent = "불러오는 중…";
     if (mode === "drill") {
-      try { drills = await API.getDrills(); } catch (e) { drills = []; }
+      // 조회 실패를 조용히 삼키면 "저장된 건물 훈련 없음"으로 보인다 — 서버가
+      // 500 을 내도 사용자에겐 '훈련이 없다'로 읽혀 원인을 못 찾는다(실측).
+      let err = null;
+      try { drills = await API.getDrills(); }
+      catch (e) { drills = []; err = e; }
       renderDrillList();
-      $("rpConn").textContent = `${drills.length}건`;
+      if (err) {
+        $("rpConn").textContent = "불러오기 실패";
+        $("rpSessList").innerHTML =
+          `<div class="grow">건물 훈련 목록을 불러오지 못했습니다 — `
+          + `${(err.message || err)}<br/>서버 로그를 확인하세요.</div>`;
+      } else {
+        $("rpConn").textContent = `${drills.length}건`;
+      }
       return;
     }
     try {
