@@ -689,10 +689,13 @@ const Session = (() => {
 
   function drawSeiGrouped(cv, labels, dShares, aShares) {
     const n = labels.length;
-    const W = cv.parentElement.clientWidth || 300;
-    const H = 180;
-    cv.width = W; cv.height = H;
-    const ctx = cv.getContext("2d");
+    // 부모 폭·고정 높이 180 으로 비트맵을 잡던 코드였다. 표출 밀도를 바꾸면 CSS 가
+    // 캔버스 박스를 바꾸는데(요약 모드는 height:100%) 비트맵은 그대로라, 브라우저가
+    // 옛 그림을 늘려 그려 **확대·픽셀 깨짐**이 났다. 스파크·히스토그램이 쓰는
+    // cvCtx 로 통일한다 — 자기 박스 × devicePixelRatio 로 잡아 항상 선명하다.
+    const g = cvCtx(cv);
+    if (!g) return;
+    const { ctx, w: W, h: H } = g;
 
     const PAD_L = 44, PAD_R = 8, PAD_T = 12, PAD_B = 34;
     const plotW = W - PAD_L - PAD_R;
@@ -974,9 +977,9 @@ const Session = (() => {
   }
 
   function drawIdrTimeline(cv, { maxWindow, delay, elapsed, isDetected }) {
-    const ctx = cv.getContext("2d");
-    const W = cv.width, H = cv.height;
-    ctx.clearRect(0, 0, W, H);
+    const g = cvCtx(cv);
+    if (!g) return;
+    const { ctx, w: W, h: H } = g;      // cvCtx 가 dpr 보정·clear 까지 한다
 
     const PAD = 4, MID = Math.round(H / 2), BH = Math.round(H * 0.38);
     const AX = PAD, AXR = W - PAD, usable = AXR - AX;
@@ -1091,7 +1094,8 @@ const Session = (() => {
       zm.forEach((z) => {
         const cv = document.getElementById(`idrcv_${z.zone_id}`);
         if (!cv) return;
-        cv.width = cv.getBoundingClientRect().width || 180;
+        // 폭만 재고 높이는 HTML 속성(38)에 맡기던 코드 — dpr 미적용이라 HiDPI 에서
+        // 흐렸고, 밀도 전환으로 CSS 높이가 바뀌면 비트맵이 늘어났다. cvCtx 로 통일.
         drawIdrTimeline(cv, {
           maxWindow,
           delay: z.response_delay_sec,
@@ -1108,6 +1112,21 @@ const Session = (() => {
     if (!el || !window.Grade) return;
     el.innerHTML = (v == null) ? "" : Grade.pill(v, metric, true);
   }
+
+  /* 표출 밀도(요약·기본·카드) 전환·패널 접기·창 크기 변경 → 캔버스 박스가 바뀐다.
+   * ③ 운영 뷰에는 resize 리스너가 **없었다** — PanelView 가 resize 를 쏘는데 듣는
+   * 곳이 ④ 리플레이뿐이라, 밀도를 바꾸면 SEI·IDR 그림이 옛 비트맵 그대로 CSS 로
+   * 늘어나 확대·픽셀 깨짐이 났다. 한 프레임 뒤(레이아웃 확정 후) 다시 그린다. */
+  let _redrawRaf = 0;
+  function redrawCanvases() {
+    cancelAnimationFrame(_redrawRaf);
+    _redrawRaf = requestAnimationFrame(() => {
+      if (!$("sessGrid") || $("sessGrid").classList.contains("hidden")) return;
+      try { renderSei(); renderCbs(); renderEpfi(); renderIdr(); }
+      catch (e) { /* 표본 없는 시점 — 다음 갱신에서 다시 그린다 */ }
+    });
+  }
+  window.addEventListener("resize", redrawCanvases);
 
   // ================================================== 결과 모달
   // ==================== 결과 리포트 헬퍼 (해석형, v1.13) ====================
