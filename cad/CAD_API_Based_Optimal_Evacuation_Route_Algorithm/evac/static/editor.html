@@ -29,6 +29,25 @@
   .mode .sub { color:var(--dim); font-size:11px; font-weight:400; }
   .mode .hint-r { margin-left:auto; color:var(--dim); font-size:11px; font-weight:400; }
   .sub-chk { margin:-2px 0 2px 18px; font-size:12px; }
+  /* 장애물 범례 — 어떤 종류가 도면에 어떤 모양으로 나가는지 그대로 보여준다.
+     색 이름만 글로 적으면 "주황이 뭐였지"가 되므로 실물 스와치를 쓴다. */
+  .obslegend { margin:2px 0 4px 18px; display:flex; flex-direction:column; gap:4px; }
+  .obsrow { display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--dim); }
+  .obsrow b { color:var(--fg); font-weight:600; font-size:12px; }
+  /* 설명 줄은 flex 가 아니라 블록 — flex 안에서는 <b> 가 각각 항목이 돼 단어가 쪼개진다 */
+  .obsnote { font-size:11px; color:var(--dim); line-height:1.5; margin-top:3px; }
+  .obsnote b { color:var(--fg); font-weight:600; }
+  .obssw { width:26px; height:14px; border-radius:3px; flex:0 0 auto; border:1px solid; }
+  .obssw.chair { background:
+      repeating-linear-gradient(45deg, rgba(180,83,9,.85) 0 1.5px, rgba(180,83,9,.16) 1.5px 5px);
+      border-color:#b45309; }
+  .obssw.box { background:
+      repeating-linear-gradient(45deg, rgba(124,58,237,.8) 0 1.5px, rgba(124,58,237,.14) 1.5px 5px),
+      repeating-linear-gradient(-45deg, rgba(124,58,237,.8) 0 1.5px, rgba(124,58,237,0) 1.5px 5px);
+      border-color:#7c3aed; }
+  .obssw.nogo { background:
+      repeating-linear-gradient(-45deg, rgba(220,38,38,.85) 0 1.5px, rgba(220,38,38,.16) 1.5px 5px);
+      border-color:#dc2626; }
   .note-warn { font-size:11px; color:var(--dim); line-height:1.45; margin-top:2px; }
   .itemlist { max-height:230px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
   .itemrow { display:flex; align-items:center; gap:6px; font-size:12px;
@@ -118,7 +137,20 @@
       <button class="mode on" id="m-pan">이동 / 줌 <span class="hint-r">휠 · 드래그</span></button>
       <button class="mode" id="m-del">삭제 <span class="sub">치수선 등</span><span class="hint-r">박스</span></button>
       <button class="mode" id="m-open"><i class="dot" style="background:#06b6d4"></i>개구부 뚫기 <span class="hint-r" id="lbl-open">선</span></button>
-      <button class="mode" id="m-block"><i class="dot" style="background:#dc2626"></i>공간 차단 <span class="hint-r" id="lbl-block">선</span></button>
+      <button class="mode" id="m-block"><i class="dot" style="background:#dc2626"></i>장애물 표시 <span class="hint-r" id="lbl-block">선</span></button>
+      <label class="chk sub-chk">종류
+        <select id="obsTag" title="도면에 남길 장애물 종류 — 색·빗금이 달라집니다. 경로 계산은 종류와 무관하게 모두 '막힘'입니다.">
+          <option value="nogo">통행금지</option>
+          <option value="chair">의자·집기</option>
+          <option value="box">박스·적치물</option>
+        </select></label>
+      <div class="obslegend">
+        <div class="obsrow"><i class="obssw chair"></i><b>의자·집기</b>고정 가구로 못 지나감</div>
+        <div class="obsrow"><i class="obssw box"></i><b>박스·적치물</b>임시로 쌓여 막힘</div>
+        <div class="obsrow"><i class="obssw nogo"></i><b>통행금지</b>진입 금지 구역</div>
+        <div class="obsnote">세 종류 모두 <b>경로가 피해 갑니다</b> — 종류는 도면에
+          <b>무엇 때문에 막혔는지</b> 남기는 표시입니다.</div>
+      </div>
       <label class="chk sub-chk"><input type="checkbox" id="rectChk"> 사각형으로 그리기</label>
       <button class="mode" id="m-exit"><i class="dot" style="background:#1d4ed8"></i>Exit 지정 <span class="hint-r">선</span></button>
       <button class="mode" id="m-start"><i class="dot" style="background:#8b5cf6"></i>출발점 지정 <span class="hint-r">클릭</span></button>
@@ -204,7 +236,16 @@ let segAlive = null;        // Uint8Array n (삭제 반영)
 let entIndex = [];          // [{h, layer, o, n}]
 let bounds = null;          // [minx,miny,maxx,maxy] mm
 let deleted = new Set(), openings = [], exits = [];
-// 편집 도형 — {op:"open"|"block", kind:"line"|"rect", pts:[x1,y1,x2,y2], w}
+// 장애물 종류 — 서버 OBSTACLE_TAGS 와 같은 표(색·라벨). 표출 전용이고
+// 경로 계산은 op(open/block)만 본다. 도면에 "뭐 때문에 막혔는지"를 남기려는 것.
+const OBS = {
+  nogo:  { rgb: "220,38,38",  name: "통행금지" },
+  chair: { rgb: "180,83,9",   name: "의자·집기" },
+  box:   { rgb: "124,58,237", name: "박스·적치물" },
+};
+const obsOf = (sh) => OBS[sh && sh.tag] || OBS.nogo;
+
+// 편집 도형 — {op:"open"|"block", kind:"line"|"rect", pts:[x1,y1,x2,y2], w, tag}
 // 뚫기/막기 모두 여기에 쌓인다. 적용 순서(open→block)는 서버가 보장.
 let shapes = [];
 let starts = [];   // occupant 모드 출발점 [[x,y], ...] (도면단위)
@@ -314,7 +355,7 @@ function draw() {
   }
   for (const sh of shapes) {
     const open = sh.op === "open";
-    const col = open ? "6,182,212" : "220,38,38";
+    const col = open ? "6,182,212" : obsOf(sh).rgb;
     const [x1, y1, x2, y2] = sh.pts;
     if (sh.kind === "rect") {
       const sx = W2SX(Math.min(x1,x2)), sy = W2SY(Math.max(y1,y2));
@@ -383,7 +424,7 @@ function draw() {
       ctx.fillText(`${d.toFixed(0)} 도면단위`, drag.sx1 + 8, drag.sy1 - 6);
     } else {
       ctx.strokeStyle = mode === "open" ? "rgba(6,182,212,.9)"
-                      : mode === "block" ? "rgba(220,38,38,.9)" : "#1d4ed8";
+                      : mode === "block" ? `rgba(${OBS[$("obsTag").value] ? OBS[$("obsTag").value].rgb : OBS.nogo.rgb},.9)` : "#1d4ed8";
       ctx.lineWidth = (mode === "open" || mode === "block") ? Math.max(4, 900 * view.s) : 5;
       ctx.setLineDash(mode === "block" ? [10, 6] : []);
       ctx.beginPath(); ctx.moveTo(drag.sx0, drag.sy0); ctx.lineTo(drag.sx1, drag.sy1);
@@ -432,6 +473,7 @@ window.addEventListener("mouseup", e => {
   else if (mode === "open" || mode === "block") {
     const kind = $("rectChk").checked ? "rect" : "line";
     const sh = { op: mode, kind, pts: [wx0, wy0, wx1, wy1] };
+    if (mode === "block") sh.tag = $("obsTag").value || "nogo";
     if (kind === "line") sh.w = 900;
     shapes.push(sh); undoStack.push({ t: "shape", i: shapes.length - 1, add: true });
     afterEdit();
@@ -523,13 +565,14 @@ function itemLabel(kind, v, i) {
   if (kind === "start") return [`출발점 ${i + 1}`, "", "#8b5cf6"];
   if (kind === "open") return [`개구부 ${i + 1}`, `${len(v).toFixed(1)} m`, "#06b6d4"];
   const open = v.op === "open";
-  const nm = open ? "뚫기" : "차단";
+  const nm = open ? "뚫기" : obsOf(v).name;
   const shape = v.kind === "rect" ? "사각형" : "선";
   const [x1, y1, x2, y2] = v.pts;
   const size = v.kind === "rect"
     ? `${(Math.abs(x2 - x1) / 1000).toFixed(1)}×${(Math.abs(y2 - y1) / 1000).toFixed(1)} m`
     : `${(Math.hypot(x2 - x1, y2 - y1) / 1000).toFixed(1)} m`;
-  return [`${nm} ${i + 1} (${shape})`, size, open ? "#06b6d4" : "#dc2626"];
+  return [`${nm} ${i + 1} (${shape})`, size,
+          open ? "#06b6d4" : `rgb(${obsOf(v).rgb})`];
 }
 
 function renderItems() {

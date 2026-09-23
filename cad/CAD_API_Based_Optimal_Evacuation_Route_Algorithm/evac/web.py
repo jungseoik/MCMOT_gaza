@@ -154,6 +154,16 @@ async def set_units(payload: dict):
     return _units_info()
 
 
+# 장애물 종류 — 편집기·map.png·floor.json 이 같은 표를 쓴다.
+# (색, 화면라벨, matplotlib 해치)  ※ 경로 계산에는 영향 없음(전부 block)
+OBSTACLE_TAGS = {
+    "chair": ("#b45309", "의자·집기", "///"),
+    "box":   ("#7c3aed", "박스·적치물", "xxx"),
+    "nogo":  ("#dc2626", "통행금지", "\\\\"),
+}
+DEFAULT_TAG = "nogo"
+
+
 def _norm_shape(sh: dict) -> dict:
     """편집 도형 검증·정규화. 잘못된 값은 422로 막는다."""
     op = str(sh.get("op", "open"))
@@ -169,6 +179,11 @@ def _norm_shape(sh: dict) -> dict:
     out = {"op": op, "kind": kind, "pts": pts}
     if kind == "line":
         out["w"] = max(1.0, float(sh.get("w", OPENING_W)))
+    # 장애물 종류 — 표출 전용 꼬리표. 경로 계산은 op(open/block)만 본다.
+    # 도면에 "여기 의자다 / 적치물이다 / 못 가는 곳이다"를 눈에 보이게 남기려는 것.
+    tag = str(sh.get("tag") or "")
+    if op == "block" and tag in OBSTACLE_TAGS:
+        out["tag"] = tag
     return out
 
 
@@ -410,12 +425,23 @@ async def verify(payload: dict = None):
 
 
 # ───────────────────────────────────────────── 저장 & 적용
-def _render_map_png(obs, bounds, out_path, px_w=2000):
-    """터치업 반영된 깨끗한 도면 PNG(축 없음, 흰 배경) — 2D맵 배경용."""
+def _render_map_png(obs, bounds, out_path, px_w=2000, shapes=None):
+    """터치업 반영된 깨끗한 도면 PNG(축 없음, 흰 배경) — 2D맵 배경용.
+
+    편집기에서 찍은 **장애물(block 도형)을 도면에 그대로 그린다.** 예전에는
+    block 이 경로 계산(core.apply_shapes)에만 들어가고 map.png 에는 안 그려져서,
+    업로드하고 나면 "여기 의자가 있어서 못 지나간다"는 정보가 화면에서 사라졌다.
+    보는 사람이 경로가 왜 그리 돌아가는지 알 수 없었다.
+
+    그리는 순서가 중요하다 — 뚫기(open)를 먼저 흰색으로 덮어 벽을 지우고, 그 위에
+    막기(block)를 올린다. core.apply_shapes 의 적용 순서(open → block)와 같게 맞춰야
+    화면과 계산이 어긋나지 않는다.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
+    from matplotlib.patches import Rectangle
     minx, miny, maxx, maxy = bounds
     Wm, Hm = (maxx - minx), (maxy - miny)
     dpi = 100
@@ -424,6 +450,43 @@ def _render_map_png(obs, bounds, out_path, px_w=2000):
     ax = fig.add_axes([0, 0, 1, 1])
     ax.add_collection(LineCollection(
         [[(s[0], s[1]), (s[2], s[3])] for s in obs], colors="#222", linewidths=0.3))
+
+    # mm → 화면 선폭(pt) 환산 — 도면 크기가 달라도 두께가 일정하게 보이게 한다
+    pt_per_mm = (px_w / Wm) * 72.0 / dpi
+
+    def _draw(sh, phase):
+        op, kind, pts = sh.get("op"), sh.get("kind"), sh.get("pts") or []
+        if op != phase or len(pts) < 4:
+            return
+        is_open = (op == "open")
+        col, hatch = ("#ffffff", None) if is_open else \
+            OBSTACLE_TAGS.get(sh.get("tag") or DEFAULT_TAG, OBSTACLE_TAGS[DEFAULT_TAG])[::2]
+        if kind == "rect":
+            x0, y0, x1, y1 = pts[0], pts[1], pts[2], pts[3]
+            ax.add_patch(Rectangle(
+                (min(x0, x1), min(y0, y1)), abs(x1 - x0), abs(y1 - y0),
+                facecolor=col, alpha=1.0 if is_open else 0.30,
+                edgecolor="none" if is_open else col,
+                hatch=hatch, linewidth=0 if is_open else 1.2, zorder=3))
+        elif kind == "poly":
+            xy = [(pts[i], pts[i + 1]) for i in range(0, len(pts) - 1, 2)]
+            ax.add_patch(plt.Polygon(
+                xy, closed=True, facecolor=col, alpha=1.0 if is_open else 0.30,
+                edgecolor="none" if is_open else col,
+                hatch=hatch, linewidth=0 if is_open else 1.2, zorder=3))
+        else:                                    # line — 폭(w)만큼 굵게
+            w_mm = float(sh.get("w") or OPENING_W)
+            ax.add_collection(LineCollection(
+                [[(pts[0], pts[1]), (pts[2], pts[3])]], colors=[col],
+                linewidths=max(0.5, w_mm * pt_per_mm),
+                alpha=1.0 if is_open else 0.55,
+                capstyle="round", zorder=3))
+
+    for sh in (shapes or []):
+        _draw(sh, "open")                        # 1) 벽 지우기
+    for sh in (shapes or []):
+        _draw(sh, "block")                       # 2) 장애물 올리기
+
     ax.set_xlim(minx, maxx); ax.set_ylim(miny, maxy)
     ax.set_aspect("equal"); ax.axis("off")
     fig.savefig(out_path, dpi=dpi, facecolor="white")
@@ -465,7 +528,7 @@ async def apply(payload: dict = None):
 
     # 1) map.png (터치업 도면) — 층별 파일명
     map_path = os.path.join(site_dir, map_name)
-    w_px, h_px = _render_map_png(obs, bounds, map_path)
+    w_px, h_px = _render_map_png(obs, bounds, map_path, shapes=_shapes())
     m_per_px = _to_m(bounds[2] - bounds[0]) / w_px   # 도면 실단위 반영
 
     # 2) 거리장 사전계산 (트래킹 좌표 → 실시간 피난거리용)
@@ -479,24 +542,38 @@ async def apply(payload: dict = None):
                         dist=an.dist.astype(np.float32), grid=an.grid,
                         bounds=np.array(bounds), cell=FULL_CELL)
 
+    # 도면 mm → 맵 px. _render_map_png 는 xlim=[minx,maxx]·ylim=[miny,maxy] 를
+    # 축[0,0,1,1]에 꽉 채우므로 선형이다(이미지 좌표계라 y축 뒤집힘).
+    # floor.json(장애물)·경로·Exit 변환이 모두 이 함수를 쓴다.
+    minx, miny, maxx, maxy = bounds
+
+    def _to_px(wx, wy):
+        return [round((wx - minx) / (maxx - minx) * w_px, 1),
+                round((maxy - wy) / (maxy - miny) * h_px, 1)]
+
     # 3) floor.json (비파괴 편집내역 + 좌표계) — 층별 파일명(floor_name)
     floor_meta = {"source": S["src_name"], "bounds_mm": bounds,
                   "m_per_px": m_per_px, "map_px": [w_px, h_px],
                   "exits_mm": S["exits"], "openings_mm": S["openings"],
                   "opening_width_mm": OPENING_W,
                   "deleted_handles": S["deleted"],
-                  "cell_mm": FULL_CELL, "clearance_mm": core.CLEARANCE}
+                  "cell_mm": FULL_CELL, "clearance_mm": core.CLEARANCE,
+                  # 장애물(의자·적치물·통행금지) — map.png 에 이미 그려져 있지만,
+                  # :8900 이 나중에 겹쳐 그리거나 밀도에서 제외하려면 좌표가 필요하다.
+                  # 맵 px 로 같이 준다(도면 mm 는 계산용, px 는 표출용).
+                  "obstacles": [
+                      {"tag": sh.get("tag") or DEFAULT_TAG,
+                       "label": OBSTACLE_TAGS[sh.get("tag") or DEFAULT_TAG][1],
+                       "kind": sh["kind"], "pts_mm": sh["pts"],
+                       "w_mm": sh.get("w"),
+                       "pts_px": [v for i in range(0, len(sh["pts"]) - 1, 2)
+                                  for v in _to_px(sh["pts"][i], sh["pts"][i + 1])]}
+                      for sh in (S.get("shapes") or []) if sh.get("op") == "block"],
+                  }
     with open(os.path.join(site_dir, floor_name), "w") as f:
         json.dump(floor_meta, f, ensure_ascii=False, indent=2)
 
-    # 3.5) 최단경로(worst-N) → 맵 원본 px polyline 으로 변환 (EPFI 기준경로 반영용).
-    #      _render_map_png 는 xlim=[minx,maxx]·ylim=[miny,maxy] 를 축[0,0,1,1]에
-    #      꽉 채우므로 도면 mm → 맵 px 는 선형(이미지 좌표계라 y축 뒤집힘):
-    #        px_x = (wx-minx)/(maxx-minx)*w_px,  px_y = (maxy-wy)/(maxy-miny)*h_px
-    minx, miny, maxx, maxy = bounds
-    def _to_px(wx, wy):
-        return [round((wx - minx) / (maxx - minx) * w_px, 1),
-                round((maxy - wy) / (maxy - miny) * h_px, 1)]
+    # 3.5) 최단경로(worst-N) → 맵 px polyline (EPFI 기준경로 반영용)
     routes_px = []
     for i, p in enumerate(an.paths):
         pm = p["path_m"]
