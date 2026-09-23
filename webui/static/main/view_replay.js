@@ -608,6 +608,10 @@ Views.replay = (() => {
     if (!data || !data.frames || !data.frames.length) return;
     const { ctx, TX, TY } = g;
     const { objs } = currentInterp();
+    // 점보다 먼저 — 나중에 그리면 객체 점을 덮는다
+    if (rpHeat && window.Heatmap) {
+      Heatmap.draw(g, objs, { mPerPx: Heatmap.mPerPxOf(site) });
+    }
     objs.forEach((o) => {
       const x = TX(o.x), y = TY(o.y), col = camColor(o.cam_id, App.cameras);
       if (o.vx || o.vy) {
@@ -660,6 +664,9 @@ Views.replay = (() => {
    */
   const SECTOR_SEG = 24;
   let eTool = "pan";          // pan | route | bnpoly | bnsector | erase
+  // 밀도 히트맵 — 운영 뷰와 같은 모듈·같은 그림. 재생 커서를 따라 같이 움직인다.
+  let rpHeat = (() => { try { return localStorage.getItem("macs_rp_heat") === "1"; }
+                        catch (e) { return false; } })();
   let eDraft = null;          // {pts:[[x,y],...]}
   let eHover = null;          // 부채꼴 미리보기 커서
   let eGeo = null;            // {routes:[...], bottlenecks:[...]} — 편집 중인 사본
@@ -1440,6 +1447,16 @@ Views.replay = (() => {
     $("rpToStart").onclick = () => { pause(); goTo(0); if (mc) mc.render(); };
     $("rpSeek").oninput = (e) => { pause(); goTo(parseInt(e.target.value)); if (mc) mc.render(); };
     $("rpSpeed").onchange = (e) => { speed = parseFloat(e.target.value) || 1; };
+    if ($("rpHeat")) {
+      $("rpHeat").classList.toggle("on", rpHeat);
+      $("rpHeat").onclick = () => {
+        rpHeat = !rpHeat;
+        $("rpHeat").classList.toggle("on", rpHeat);
+        try { localStorage.setItem("macs_rp_heat", rpHeat ? "1" : "0"); }
+        catch (e) { /* 사생활 모드 */ }
+        if (mc) mc.render();
+      };
+    }
     $("rpApply").onclick = recompute;
     $("rpReset").onclick = () => { fillThresholds(site && site.thresholds); $("rpMsg").textContent = "원래값으로 되돌림 — [재계산]을 눌러 반영"; };
     $("rpObjSort").onclick = () => {                    // EPFI↑ → 이탈↓ → 지속↓ 순환

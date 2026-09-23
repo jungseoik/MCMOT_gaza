@@ -18,6 +18,9 @@ Views.live = (() => {
   })();
   let showGraph = false;                 // IDR 공간그래프 표시 토글
   let showHulls = false;                 // 카메라 매핑 커버리지 다각형 표시
+  // 밀도 히트맵 — 표출 전용(지표 계산과 무관). 취향이라 localStorage 에 기억한다.
+  let showHeat = (() => { try { return localStorage.getItem("macs_live_heat") === "1"; }
+                          catch (e) { return false; } })();
   let selGid = null;                     // 객체 목록에서 선택된 gid (맵 하이라이트)
   let objSort = "dev";                   // 객체 정렬: dev(이탈)|speed|dwell
 
@@ -178,6 +181,15 @@ Views.live = (() => {
     const { ctx, TX, TY } = g;
     const alpha = Math.min(1, interpDuration > 0
       ? (performance.now() - interpStart) / interpDuration : 1);
+    // 히트맵은 객체 점보다 **먼저** — 나중에 그리면 점을 덮어 누가 어디 있는지 사라진다.
+    // 보간된 위치를 쓴다(점과 같은 자리라야 "저 색이 저 사람들"로 읽힌다).
+    if (showHeat && window.Heatmap) {
+      Heatmap.draw(g, state.objects.map((o) => {
+        const pv = prevObjects[`${o.cam_id}:${o.id}`];
+        return { x: pv ? pv.x + (o.x - pv.x) * alpha : o.x,
+                 y: pv ? pv.y + (o.y - pv.y) * alpha : o.y };
+      }), { mPerPx: Heatmap.mPerPxOf(App.site) });
+    }
     state.objects.forEach((o) => {
       const prev = prevObjects[`${o.cam_id}:${o.id}`];
       const rx = prev ? prev.x + (o.x - prev.x) * alpha : o.x;
@@ -416,6 +428,16 @@ Views.live = (() => {
       $("hullToggle").classList.toggle("on", showHulls);
       if (mc) mc.render();
     };
+    if ($("heatToggle")) {
+      $("heatToggle").classList.toggle("on", showHeat);
+      $("heatToggle").onclick = () => {
+        showHeat = !showHeat;
+        $("heatToggle").classList.toggle("on", showHeat);
+        try { localStorage.setItem("macs_live_heat", showHeat ? "1" : "0"); }
+        catch (e) { /* 사생활 모드 — 기억만 못 한다 */ }
+        if (mc) mc.render();
+      };
+    }
     // fpsInput — 값 변경 즉시 반영 (RAF 루프가 다음 프레임에 적용)
     $("fpsInput").oninput = () => setConn(`LIVE · ${renderFps()}fps 보간`, "ok");
     $("objSort").onclick = () => {                 // 객체 목록 정렬 전환
