@@ -685,6 +685,19 @@ body.rehearsing .rhbanner{ display:block; }
 .g-good{ background:rgba(63,185,80,.15); color:#3FB950; }
 .g-mid{ background:rgba(245,166,35,.15); color:#F5A623; }
 .g-bad{ background:rgba(255,91,91,.15); color:#FF5B5B; }
+/* 5단계 등급 — 운영 뷰·④ 리플레이·리포트 공용(grade.js). 초록→빨강 한 방향으로
+   읽히게 색을 단조로 깐다. 3색(g-good/mid/bad)은 리포트 총평 테두리에 그대로 쓴다. */
+.g1{ background:rgba(46,160,67,.18);  color:#3FB950; }   /* 우수 · 원활 */
+.g2{ background:rgba(86,211,100,.15); color:#56D364; }   /* 양호 */
+.g3{ background:rgba(245,166,35,.15); color:#F5A623; }   /* 보통 */
+.g4{ background:rgba(255,140,66,.16); color:#FF8C42; }   /* 미흡 · 혼잡 */
+.g5{ background:rgba(255,91,91,.16);  color:#FF5B5B; }   /* 불량 · 심각 */
+.gpill i{ font-style:normal; opacity:.6; margin-left:4px; font-size:.85em;
+  font-variant-numeric:tabular-nums; }
+/* 카드 머리의 등급 자리 — 값 옆이 아니라 제목 줄에 붙어야 한눈에 들어온다 */
+.gslot{ margin-left:auto; display:inline-flex; align-items:center; }
+.gslot:empty{ display:none; }
+.mh2 .gslot{ margin-left:6px; }
 .g-na{ background:rgba(255,255,255,.08); color:var(--text-3); }
 /* 섹션 헤더 — 위쪽 구분선으로 리포트 리듬을 만든다 */
 .repsec-h{ font-size:12px; font-weight:700; color:var(--text-2); letter-spacing:.02em;

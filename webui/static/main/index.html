@@ -505,18 +505,18 @@
             <div class="sessmeta hidden" id="sessMeta"></div>
             <div class="mgrid hidden" id="sessGrid">
               <div class="mcard" id="cardSei">
-                <div class="mhead"><b>SEI</b><span class="msub">출구 활용 효율</span><span class="mela t-num"></span></div>
+                <div class="mhead"><b>SEI</b><span class="msub">출구 활용 효율</span><span class="gslot" id="gSei"></span><span class="mela t-num"></span></div>
                 <div class="mbig t-num" id="seiVal">—</div>
                 <div class="mbars" id="seiBars"></div>
               </div>
               <div class="mcard" id="cardCbs">
-                <div class="mhead"><b>CBS</b><span class="msub">병목 혼잡 누적</span><span class="mela t-num"></span></div>
+                <div class="mhead"><b>CBS</b><span class="msub">병목 혼잡 누적</span><span class="gslot" id="gCbs"></span><span class="mela t-num"></span></div>
                 <div class="mbig t-num" id="cbsVal">0</div>
                 <canvas class="mspark" id="cbsSpark" title="총 CBS 추이"></canvas>
                 <div class="mbnlist" id="cbsBn"></div>
               </div>
               <div class="mcard" id="cardEpfi">
-                <div class="mhead"><b>EPFI</b><span class="msub">경로 충실도</span><span class="mela t-num"></span></div>
+                <div class="mhead"><b>EPFI</b><span class="msub">경로 충실도</span><span class="gslot" id="gEpfi"></span><span class="mela t-num"></span></div>
                 <div class="mbig t-num" id="epfiVal">—</div>
                 <canvas class="mspark" id="epfiSpark" title="평균 EPFI 추이"></canvas>
                 <div class="mhistwrap"><canvas id="epfiHist"></canvas><div class="mnote" id="epfiNote"></div></div>
@@ -528,7 +528,7 @@
                 </div>
               </div>
               <div class="mcard" id="cardIdr">
-                <div class="mhead"><b>IDR</b><span class="msub">구역 피난 반응</span><span class="mela t-num" id="idrHeadEl"><span id="idrProg">0/0</span> 구역 반응</span></div>
+                <div class="mhead"><b>IDR</b><span class="msub">구역 피난 반응</span><span class="gslot" id="gIdr"></span><span class="mela t-num" id="idrHeadEl"><span id="idrProg">0/0</span> 구역 반응</span></div>
                 <div class="mbig t-num" id="idrAvgEl">—</div>
                 <div class="mtblwrap" id="idrTblWrap"></div>
               </div>
@@ -628,10 +628,10 @@
             </div>
             <div class="grow" id="rpExitNow"></div>
             <div class="mgrid2">
-              <div class="mcard2"><div class="mh2"><b>SEI</b> 출구효율</div><div class="mbig t-num" id="rpSei">—</div><canvas class="rpspark" id="rpSparkSei"></canvas></div>
-              <div class="mcard2"><div class="mh2"><b>EPFI</b> 경로충실</div><div class="mbig t-num" id="rpEpfi">—</div><canvas class="rpspark" id="rpSparkEpfi"></canvas></div>
-              <div class="mcard2"><div class="mh2"><b>CBS</b> 병목누적</div><div class="mbig t-num" id="rpCbs">—</div><canvas class="rpspark" id="rpSparkCbs"></canvas></div>
-              <div class="mcard2"><div class="mh2"><b>IDR</b> 평균 <span class="t-num" id="rpIdrProg" style="opacity:.6">—</span></div><div class="mbig t-num" id="rpIdr">—</div><canvas class="rpspark" id="rpSparkIdr"></canvas></div>
+              <div class="mcard2"><div class="mh2"><b>SEI</b> 출구효율<span class="gslot" id="rpGSei"></span></div><div class="mbig t-num" id="rpSei">—</div><canvas class="rpspark" id="rpSparkSei"></canvas></div>
+              <div class="mcard2"><div class="mh2"><b>EPFI</b> 경로충실<span class="gslot" id="rpGEpfi"></span></div><div class="mbig t-num" id="rpEpfi">—</div><canvas class="rpspark" id="rpSparkEpfi"></canvas></div>
+              <div class="mcard2"><div class="mh2"><b>CBS</b> 병목누적<span class="gslot" id="rpGCbs"></span></div><div class="mbig t-num" id="rpCbs">—</div><canvas class="rpspark" id="rpSparkCbs"></canvas></div>
+              <div class="mcard2"><div class="mh2"><b>IDR</b> 평균 <span class="t-num" id="rpIdrProg" style="opacity:.6">—</span><span class="gslot" id="rpGIdr"></span></div><div class="mbig t-num" id="rpIdr">—</div><canvas class="rpspark" id="rpSparkIdr"></canvas></div>
             </div>
             <div class="grow" id="rpBase"></div>
           </div>
@@ -877,6 +877,7 @@
 
 <script src="/static/main/login_gate.js"></script>
 <script src="/static/main/api.js"></script>
+<script src="/static/main/grade.js"></script>
 <script src="/static/main/mapcanvas.js"></script>
 <script src="/static/main/session.js"></script>
 <script src="/static/main/view_map.js"></script>

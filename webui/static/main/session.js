@@ -609,6 +609,7 @@ const Session = (() => {
   function renderSei() {
     const sei = live ? live.sei : result.sei;
     $("seiVal").textContent = sei != null ? fmt1(sei) : "—";
+    setGrade("gSei", sei, "sei");
 
     const exits = (App.site && App.site.exits) || [];
     const box = $("seiBars");
@@ -869,6 +870,7 @@ const Session = (() => {
   function renderCbs() {
     const cbs = live ? live.cbs_total : result.cbs_total;
     $("cbsVal").textContent = fmt1(cbs);
+    setGrade("gCbs", cbs, "cbs");
     spark($("cbsSpark"), timeline.map((t) => t.cbs_total), { min: 0, color: "#FF6F21" });
 
     if (!bnPanel) bnPanel = makeCbsBnPanel($("cbsBn"));
@@ -888,6 +890,7 @@ const Session = (() => {
   function renderEpfi() {
     const ep = live ? live.epfi_avg : result.epfi_avg;
     $("epfiVal").textContent = ep != null ? fmt1(ep) : "—";
+    setGrade("gEpfi", ep, "epfi");
     spark($("epfiSpark"), timeline.map((t) => t.epfi_avg), { min: 0, max: 100, color: "#3FB950" });
     const cv = $("epfiHist"), note = $("epfiNote");
     if (result && result.person_metrics.length) {
@@ -1040,6 +1043,12 @@ const Session = (() => {
     } else if (result) {
       $("idrProg").textContent = `${startedZones.length}/${tot}`;
     }
+    // IDR 등급은 값(m/s)이 아니라 **개시 구역 비율**로 본다 — m/s 는 경보원~구역
+    // 거리에 비례해 도면마다 스케일이 달라, 값으로 등급을 매기면 층끼리 비교가 깨진다.
+    setGrade("gIdr", Grade.idrScore(
+      live ? live.zones_started : startedZones.length,
+      live ? live.zones_total : tot,
+      !live), "idr");        // 진행 중이면 잠정(0 개시는 무등급), 종료 결과면 확정
     const validIdrs = startedZones.map((z) => z.idr).filter((v) => v != null);
     const avgIdr = validIdrs.length ? validIdrs.reduce((s, v) => s + v, 0) / validIdrs.length : null;
     const avgEl = $("idrAvgEl");
@@ -1093,17 +1102,25 @@ const Session = (() => {
     });
   }
 
+  // 5단계 등급 배지 — 운영 뷰 카드 머리. 기준은 grade.js 한 곳(세 화면 공용).
+  function setGrade(slotId, v, metric) {
+    const el = $(slotId);
+    if (!el || !window.Grade) return;
+    el.innerHTML = (v == null) ? "" : Grade.pill(v, metric, true);
+  }
+
   // ================================================== 결과 모달
   // ==================== 결과 리포트 헬퍼 (해석형, v1.13) ====================
   // "지표 이름과 숫자만 있는 결과"는 훈련 담당자가 해석할 수 없다 — 지표마다
   // ①무엇을 재는지 ②이번 값을 어떻게 읽는지 문장을 자동으로 붙인다.
-  // 등급(우수/보통/미흡)은 표시용 참고 기준(80·60, CBS 0.5·10) — 요구사항에 규정 없음.
+  // 등급은 grade.js(5단계) 한 곳에서 온다 — 운영 뷰·리플레이·리포트가 같은 기준.
+  // [라벨, 3색클래스, 5색클래스, 등수] 형태로 돌려준다(총평 테두리가 3색을 쓴다).
   function gradeOf(v, kind) {
-    if (v == null) return null;
-    if (kind === "cbs") return v <= 0.5 ? ["원활", "g-good"] : v <= 10 ? ["주의", "g-mid"] : ["혼잡", "g-bad"];
-    return v >= 80 ? ["우수", "g-good"] : v >= 60 ? ["보통", "g-mid"] : ["미흡", "g-bad"];
+    if (v == null || !window.Grade) return null;
+    const g = Grade.of(v, kind === "cbs" ? "cbs" : "epfi");
+    return [g.label, g.legacy, g.cls, g.rank];
   }
-  const pill = (g) => g ? `<span class="gpill ${g[1]}">${g[0]}</span>`
+  const pill = (g) => g ? `<span class="gpill ${g[2] || g[1]}">${g[0]}<i>${g[3]}/5</i></span>`
                         : `<span class="gpill g-na">표본부족</span>`;
   const repRow = (k, v) => `<div class="resrow"><span>${k}</span><b class="t-num">${v}</b></div>`;
   const fmtDT = (ts) => ts ? new Date(ts * 1000).toLocaleString("ko-KR", { hour12: false }) : "—";
@@ -1230,9 +1247,10 @@ const Session = (() => {
   function repCards(o) {
     const fn = o.fname || ((f) => f);
     const started = o.zones.filter((z) => z.m.status === "started").length;
-    const idrG = !o.zones.length ? null
-      : started === o.zones.length ? ["우수", "g-good"]
-      : started > 0 ? ["보통", "g-mid"] : ["미흡", "g-bad"];
+    // IDR 도 다른 셋과 같은 5단계로 — 값(m/s)이 아니라 **개시 구역 비율**이 기준이다
+    // (m/s 는 경보원~구역 거리에 비례해 도면마다 스케일이 달라 등급을 못 매긴다).
+    // 리포트는 종료된 결과라 final=true — 끝까지 0 개시면 불량으로 확정한다.
+    const idrG = gradeOf(Grade.idrScore(started, o.zones.length, true));
     return `<div class="repgrid">`
       + repCard("epfi", "EPFI", "경로 충실도 (0~100)", o.epfi != null ? fmt1(o.epfi) : "—",
                 gradeOf(o.epfi), REP_WHAT.epfi, readEpfi(o.epfi, o.persons))

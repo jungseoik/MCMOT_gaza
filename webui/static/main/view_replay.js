@@ -279,12 +279,22 @@ Views.replay = (() => {
     img.src = API.mapImageUrl(floor);
   }
 
+  /** 5단계 등급 배지 — grade.js 기준(운영 뷰·리포트와 동일). */
+  function rpGrade(slotId, v, metric) {
+    const el = $(slotId);
+    if (!el || !window.Grade) return;
+    el.innerHTML = (v == null) ? "" : Grade.pill(v, metric, true);
+  }
+
   function showBuildingMetrics(dr, tag) {
     const b = dr.building || {};
     $("rpTag").textContent = tag || "건물값";
     $("rpSei").textContent = fmtVal(b.sei, 1);
     $("rpEpfi").textContent = fmtVal(b.epfi_avg, 1);
     $("rpCbs").textContent = fmtVal(b.cbs_total, 1);
+    rpGrade("rpGSei", b.sei, "sei");
+    rpGrade("rpGEpfi", b.epfi_avg, "epfi");
+    rpGrade("rpGCbs", b.cbs_total, "cbs");
     let zSt = 0, zTot = 0;
     const allZ = [];
     Object.entries(b.idr_by_floor || {}).forEach(([fid, zs]) =>
@@ -297,6 +307,8 @@ Views.replay = (() => {
     $("rpIdr").textContent = vs.length
       ? (vs.reduce((s, v) => s + v, 0) / vs.length).toFixed(2) : "—";
     $("rpIdrProg").textContent = `${zSt}/${zTot}`;
+    // 최종/재계산 값이라 final=true — 끝까지 0 개시면 그건 진짜 불량이다
+    rpGrade("rpGIdr", Grade.idrScore(zSt, zTot, true), "idr");  // 값(m/s) 아닌 개시 구역 비율
     renderIdrTbl(allZ, dr.alarm_ts, tag);
     // 객체별 지표는 층 단위 — 드릴이면 지금 보고 있는 층 것. 층이 정해지기 전에
     // 한 번 도므로 loadDrillFloor 에서 그 층 것으로 다시 그린다.
@@ -389,6 +401,7 @@ Views.replay = (() => {
 
   function clearMetrics() {
     ["rpSei","rpEpfi","rpCbs","rpIdr"].forEach((id) => { $(id).textContent = "—"; });
+    ["rpGSei","rpGEpfi","rpGCbs","rpGIdr"].forEach((id) => { if ($(id)) $(id).innerHTML = ""; });
     eGeo = null; eDraft = null; eUndo = []; eDirty = false;
     if ($("rpGeoList")) $("rpGeoList").innerHTML = `<div class="mnote">세션을 선택하세요</div>`;
     ["rpEdApply","rpEdReset","rpEdUndo"].forEach((id) => { if ($(id)) $(id).disabled = true; });
@@ -1229,6 +1242,9 @@ Views.replay = (() => {
     $("rpSei").textContent = p.sei == null ? "—" : Math.round(p.sei);
     $("rpEpfi").textContent = p.epfi_avg == null ? "—" : Math.round(p.epfi_avg);
     $("rpCbs").textContent = (p.cbs_total || 0).toFixed(1);
+    rpGrade("rpGSei", p.sei, "sei");
+    rpGrade("rpGEpfi", p.epfi_avg, "epfi");
+    rpGrade("rpGCbs", p.cbs_total || 0, "cbs");
 
     const res = (data && data.result) || {};
     const zm = res.zone_metrics || [];
@@ -1239,6 +1255,7 @@ Views.replay = (() => {
     $("rpIdr").textContent = vs.length
       ? (vs.reduce((a, b) => a + b, 0) / vs.length).toFixed(2) : "—";
     $("rpIdrProg").textContent = `${done.length}/${zm.length}`;
+    rpGrade("rpGIdr", Grade.idrScore(done.length, zm.length), "idr");  // 재생 중 = 잠정
 
     $("rpTag").textContent = `t=${fmtDur(cursor)} 시점값`;
     renderSeiTbl(p.exit_counts || null);
