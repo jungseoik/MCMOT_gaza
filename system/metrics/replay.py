@@ -142,6 +142,9 @@ def run_replay(db_path, overrides: dict | None = None, fps: float = 5.0):
     _apply_overrides(site, overrides or {})
 
     eng = MetricsEngine(site, cams)
+    # 개인 경로 모드 — {트랙키: route_id}. 경로를 만든 트랙에 그 경로를 직접 묶는다.
+    # 없으면(=공통 경로 모드) 기존처럼 '최근접 경로' 규칙이 그대로 산다.
+    eng._route_bind = dict((overrides or {}).get("route_bind") or {})
     origins = [tuple(o) for o in (meta.get("alarm_origins") or [])] or None
     eng.start_session(t_alarm=float(meta["alarm_ts"]), alarm_origins=origins)
 

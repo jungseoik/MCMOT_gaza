@@ -191,6 +191,9 @@ class MetricsEngine:
             # 경로 polyline (정렬도용) — 없으면 align=None
             self._routes = [np.asarray(r.points, dtype=np.float64)
                             for r in site.routes if len(r.points) >= 2]
+            # id → polyline. 개인 경로 모드에서 '그 트랙에 묶인 경로' 를 바로 찾는다.
+            self._route_by_id = {r.id: np.asarray(r.points, dtype=np.float64)
+                                 for r in site.routes if len(r.points) >= 2}
 
             # 통과선 — 기하가 같으면 부호상태까지, 다르면 카운트만 승계
             margin_px = (self.margin_m / self._m_per_px
@@ -690,7 +693,18 @@ class MetricsEngine:
                 speed = dist_m / dt if dist_m >= self.min_move_m else 0.0
         align: float | None = None
         if self._routes and (vx or vy):
-            hit = min((nearest_on_polyline((x1, y1), r) for r in self._routes),
+            # 개인 경로 모드에서는 **그 트랙에 묶인 경로**의 접선을 쓴다.
+            # 경로가 사람 수만큼 깔리면 '최근접'이 남의 경로를 집어, 진행방향과
+            # 무관한 접선으로 정렬도가 무너진다(실측 중앙값 0.83 → 0.13).
+            cand = self._routes
+            bind = getattr(self, "_route_bind", None)
+            if bind:
+                rid = bind.get(st.gid) or bind.get(f"{st.cam_id}:{st.local_id}")
+                if rid is not None:
+                    one = self._route_by_id.get(rid)
+                    if one is not None:
+                        cand = [one]
+            hit = min((nearest_on_polyline((x1, y1), r) for r in cand),
                       key=lambda h: h.dist_px)
             tx, ty = hit.tangent
             if tx or ty:

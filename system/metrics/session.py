@@ -257,8 +257,25 @@ class EvaluationSession:
 
     # ---------------------------------------------------- EPFI 관측 누적
 
-    def _assign_route(self, xy) -> tuple[str | None, np.ndarray | None]:
-        """첫 관측 위치의 최근접 Route 배정. 경로 없으면 미배정."""
+    def _assign_route(self, xy, gid: str | None = None):
+        """경로 배정 → (route_id, points).
+
+        ① **그 트랙에 직접 묶인 경로**가 있으면 그것(개인 경로 모드).
+        ② 없으면 첫 관측 위치의 최근접 Route.
+
+        왜 ①이 필요한가: 개인 경로 모드는 사람 수만큼 경로가 생기는데, 그 상태로
+        "최근접"을 쓰면 **옆 사람이 다른 방향으로 가려고 만든 경로**가 더 가까워서
+        거기 배정되는 일이 흔하다. 실측(04 각본, 자동 경로 65개): 최근접 배정이면
+        정렬도 중앙값이 0.830 → 0.130 으로 무너지고 EPFI 도 70 → 48.8 로 떨어졌다.
+        경로를 만든 트랙을 알고 있으므로 그대로 묶으면 ReID 없이도 해결된다.
+        """
+        bind = getattr(self._eng, "_route_bind", None)
+        if bind and gid:
+            rid = bind.get(gid)
+            if rid:
+                for r_id, pts in self._routes:
+                    if r_id == rid:
+                        return r_id, pts
         if not self._routes:
             return None, None
         rid, pts = min(self._routes,
@@ -278,7 +295,7 @@ class EvaluationSession:
             self.last_ts = ts
         p = self.persons.get(gid)
         if p is None:
-            rid, rpts = self._assign_route((x, y))
+            rid, rpts = self._assign_route((x, y), gid)
             d = self._dev_m((x, y), rpts)
             self.persons[gid] = _PersonAcc(
                 gid=gid, route_id=rid, route_pts=rpts,

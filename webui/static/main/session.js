@@ -458,6 +458,37 @@ const Session = (() => {
     return `${m}:${String(s).padStart(2, "0")}`;
   }
 
+  /* 경보 경과시간 — 훈련의 모든 지표가 "경보 후 몇 초"를 기준으로 읽히는데,
+   * 작은 회색 글씨로 메타 줄 끝에 붙어 있어 눈에 안 들어왔다. 큰 숫자로 따로 뺀다.
+   * 진행 중이면 1초마다 스스로 갱신한다 — SSE(5Hz)를 기다리면 초가 끊겨 보인다. */
+  let _elTimer = 0;
+  function renderElapsed() {
+    const box = $("sessElapsed");
+    if (!box) return;
+    const e = elapsedSec();
+    const has = !!(live || result);
+    box.classList.toggle("hidden", !has);
+    if (!has) return;
+    const running = !!live;
+    // 진행 중에는 마지막 갱신 이후 흐른 벽시계를 더해 초가 매끄럽게 흐르게 한다
+    const shown = (running && _elBase != null)
+      ? _elBase + (performance.now() - _elAt) / 1000 : e;
+    const v = Math.max(0, shown == null ? 0 : shown);
+    const m = Math.floor(v / 60), sec = Math.floor(v % 60);
+    box.classList.toggle("running", running);
+    box.innerHTML =
+      `<span class="el-lab">경보 후 경과</span>`
+      + `<span class="el-big t-num">${m}<i>:</i>${String(sec).padStart(2, "0")}</span>`
+      + `<span class="el-sub">${running ? "진행 중" : "종료"}</span>`;
+  }
+  let _elBase = null, _elAt = 0;
+  function noteElapsed() {
+    _elBase = elapsedSec(); _elAt = performance.now();
+    renderElapsed();
+    clearInterval(_elTimer);
+    if (live) _elTimer = setInterval(renderElapsed, 250);
+  }
+
   function nameOf(list, id) {
     const e = (list || []).find((x) => x.id === id);
     return (e && e.name) || id;
@@ -595,6 +626,7 @@ const Session = (() => {
       `<b>${sid}</b> · 경보 ${hhmmss(alarmTs)} · ` +
       (live ? `<span class="st-run">진행 중</span>` : `<span class="st-end">종료</span>`) +
       ` · 경과 <span class="t-num">${elapsedTxt()}</span>` + cfgWarn;
+    noteElapsed();
     document.querySelectorAll("#sessGrid .mela:not(#idrHeadEl)").forEach((el) => {
       el.textContent = "경과 " + elapsedTxt();
     });
