@@ -472,7 +472,10 @@ Views.replay = (() => {
       drillSites = resp.site_by_floor || {};
       drillTimelines = resp.timeline_by_floor || {};
       drillOverrides = resp.overrides_by_floor || {};
-      showBuildingMetrics(drill, "재계산값");
+      if (resp.route_mode) routeMode = resp.route_mode;
+      routeStats = resp.person_route_stats || null;
+      if (window.__rpSyncRouteUI) window.__rpSyncRouteUI();
+      showBuildingMetrics(drill, routeMode === "person" ? "재계산값 · 개인 경로" : "재계산값");
       const floors = drill.floors || [];
       const fl = floors.includes(keepFloor) ? keepFloor : floors[0];
       if (fl) { loadDrillFloor(fl); goTo(Math.min(keepIdx, (data.frames || []).length - 1)); }
@@ -602,7 +605,7 @@ Views.replay = (() => {
   }
 
   function overlay(g) {
-    if (site) drawSiteElements(g, site, { state: dataState() });
+    if (site) drawSiteElements(g, site, { state: dataState(), layers: rpLayers });
     drawEdit(g);                                   // 편집 추가/제외 표시
     drawAlarmOrigins(g);
     if (!data || !data.frames || !data.frames.length) return;
@@ -667,6 +670,13 @@ Views.replay = (() => {
   // 밀도 히트맵 — 운영 뷰와 같은 모듈·같은 그림. 재생 커서를 따라 같이 움직인다.
   let rpHeat = (() => { try { return localStorage.getItem("macs_rp_heat") === "1"; }
                         catch (e) { return false; } })();
+  /* 경로 기준 — "site"(사람이 그린 공통 경로) | "person"(재실자별 산출 경로).
+   * 개인 모드는 경로가 사람 수만큼(실측 60~145개) 깔려 도면이 스파게티가 된다.
+   * 그래서 개인 모드에서는 **경로·IDR 구역을 기본으로 숨기고** 병목·출구만 남긴다.
+   * 보고 싶으면 [경로]·[구역] 토글로 켠다. 지표 계산과는 무관한 표출 규칙이다. */
+  let routeMode = "site";
+  let routeStats = null;
+  const rpLayers = { routes: true, zones: true };
   let eDraft = null;          // {pts:[[x,y],...]}
   let eHover = null;          // 부채꼴 미리보기 커서
   let eGeo = null;            // {routes:[...], bottlenecks:[...]} — 편집 중인 사본
@@ -1130,6 +1140,13 @@ Views.replay = (() => {
   // ---------------------------------------------------------------- 적용·복귀
   async function applyGeometry() {
     if (!eGeo || !selId) return;
+    if (routeMode === "person") {
+      // 개인 모드는 경로를 산출본으로 갈아끼우므로, 여기서 경로를 편집해도
+      // 재계산 때 덮어써진다. 병목만 바꿀 거면 [공통]으로 돌린 뒤 하거나,
+      // 편집 후 다시 [개인]을 눌러야 한다 — 조용히 날리지 말고 알린다.
+      if (!confirm("개인 경로 기준입니다.\n편집한 **피난경로**는 재계산 때 산출 경로로 "
+                   + "덮어써집니다(병목 편집은 유지).\n그래도 적용할까요?")) return;
+    }
     $("rpEdApply").disabled = true;
     $("rpMsg").textContent = "편집한 도면으로 재계산 중…";
     try {
@@ -1447,6 +1464,56 @@ Views.replay = (() => {
     $("rpToStart").onclick = () => { pause(); goTo(0); if (mc) mc.render(); };
     $("rpSeek").oninput = (e) => { pause(); goTo(parseInt(e.target.value)); if (mc) mc.render(); };
     $("rpSpeed").onchange = (e) => { speed = parseFloat(e.target.value) || 1; };
+    function syncRouteUI() {
+      document.querySelectorAll("#rpRouteMode [data-rmode]").forEach((b) =>
+        b.classList.toggle("on", b.dataset.rmode === routeMode));
+      const el = $("rpRouteBadge");
+      if (el) {
+        const on = routeMode === "person";
+        el.classList.toggle("hidden", !on);
+        if (on) {
+          const st = routeStats || {};
+          const made = Object.values(st).reduce((a, v) => a + (v.made || 0), 0);
+          const bad = Object.values(st).reduce((a, v) => a + (v.unreachable || 0), 0);
+          el.innerHTML = `개인 경로 ${made}개`
+            + (bad ? ` · <b title="벽 안에 찍혔거나 출구와 끊긴 자리 — 그 사람은 EPFI 집계에서 빠집니다">산출 불가 ${bad}명</b>` : "");
+        }
+      }
+      // 개인 모드 기본 표출 — 경로·구역 숨김. 사용자가 토글로 켠 건 존중한다.
+      document.querySelectorAll("#rpLayerSeg [data-rlayer]").forEach((b) =>
+        b.classList.toggle("on", rpLayers[b.dataset.rlayer] !== false));
+    }
+    window.__rpSyncRouteUI = syncRouteUI;
+
+    document.querySelectorAll("#rpLayerSeg [data-rlayer]").forEach((b) => {
+      b.onclick = () => {
+        const k = b.dataset.rlayer;
+        rpLayers[k] = (rpLayers[k] === false);
+        b.classList.toggle("on", rpLayers[k]);
+        if (mc) mc.render();
+      };
+    });
+
+    document.querySelectorAll("#rpRouteMode [data-rmode]").forEach((b) => {
+      b.onclick = async () => {
+        const m = b.dataset.rmode;
+        if (m === routeMode || mode !== "drill") {
+          if (mode !== "drill") $("rpMsg").textContent =
+            "개인 경로 기준은 건물 훈련(리허설 녹화본)에서만 지원합니다.";
+          return;
+        }
+        routeMode = m;
+        // 개인 모드로 들어가면 경로·구역을 기본으로 끈다(스파게티 방지).
+        rpLayers.routes = (m !== "person");
+        rpLayers.zones = (m !== "person");
+        syncRouteUI();
+        $("rpMsg").textContent = m === "person"
+          ? "재실자별 피난경로 산출 중… (세션당 1회, 이후 저장본 재사용)" : "재계산 중…";
+        try { await recomputeDrill({ route_mode: m }); }
+        catch (e) { $("rpMsg").textContent = "경로 기준 전환 실패: " + e.message; }
+      };
+    });
+
     if ($("rpHeat")) {
       $("rpHeat").classList.toggle("on", rpHeat);
       $("rpHeat").onclick = () => {

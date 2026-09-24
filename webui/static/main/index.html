@@ -581,6 +581,20 @@
           <span class="fieldlab" title="객체 위치 보간 렌더링 목표 fps">보간
             <input id="rpFps" type="number" min="1" max="30" step="1" value="20" style="width:46px" /> fps</span>
           <button class="tag-btn" id="rpHeat" title="밀도 히트맵 — 사람이 몰린 곳을 색으로. 지표 계산과 무관한 표출 전용">히트맵</button>
+          <span class="sp"></span>
+          <span class="fieldlab">경로 기준</span>
+          <span class="seg" id="rpRouteMode">
+            <button class="tag-btn on" data-rmode="site"
+              title="공통 — ① 맵 설정에서 사람이 그린 피난경로. 각자 가장 가까운 경로에 배정됩니다(기존 방식)">공통</button>
+            <button class="tag-btn" data-rmode="person"
+              title="개인 — 재실자마다 그 자리에서 출구까지의 최단경로를 산출해 기준으로 씁니다. 리허설 녹화본 전용·세션 종료 후 산출">개인</button>
+          </span>
+          <span class="rmbadge hidden" id="rpRouteBadge"></span>
+          <span class="sp"></span>
+          <span class="seg" id="rpLayerSeg" title="도면 위 표시 — 개인 경로 기준일 때는 경로·구역이 기본으로 꺼집니다">
+            <button class="tag-btn on" data-rlayer="routes">경로</button>
+            <button class="tag-btn on" data-rlayer="zones">구역</button>
+          </span>
         </div>
         <div class="toolbar rpedit hidden" id="rpEditBar">
           <span class="fieldlab">도면 편집</span>

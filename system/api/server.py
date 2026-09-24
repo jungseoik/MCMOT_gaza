@@ -1724,6 +1724,50 @@ def _effective_site_view(meta: dict, ov: dict | None) -> dict:
     return sv
 
 
+def _person_routes(session_id: str, floor_id: str, *, make: bool = False):
+    """그 층의 **개인 피난경로** 사이드카. make=True 면 없을 때 만들어 저장한다.
+
+    왜 세션 종료 후(오프라인)인가: ④ 리플레이는 녹화본을 다시 흘려보내 그리는
+    화면이라, 경로를 한 번 만들어 두면 재생할 때 그대로 재현된다. 훈련 실행 중에
+    뽑을 이유가 없고, 실행 중 부하도 0 이다. 실측 생성 0.4초/층.
+    """
+    from system.evac import person_routes as pr
+    db = _session_db_path(session_id, floor_id)
+    if not db.is_file():
+        return None
+    got = pr.load(db)
+    if got is not None or not make:
+        return got
+    data = pr.generate(db, rt.store.site_dir(SITE_ID))
+    pr.save(db, data)
+    return data
+
+
+@app.post("/api/drill/{session_id}/person_routes")
+def drill_person_routes(session_id: str, force: bool = False):
+    """개인 피난경로 산출·저장 (층별). 이미 있으면 그대로 돌려준다(force=true 면 재산출).
+
+    리허설 녹화본에만 쓴다 — RTSP 라이브 세션은 경보 시점 좌표 품질을 보장할 수
+    없어 대상이 아니다(사용자 합의).
+    """
+    from system.evac import person_routes as pr
+    out, errs = {}, {}
+    for f in _drill_floors(session_id):
+        db = _session_db_path(session_id, f)
+        if not db.is_file():
+            continue
+        try:
+            if force:
+                pr.save(db, pr.generate(db, rt.store.site_dir(SITE_ID)))
+            data = _person_routes(session_id, f, make=True)
+            out[f] = {"routes": len(data["routes"]), **data["stats"]}
+        except Exception as e:                       # 도면·출구·축척 미비 등
+            errs[f] = str(e)
+    if not out and errs:
+        raise HTTPException(422, {"msg": "개인 경로를 만들 수 없습니다", "floors": errs})
+    return {"session_id": session_id, "by_floor": out, "errors": errs}
+
+
 @app.post("/api/drill/{session_id}/replay")
 async def drill_replay(session_id: str, request: Request):
     """건물 드릴 재계산 — 참여 각 층의 녹화 db를 같은 오버라이드로 리플레이하고
@@ -1745,6 +1789,10 @@ async def drill_replay(session_id: str, request: Request):
     # 저장된 편집본을 그대로 쓴다. 본문의 geometry 는 {floor_id: {...}} 형태.
     geo_by_floor = overrides.pop("geometry", None)
     save = bool(body.get("save"))          # true 면 이번 오버라이드를 편집본으로 영구 저장
+    # 경로 기준 — "site"(사람이 그린 공통 경로, 기본) | "person"(재실자별 산출 경로)
+    route_mode = str(body.get("route_mode") or "site")
+    if route_mode not in ("site", "person"):
+        raise HTTPException(422, f"route_mode는 site|person — 받은 값: {route_mode!r}")
 
     part = _drill_floors(session_id)        # 레코드 기준 — 리허설 층은 종료 후 참여 층이 아니다
     dbs = [(f, _session_db_path(session_id, f)) for f in part]
@@ -1757,11 +1805,22 @@ async def drill_replay(session_id: str, request: Request):
     site_by_floor: dict[str, dict] = {}
     timeline_by_floor: dict[str, list] = {}
     ov_by_floor: dict[str, dict] = {}
+    pr_stats: dict[str, dict] = {}
     for f, db in dbs:
         per = dict(overrides)
         if geo_by_floor is not None and f in geo_by_floor:
             per["geometry"] = geo_by_floor[f]
         per = _merge_overrides(session_id, f, per)
+        if route_mode == "person":
+            # 개인 경로 모드 — 그 층의 산출 경로로 **경로만** 갈아끼운다.
+            # 병목은 편집본이 있으면 그대로 둔다(경로와 무관한 축이라 섞지 않는다).
+            pdata = _person_routes(session_id, f, make=True)
+            if pdata and pdata.get("routes"):
+                geo = dict(per.get("geometry") or {})
+                geo["routes"] = [{k: v for k, v in r.items() if not k.startswith("_")}
+                                 for r in pdata["routes"]]
+                per["geometry"] = geo
+                pr_stats[f] = pdata["stats"]
         if save:
             _overrides_save(session_id, f, per)
         ov_by_floor[f] = per
@@ -1780,7 +1839,10 @@ async def drill_replay(session_id: str, request: Request):
             "frames_by_floor": frames_by_floor, "site_by_floor": site_by_floor,
             "timeline_by_floor": timeline_by_floor,
             # 지금 적용된 편집본 — 화면을 다시 열어도 같은 도면이 보이게 한다
-            "overrides_by_floor": ov_by_floor}
+            "overrides_by_floor": ov_by_floor,
+            # 경로 기준과 산출 통계(개인 경로 모드일 때) — 화면이 배지로 띄운다
+            "route_mode": route_mode,
+            "person_route_stats": pr_stats}
 
 
 @app.get("/api/session")

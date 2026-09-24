@@ -691,6 +691,10 @@ body.rehearsing .rhbanner{ display:block; }
 .elapsed .el-big i{ font-style:normal; opacity:.45; margin:0 1px; }
 .elapsed .el-sub{ font-size:11.5px; font-weight:700; color:var(--text-3); }
 .elapsed.running .el-sub{ color:#3FB950; }
+/* 경로 기준 배지 — 같은 세션도 기준이 다르면 숫자가 달라진다. 크게 붙여 오독을 막는다. */
+.rmbadge{ font-size:11.5px; font-weight:700; padding:3px 10px; border-radius:999px;
+  background:rgba(48,220,251,.14); color:var(--brand,#30DCFB); white-space:nowrap; }
+.rmbadge b{ color:#F5A623; font-weight:700; }
 .repsum{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; padding:14px 18px;
   background:var(--bg-3); border:1px solid var(--stroke-3); border-radius:var(--r-md);
   font-size:13.5px; color:var(--text-1); margin-bottom:6px; line-height:1.8; }

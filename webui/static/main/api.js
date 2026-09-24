@@ -93,6 +93,8 @@ const API = {
     API._j(`/api/sessions/${encodeURIComponent(id)}?` + API._fq(floor), { method: "DELETE" }),
   // 건물 드릴 재계산(Phase 3) — 전 층 .db를 같은 오버라이드로 리플레이 → 재산출 롤업.
   drillReplay: (id, body) => API._post(`/api/drill/${encodeURIComponent(id)}/replay`, body || {}),
+  drillPersonRoutes: (id, force) =>
+    API._post(`/api/drill/${encodeURIComponent(id)}/person_routes${force ? "?force=true" : ""}`, {}),
   // ---- 리플레이 도면 편집본 (세션별 사이드카) — 녹화본은 건드리지 않는다
   getReplayOverrides: (id, floor) =>
     API._j(`/api/replay/${encodeURIComponent(id)}/overrides`
