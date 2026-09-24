@@ -558,6 +558,13 @@ async def apply(payload: dict = None):
                   "opening_width_mm": OPENING_W,
                   "deleted_handles": S["deleted"],
                   "cell_mm": FULL_CELL, "clearance_mm": core.CLEARANCE,
+                  # 편집 도형 **전부**(뚫기 open + 막기 block, 도면 mm).
+                  # 예전엔 저장하지 않아, 적용 뒤에는 "어디를 뚫었는지"가 사라졌다 —
+                  # openings_mm 은 구형식(선)만 담고 shapes 는 아예 빠져 있었다.
+                  # 그 결과 map.png 에도 안 그려지고(뚫기는 격자에만 적용) 파일에도
+                  # 없어서, 나중에 이 도면으로 경로를 다시 풀 때 **문이 막힌 채**로
+                  # 계산됐다(실측: 사람이 걸어간 자리의 38%가 '출구 도달 불가').
+                  "shapes": [dict(sh) for sh in (S.get("shapes") or [])],
                   # 장애물(의자·적치물·통행금지) — map.png 에 이미 그려져 있지만,
                   # :8900 이 나중에 겹쳐 그리거나 밀도에서 제외하려면 좌표가 필요하다.
                   # 맵 px 로 같이 준다(도면 mm 는 계산용, px 는 표출용).
