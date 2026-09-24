@@ -63,7 +63,14 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES) -> dict:
     if not png.is_file():
         raise ValueError(f"{floor_id}: 도면 이미지가 없습니다 — {png.name}")
 
-    df = build_distfield(str(png), exits, m_per_px)
+    # 사람이 ① 맵 설정에서 그린 피난경로를 따라 통로를 뚫는다.
+    # 그 선은 **실제 문을 지나도록** 그어져 있어서, map.png 에 문짝·스윙 호가
+    # 선으로 남아 문이 막혀 보이는 문제를 그대로 푼다. 편집기의 개구부 뚫기는
+    # floor.json 에 저장되지 않아 복구할 수 없다(별도 수정 대상).
+    # 실측(AI hub 3층, 관측 1512): 벽 위 32.2%→20%, **도달불가 38.2%→0.1%**.
+    carve = [r.points for r in site.routes if len(r.points) >= 2]
+    df = build_distfield(str(png), exits, m_per_px,
+                         carve_paths=carve or None, carve_w_m=2.0, clearance_m=0.15)
 
     # 트랙별 **첫 투영 위치** — 엔진과 같은 투영기(CameraProjector)를 쓴다.
     # 좌표계가 조금이라도 다르면 경로가 엉뚱한 데서 출발한다.

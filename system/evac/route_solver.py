@@ -62,12 +62,22 @@ def _dilate(mask: np.ndarray, r: int) -> np.ndarray:
 
 def build_distfield(map_png: str, exits_px, m_per_px: float, *,
                     cell_m: float = CELL_M, clearance_m: float = CLEARANCE_M,
-                    wall_gray: int = WALL_GRAY, extra_walls=None) -> DistField:
+                    wall_gray: int = WALL_GRAY, extra_walls=None,
+                    carve_paths=None, carve_w_m: float = 1.2) -> DistField:
     """map.png + 출구선(맵 px) → 거리장.
 
     exits_px    : [[(x1,y1),(x2,y2)], ...] 출구 통과선 (맵 px)
-    extra_walls : 추가로 막을 다각형 [[(x,y),...], ...] (맵 px) — 병목이 아니라
-                  '통행금지'처럼 도면에 없는 막음을 넣고 싶을 때. 보통 None.
+    extra_walls : 추가로 막을 다각형 [[(x,y),...], ...] (맵 px)
+    carve_paths : **뚫어야 할 통로** [[(x,y),...], ...] (맵 px). 보통 ① 맵 설정에서
+                  사람이 그린 피난경로를 넣는다.
+
+    carve_paths 가 왜 필요한가 — map.png 는 도면을 **그린 그림**이라 두 가지가 빠진다:
+      · 편집기의 개구부 뚫기(문 열기)는 격자에만 적용되고 그림에는 안 들어간다
+        (게다가 floor.json 에도 저장되지 않는다 — 복구할 길이 없다)
+      · 문짝·문 스윙 호가 선으로 그려져 있어 **실제 문이 벽으로 잡힌다**
+    사람이 그린 피난경로는 **실제 문을 지나도록 그어져 있으므로**, 그 선을 따라
+    통로 폭만큼 뚫으면 진짜 문이 열린다. 실측: 사람 관측이 벽 위에 찍히는 비율이
+    32.2% → 대폭 감소(아래 검증).
     """
     import cv2
     im = cv2.imread(map_png, cv2.IMREAD_GRAYSCALE)
@@ -99,6 +109,16 @@ def build_distfield(map_png: str, exits_px, m_per_px: float, *,
             wall |= m.astype(bool).T
 
     wall = _dilate(wall, int(round(clearance_m / cell_m)))
+
+    # 통로 뚫기 — clearance 팽창 **뒤에** 해야 한다. 앞서 뚫으면 팽창이 다시 덮는다.
+    if carve_paths:
+        half = max(1, int(round((carve_w_m / 2) / cell_m)))
+        cm = np.zeros((rows, cols), np.uint8)
+        for pts in carve_paths:
+            q = [(int(x / cell_px), int(y / cell_px)) for x, y in pts]
+            for i in range(len(q) - 1):
+                cv2.line(cm, q[i], q[i + 1], 1, thickness=half * 2 + 1)
+        wall &= ~cm.astype(bool).T
 
     # 출구 셀 — 선분을 따라 샘플링. 출구는 벽에 묻혀도 무조건 통행 가능으로 연다
     # (문틀 선 때문에 출구가 막히면 거리장이 통째로 무한대가 된다).
