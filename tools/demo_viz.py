@@ -33,6 +33,7 @@ import numpy as np                            # noqa: E402
 
 from system.metrics import recorder           # noqa: E402
 from system.metrics.replay import run_replay  # noqa: E402
+from tools import demo_ghosts as dghost       # noqa: E402
 from tools import demo_obstacles as dobs      # noqa: E402
 from tools.session_viz import (                # noqa: E402
     drill_label, find_session, fit, latest_at, put, resolve_clips,
@@ -77,6 +78,84 @@ def session_color(key: str):
     return int(b), int(g), int(r)
 
 
+# ── 밀도 히트맵 (VERSION 2)
+# 화면(webui/static/main/heatmap.js)과 **같은 팔레트·같은 반경**을 쓴다. 발표에서
+# 보여주는 그림과 운영 화면의 그림이 다르면 그때부터 설명이 꼬인다.
+HEAT_R_M = 2.5          # 한 사람이 퍼뜨리는 반경 (실거리 m)
+HEAT_SCALE = 0.5        # 누적 버퍼 배율 — 블롭은 어차피 뭉툭하다
+HEAT_PEAK = 0.55        # 블롭 중심 알파 (heatmap.js 와 동일)
+HEAT_STOPS = [(0.00, (0, 0, 0), 0), (0.12, (40, 110, 220), 90),
+              (0.32, (40, 200, 200), 150), (0.55, (70, 210, 90), 185),
+              (0.78, (245, 200, 40), 210), (1.00, (240, 60, 50), 230)]
+
+
+def heat_lut():
+    """256단계 조견표 (BGR + 알파) — 픽셀마다 보간하지 않게."""
+    rgb = np.zeros((256, 3), np.float32)
+    al = np.zeros(256, np.float32)
+    for i in range(256):
+        t = i / 255.0
+        a, b = HEAT_STOPS[0], HEAT_STOPS[-1]
+        for k in range(len(HEAT_STOPS) - 1):
+            if HEAT_STOPS[k][0] <= t <= HEAT_STOPS[k + 1][0]:
+                a, b = HEAT_STOPS[k], HEAT_STOPS[k + 1]
+                break
+        f = (t - a[0]) / ((b[0] - a[0]) or 1)
+        rgb[i] = [a[1][2] + (b[1][2] - a[1][2]) * f,      # BGR 로 뒤집어 담는다
+                  a[1][1] + (b[1][1] - a[1][1]) * f,
+                  a[1][0] + (b[1][0] - a[1][0]) * f]
+        al[i] = (a[2] + (b[2] - a[2]) * f) / 255.0
+    return rgb, al
+
+
+def heat_blob(r_px: int):
+    """반경 r 의 방사 감쇠 커널 — 겹칠수록 알파가 쌓인다 = 밀집."""
+    r = max(2, int(r_px))
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1].astype(np.float32)
+    d = np.hypot(xx, yy) / r
+    return np.clip(1.0 - d, 0.0, 1.0) ** 1.6 * HEAT_PEAK
+
+
+def heat_overlay(base, pts, blob, lut_rgb, lut_a):
+    """도면 위에 밀도장을 깔아 돌려준다. base 는 건드리지 않는다."""
+    h, w = base.shape[:2]
+    sh, sw = max(1, int(h * HEAT_SCALE)), max(1, int(w * HEAT_SCALE))
+    acc = np.zeros((sh, sw), np.float32)
+    r = blob.shape[0] // 2
+    for x, y in pts:
+        cx, cy = int(x * HEAT_SCALE), int(y * HEAT_SCALE)
+        x0, y0 = max(0, cx - r), max(0, cy - r)
+        x1, y1 = min(sw, cx + r + 1), min(sh, cy + r + 1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        acc[y0:y1, x0:x1] += blob[y0 - (cy - r):y1 - (cy - r),
+                                  x0 - (cx - r):x1 - (cx - r)]
+    if acc.max() <= 0:
+        return base
+    idx = np.clip(acc * 255.0, 0, 255).astype(np.uint8)
+    col = lut_rgb[idx]                       # (sh,sw,3) BGR
+    alp = lut_a[idx][..., None]
+    small = base[::1, ::1]
+    col = cv2.resize(col, (w, h), interpolation=cv2.INTER_LINEAR)
+    alp = cv2.resize(alp, (w, h), interpolation=cv2.INTER_LINEAR)[..., None]
+    return (base * (1 - alp) + col * alp).astype(np.uint8)
+
+
+def heat_legend(img, x0, y0):
+    """밀집도 색띠 — 색만 깔아 두면 "빨간 게 뭔데"가 남는다."""
+    w, h = 150, 12
+    g = np.linspace(0, 255, w).astype(np.uint8)
+    rgb, _ = heat_lut()
+    bar = rgb[g][None, :, :].repeat(h, 0).astype(np.uint8)
+    ov = img.copy()
+    cv2.rectangle(ov, (x0 - 8, y0 - 24), (x0 + w + 8, y0 + h + 8), (28, 28, 32), -1)
+    cv2.addWeighted(ov, 0.80, img, 0.20, 0, img)
+    img[y0:y0 + h, x0:x0 + w] = bar
+    put(img, "밀집도", (x0, y0 - 23), 15, (232, 232, 240), True)
+    put(img, "낮음", (x0, y0 + h + 1), 13, (170, 170, 180))
+    put(img, "높음", (x0 + w - 30, y0 + h + 1), 13, (170, 170, 180))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="발표용 시각화 — 지표가 보이는 영상")
     ap.add_argument("--session", required=True)
@@ -92,6 +171,8 @@ def main() -> int:
                     help='임계값 오버라이드 JSON — 예 \'{"dt_hold":1.0}\'. '
                          "배포 기본값에서 개시가 안 서는 각본을 보여줄 때 쓴다. "
                          "쓰면 화면에 그 사실을 표기한다(숨기면 오해를 부른다).")
+    ap.add_argument("--map", default="dots", choices=("dots", "heat"),
+                    help="2D 맵 표출 — dots(점+흔적) / heat(밀도 히트맵)")
     a = ap.parse_args()
 
     db, floor = find_session(a.session, a.floor)
@@ -119,10 +200,22 @@ def main() -> int:
     print(f"[demo] 개인 경로 {len(proutes['routes'])}개 · 산출 불가 "
           f"{proutes['stats']['unreachable']}명")
 
+    # 붙박이 오검출 제외 — 화면뿐 아니라 **엔진에도 넣지 않는다**(지표와 그림이
+    # 어긋나면 그게 더 나쁜 거짓말이다). 목록은 사람이 크롭으로 확인해 확정한 것.
+    ghosts = dghost.load(a.session)
+    if ghosts:
+        print(f"[demo] 붙박이 오검출 {len(ghosts)}개 트랙 제외 — "
+              + ", ".join(f"{g['key']}({g.get('verified') or g['reason']})" for g in ghosts))
+
     th = json.loads(a.th) if a.th else {}
     if th:
         print(f"[demo] 임계값 오버라이드 {th} — 화면에 표기합니다")
-    result, timeline, frames, _m = run_replay(db, {"thresholds": th} if th else {}, fps=5.0)
+    ov = {}
+    if th:
+        ov["thresholds"] = th
+    if ghosts:
+        ov["exclude_tracks"] = [g["key"] for g in ghosts]
+    result, timeline, frames, _m = run_replay(db, ov, fps=5.0)
     res = result.model_dump()
     tl = [t.model_dump() for t in timeline]
     site = meta["site_view"]
@@ -188,10 +281,20 @@ def main() -> int:
             cv2.rectangle(left0, (x0 + 10, y + 4), (x0 + 26, y + 18), bgr, -1)
             put(left0, nm, (x0 + 34, y + 1), 16, (232, 232, 240), True)
 
+    # 히트맵 준비 — 반경은 **실거리**로 잡는다(화면 px 로 고정하면 도면 축척마다
+    # 같은 밀집이 다른 그림이 된다).
+    HEAT = a.map == "heat"
+    if HEAT:
+        heat_r = max(6, int(HEAT_R_M / m_per_px * msc * HEAT_SCALE))
+        blob = heat_blob(heat_r)
+        lut_rgb, lut_a = heat_lut()
+        heat_legend(left0, 22, 38)      # 좌하단은 장애물 범례가 쓴다
+        print(f"[demo] 히트맵 판 — 반경 {HEAT_R_M}m = {heat_r}px(누적버퍼)")
+
     DOT = session_color(a.session)
     outdir = ROOT / a.out
     outdir.mkdir(parents=True, exist_ok=True)
-    stem = f"{a.metric}_{label.split()[0]}"
+    stem = f"{a.metric}_{label.split()[0]}" + ("_heat" if a.map == "heat" else "")
     tmp, final = outdir / f"{stem}.tmp.mp4", outdir / f"{stem}.mp4"
     vw = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (OW, OH))
 
@@ -328,21 +431,30 @@ def main() -> int:
             trail[:] = [q for q in trail if t - q[0] <= TRAIL_SEC]
 
             left = left0.copy()
-            # 흔적 — 오래된 것일수록 흐리게. 세 단계로 나눠 겹쳐 그린다
-            # (점마다 알파를 주려면 매번 addWeighted 라 느리다).
-            for lo, hi, al, rr in ((0.66, 1.0, 0.18, 2), (0.33, 0.66, 0.34, 3),
-                                   (0.0, 0.33, 0.55, 4)):
-                ov = left.copy()
-                drew = False
-                for ts_, x, y in trail:
-                    age = (t - ts_) / TRAIL_SEC
-                    if lo <= age < hi:
-                        cv2.circle(ov, MP(x, y), rr, DOT, -1); drew = True
-                if drew:
-                    cv2.addWeighted(ov, al, left, 1 - al, 0, left)
-            for o in obs:
-                cv2.circle(left, MP(o["x"], o["y"]), 7, DOT, -1)
-                cv2.circle(left, MP(o["x"], o["y"]), 7, (20, 20, 20), 1)
+            if HEAT:
+                # 밀집을 보여주는 판 — 흔적은 뺀다. 흔적선과 밀도장이 겹치면
+                # 어느 쪽이 "몰려 있다"인지 안 읽힌다.
+                left = heat_overlay(left, [MP(o["x"], o["y"]) for o in obs],
+                                    blob, lut_rgb, lut_a)
+                for o in obs:                       # 누가 몇 명인지는 남겨 둔다
+                    cv2.circle(left, MP(o["x"], o["y"]), 4, (255, 255, 255), -1)
+                    cv2.circle(left, MP(o["x"], o["y"]), 4, (30, 30, 30), 1)
+            else:
+                # 흔적 — 오래된 것일수록 흐리게. 세 단계로 나눠 겹쳐 그린다
+                # (점마다 알파를 주려면 매번 addWeighted 라 느리다).
+                for lo, hi, al, rr in ((0.66, 1.0, 0.18, 2), (0.33, 0.66, 0.34, 3),
+                                       (0.0, 0.33, 0.55, 4)):
+                    ov = left.copy()
+                    drew = False
+                    for ts_, x, y in trail:
+                        age = (t - ts_) / TRAIL_SEC
+                        if lo <= age < hi:
+                            cv2.circle(ov, MP(x, y), rr, DOT, -1); drew = True
+                    if drew:
+                        cv2.addWeighted(ov, al, left, 1 - al, 0, left)
+                for o in obs:
+                    cv2.circle(left, MP(o["x"], o["y"]), 7, DOT, -1)
+                    cv2.circle(left, MP(o["x"], o["y"]), 7, (20, 20, 20), 1)
 
             right = np.zeros((PANE_H, RIGHT_W, 3), np.uint8)
             n = len(caps)

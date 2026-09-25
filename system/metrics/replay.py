@@ -134,7 +134,12 @@ def run_replay(db_path, overrides: dict | None = None, fps: float = 5.0):
 
     frames: fps 격자로 샘플된 경량 MapState 리스트 (2D 재생용).
     overrides: {thresholds:{v_th,...}, rho_crit, bottlenecks:{id:{rho_crit,weight}},
-                exits:{id:{width_m,q_design,design_capacity}}}
+                exits:{id:{width_m,q_design,design_capacity}},
+                exclude_tracks:["<cam_id>:<local_track_id>", ...]}
+
+    exclude_tracks 는 그 트랙을 **엔진에 아예 넣지 않는다** — 화면에서만 지우면
+    지표는 유령을 세고 있는데 그림에는 없는, 더 나쁜 상태가 된다. 쓰는 곳은
+    발표용 시각화뿐이고, 무엇을 왜 뺐는지는 호출부가 남긴다.
     """
     meta = recorder.load_meta(db_path)
     site = SiteConfig.model_validate(meta["site_view"])
@@ -164,7 +169,11 @@ def run_replay(db_path, overrides: dict | None = None, fps: float = 5.0):
             frames.append(_lite_frame(eng.snapshot()))
             last = t
 
+    drop = set((overrides or {}).get("exclude_tracks") or [])
     for cam_id, ts, tracks in recorder.iter_calls(db_path):
+        if drop:
+            tracks = [t for t in tracks
+                      if f"{cam_id}:{t.local_track_id}" not in drop]
         if pending is not None and ts > pending:
             _emit(pending)                      # pending 순간의 전 카메라 반영 완료
         eng.on_tracks(cam_id, ts, tracks)
