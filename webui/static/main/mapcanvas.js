@@ -383,7 +383,22 @@ function drawGraph(g, graph, opts = {}) {
  *  옛 호출부) TX/TY 로 폴백한다. x·y 가 서로 뒤바뀔 수 있어 반드시 쌍으로 변환한다. */
 function PT(g, x, y) { return g.P ? g.P(x, y) : [g.TX(x), g.TY(y)]; }
 
+/* 점 색을 **세션 단위 한 가지**로 통일하고 싶을 때 여기에 색을 넣는다(null=카메라별).
+ * 카메라별 색은 "어느 카메라가 잡았나"를 보는 용도인데, 훈련을 볼 때는 오히려
+ * 같은 사람이 카메라를 넘을 때마다 색이 바뀌어 산만하다. 지표와는 무관한 표출 설정. */
+let MC_UNIFORM = null;
+function mcSetUniformColor(c) { MC_UNIFORM = c || null; }
+
+/** 세션·훈련 id 로 색 하나를 정한다 — 같은 세션은 항상 같은 색(재생해도 안 바뀜). */
+function mcSessionColor(key) {
+  let h = 0;
+  const k = String(key || "");
+  for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) | 0;
+  return `hsl(${Math.abs(h) % 360},72%,62%)`;
+}
+
 function camColor(camId, cams) {
+  if (MC_UNIFORM) return MC_UNIFORM;
   let idx = (cams || []).findIndex((c) => c.cam_id === camId);
   if (idx < 0) {
     idx = 0;

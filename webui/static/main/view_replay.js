@@ -522,6 +522,9 @@ Views.replay = (() => {
   function prepPlayback() {
     const f = (data && data.frames) || [];
     duration = f.length ? (f[f.length - 1].ts - f[0].ts) : 0;
+    const at = (mode === "drill" ? (drill && drill.alarm_ts)
+                                 : (data && data.meta && data.meta.alarm_ts));
+    alarmOffset = (f.length && at) ? (f[0].ts - at) : 0;
     cursor = 0;
     $("rpSeek").max = String(Math.max(0, f.length - 1));
     $("rpSeek").value = "0";
@@ -558,8 +561,12 @@ Views.replay = (() => {
     if (cursor >= duration - 1e-3) cursor = 0;   // 끝이면 처음부터
     playing = true; $("rpPlay").textContent = "⏸ 일시정지";
     lastRaf = performance.now();
+    renderRpElapsed();                 // 재생/정지 표시를 즉시 반영
   }
-  function pause() { playing = false; $("rpPlay").textContent = "▶ 재생"; }
+  function pause() {
+    playing = false; $("rpPlay").textContent = "▶ 재생";
+    renderRpElapsed();                 // 정지인데 "재생 중"이 남지 않게
+  }
   function togglePlay() { playing ? pause() : play(); }
 
   function goTo(idx) {                             // 슬라이더(프레임 인덱스) → cursor
@@ -583,7 +590,26 @@ Views.replay = (() => {
     s = Math.max(0, Math.round(s));
     return `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
   }
-  function updateTimeLabel() { $("rpTime").textContent = `${fmtDur(cursor)} / ${fmtDur(duration)}`; }
+  function updateTimeLabel() {
+    $("rpTime").textContent = `${fmtDur(cursor)} / ${fmtDur(duration)}`;
+    renderRpElapsed();
+  }
+
+  /** 경보 후 경과 — 운영 뷰와 같은 모양·같은 의미로 크게 띄운다. */
+  function renderRpElapsed() {
+    const box = $("rpElapsed");
+    if (!box) return;
+    const has = !!(data && data.frames && data.frames.length);
+    box.classList.toggle("hidden", !has);
+    if (!has) return;
+    // 반올림을 플레이어 시간 표시(fmtDur)와 맞춘다 — 안 맞추면 1초 어긋나 보인다
+    const v = Math.max(0, Math.round(cursor + alarmOffset));
+    const m = Math.floor(v / 60), sec = v % 60;
+    box.classList.toggle("running", !!playing);
+    box.innerHTML = `<span class="el-lab">경보 후 경과</span>`
+      + `<span class="el-big t-num">${m}<i>:</i>${String(sec).padStart(2, "0")}</span>`
+      + `<span class="el-sub">${playing ? "재생 중" : "정지"}</span>`;
+  }
 
   // ------------------------------------------------------------ 렌더
   function currentInterp() {
@@ -605,6 +631,10 @@ Views.replay = (() => {
   }
 
   function overlay(g) {
+    // 단일색은 그리기 직전에만 켠다 — 전역이라 다른 화면(운영 뷰)에 새면 안 된다.
+    if (typeof mcSetUniformColor === "function") {
+      mcSetUniformColor(rpUni ? mcSessionColor(selId || "") : null);
+    }
     if (site) drawSiteElements(g, site, { state: dataState(), layers: rpLayers });
     drawEdit(g);                                   // 편집 추가/제외 표시
     drawAlarmOrigins(g);
@@ -674,6 +704,14 @@ Views.replay = (() => {
    * 개인 모드는 경로가 사람 수만큼(실측 60~145개) 깔려 도면이 스파게티가 된다.
    * 그래서 개인 모드에서는 **경로·IDR 구역을 기본으로 숨기고** 병목·출구만 남긴다.
    * 보고 싶으면 [경로]·[구역] 토글로 켠다. 지표 계산과는 무관한 표출 규칙이다. */
+  /* 재생 커서는 "첫 프레임 이후"인데, 지표는 전부 **경보 후 경과** 기준이다.
+   * 재녹화 세션은 둘이 같지만(실측 오차 0.00s) 옛 세션은 어긋날 수 있어 보정한다.
+   * 재생 배속(0.5x·2x)은 영향이 없다 — 커서가 벽시계가 아니라 영상 시간이라서. */
+  let alarmOffset = 0;
+  // 점 색을 세션 하나로 통일 — 카메라별 색은 같은 사람이 카메라를 넘을 때마다
+  // 색이 바뀌어 산만하다. 지표와 무관한 표출 설정이라 브라우저에 기억한다.
+  let rpUni = (() => { try { return localStorage.getItem("macs_rp_uni") === "1"; }
+                       catch (e) { return false; } })();
   let routeMode = "site";
   let routeStats = null;
   const rpLayers = { routes: true, zones: true };
@@ -1484,6 +1522,16 @@ Views.replay = (() => {
         b.classList.toggle("on", rpLayers[b.dataset.rlayer] !== false));
     }
     window.__rpSyncRouteUI = syncRouteUI;
+
+    if ($("rpUniColor")) {
+      $("rpUniColor").classList.toggle("on", rpUni);
+      $("rpUniColor").onclick = () => {
+        rpUni = !rpUni;
+        $("rpUniColor").classList.toggle("on", rpUni);
+        try { localStorage.setItem("macs_rp_uni", rpUni ? "1" : "0"); } catch (e) { /* */ }
+        if (mc) mc.render();
+      };
+    }
 
     document.querySelectorAll("#rpLayerSeg [data-rlayer]").forEach((b) => {
       b.onclick = () => {

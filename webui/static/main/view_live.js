@@ -21,6 +21,9 @@ Views.live = (() => {
   // 밀도 히트맵 — 표출 전용(지표 계산과 무관). 취향이라 localStorage 에 기억한다.
   let showHeat = (() => { try { return localStorage.getItem("macs_live_heat") === "1"; }
                           catch (e) { return false; } })();
+  // 점 색을 세션 하나로 통일 (카메라별 색 ↔ 단일색). 표출 전용.
+  let uniColor = (() => { try { return localStorage.getItem("macs_live_uni") === "1"; }
+                          catch (e) { return false; } })();
   let selGid = null;                     // 객체 목록에서 선택된 gid (맵 하이라이트)
   let objSort = "dev";                   // 객체 정렬: dev(이탈)|speed|dwell
 
@@ -173,6 +176,10 @@ Views.live = (() => {
 
   // ------------------------------------------------------------ 렌더
   function overlay(g) {
+    if (typeof mcSetUniformColor === "function") {
+      const sid = state && state.sess && state.sess.session_id;
+      mcSetUniformColor(uniColor ? mcSessionColor(sid || "live") : null);
+    }
     drawSiteElements(g, App.site, { state, showScale: false, layers });
     if (showGraph) drawGraph(g, App.site.graph, { faint: true });
     if (showHulls) drawCameraHulls(g);               // 카메라별 매핑 커버리지
@@ -428,6 +435,15 @@ Views.live = (() => {
       $("hullToggle").classList.toggle("on", showHulls);
       if (mc) mc.render();
     };
+    if ($("uniColorToggle")) {
+      $("uniColorToggle").classList.toggle("on", uniColor);
+      $("uniColorToggle").onclick = () => {
+        uniColor = !uniColor;
+        $("uniColorToggle").classList.toggle("on", uniColor);
+        try { localStorage.setItem("macs_live_uni", uniColor ? "1" : "0"); } catch (e) { /* */ }
+        if (mc) mc.render();
+      };
+    }
     if ($("heatToggle")) {
       $("heatToggle").classList.toggle("on", showHeat);
       $("heatToggle").onclick = () => {
