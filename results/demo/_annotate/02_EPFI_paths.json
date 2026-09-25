@@ -1,0 +1,11 @@
+{
+  "session_id": "sess-1789693292022",
+  "floor": "floor4",
+  "label": "04 EPFI 2명 완전 우회 진입",
+  "map_png": "map_floor4.png",
+  "map_px": [
+    2000,
+    2013
+  ],
+  "tracks": 82
+}

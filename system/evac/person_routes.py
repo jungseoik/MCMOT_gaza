@@ -83,11 +83,16 @@ def _edits_from_floor_json(site_dir: Path, floor_id: str, m_per_px: float):
     return carve, blocks
 
 
-def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES) -> dict:
+def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
+             extra_walls=None) -> dict:
     """녹화본 → 자동 피난경로 목록. 반환값이 곧 사이드카 내용.
 
     {"floor_id", "m_per_px", "routes":[{id,name,points}],
      "stats":{seeds, made, unreachable, snapped_out}, "generated_from"}
+
+    extra_walls: 추가로 막을 다각형(맵 px). 발표 시각화의 장애물 표시처럼
+    도면에는 없지만 실제로는 못 지나가는 것들을 호출부가 얹는다. 경로만
+    바뀌고 지표 계산에는 닿지 않는다.
     """
     site_dir = Path(site_dir)
     meta = recorder.load_meta(db_path)
@@ -118,9 +123,10 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES) -> dict:
     carve, blocks = _edits_from_floor_json(site_dir, floor_id, m_per_px)
     if not carve:
         carve = [r.points for r in site.routes if len(r.points) >= 2]
+    walls = list(blocks) + [list(w) for w in (extra_walls or [])]
     df = build_distfield(str(png), exits, m_per_px,
                          carve_paths=carve or None, carve_w_m=2.0,
-                         clearance_m=0.15, extra_walls=blocks or None)
+                         clearance_m=0.15, extra_walls=walls or None)
 
     # 트랙별 **첫 투영 위치** — 엔진과 같은 투영기(CameraProjector)를 쓴다.
     # 좌표계가 조금이라도 다르면 경로가 엉뚱한 데서 출발한다.
@@ -161,7 +167,7 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES) -> dict:
         "floor_id": floor_id, "m_per_px": m_per_px,
         "routes": routes,
         "stats": {"seeds": len(first), "made": len(routes),
-                  "unreachable": unreachable},
+                  "unreachable": unreachable, "extra_walls": len(extra_walls or [])},
         "generated_from": Path(db_path).name,
     }
 

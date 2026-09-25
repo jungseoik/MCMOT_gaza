@@ -33,6 +33,7 @@ import numpy as np                            # noqa: E402
 
 from system.metrics import recorder           # noqa: E402
 from system.metrics.replay import run_replay  # noqa: E402
+from tools import demo_obstacles as dobs      # noqa: E402
 from tools.session_viz import (                # noqa: E402
     drill_label, find_session, fit, latest_at, put, resolve_clips,
 )
@@ -98,12 +99,22 @@ def main() -> int:
     label = drill_label(a.session) or a.session
     print(f"[demo] {a.session} · {floor} · {label} · 주지표 {a.metric}")
 
+    # 장애물 표시(:8920 편집기) — 그림에도 얹고, **경로 산출에서는 벽**으로 친다.
+    # 지표 계산에는 넣지 않는다(사람이 그린 공통 경로 기준 산출은 그대로).
+    obstacles = dobs.load(floor)
+    osig = dobs.signature(obstacles)
+    if obstacles:
+        print(f"[demo] 장애물 표시 {len(obstacles)}개 — 도면에 표출 + 경로 산출에 반영")
+
     # 개인 경로(있으면) — 인트로에 쓴다
     from system.evac import person_routes as pr
     proutes = pr.load(db)
-    if proutes is None:
-        print("[demo] 재실자별 경로 산출 중…")
-        proutes = pr.generate(db, ROOT / "data/sites/default")
+    if proutes is None or proutes.get("_obstacles_sig") != osig:
+        why = "없음" if proutes is None else "장애물 표시가 바뀜"
+        print(f"[demo] 재실자별 경로 산출 중… ({why})")
+        proutes = pr.generate(db, ROOT / "data/sites/default",
+                              extra_walls=[o["points"] for o in obstacles] or None)
+        proutes["_obstacles_sig"] = osig
         pr.save(db, proutes)
     print(f"[demo] 개인 경로 {len(proutes['routes'])}개 · 산출 불가 "
           f"{proutes['stats']['unreachable']}명")
@@ -163,6 +174,19 @@ def main() -> int:
         ln = e.get("line") or []
         if len(ln) >= 2:
             cv2.line(left0, MP(*ln[0]), MP(*ln[1]), (255, 190, 60), 6, cv2.LINE_AA)
+    dobs.draw(left0, obstacles, MP)                      # 장애물 표시(해치)
+    leg = dobs.legend(obstacles)                         # 범례 — 색만으론 안 읽힌다
+    if leg:
+        # 도면이 흰 바탕이라 글자를 그냥 얹으면 안 읽힌다 — 어두운 판을 깐다
+        h = 10 + len(leg) * 24
+        x0, y0 = 12, PANE_H - 12 - h
+        ov = left0.copy()
+        cv2.rectangle(ov, (x0, y0), (x0 + 168, y0 + h), (28, 28, 32), -1)
+        cv2.addWeighted(ov, 0.80, left0, 0.20, 0, left0)
+        for i, (nm, bgr) in enumerate(leg):
+            y = y0 + 6 + i * 24
+            cv2.rectangle(left0, (x0 + 10, y + 4), (x0 + 26, y + 18), bgr, -1)
+            put(left0, nm, (x0 + 34, y + 1), 16, (232, 232, 240), True)
 
     DOT = session_color(a.session)
     outdir = ROOT / a.out
@@ -173,11 +197,58 @@ def main() -> int:
 
     f1 = lambda v, d=1: "—" if v is None else f"{v:.{d}f}"   # noqa: E731
     n_zones = len(res.get("zone_metrics") or [])
+
+    def interp_objects(t):
+        """관측(5fps)을 출력 fps 로 **선형 보간**한다.
+
+        보간 없이 latest_at 으로 집으면 점이 초당 5번만 움직여 30fps 영상에서
+        뚝뚝 끊긴다. 앞뒤 프레임을 gid 로 짝지어 사이를 메운다 — ④ 리플레이
+        화면(currentInterp)과 같은 방식이라 보이는 그림이 일치한다.
+        좌표를 만들어내는 게 아니라 **표출만 매끄럽게** 하는 것이고, 지표 계산에는
+        일절 안 쓴다(지표는 원 관측으로 이미 산출돼 있다).
+        """
+        n = len(frames)
+        lo, hi = 0, n - 1
+        i = 0
+        while lo <= hi:                                   # ts <= t 인 마지막 프레임
+            mid = (lo + hi) // 2
+            if frames[mid]["ts"] <= t:
+                i = mid; lo = mid + 1
+            else:
+                hi = mid - 1
+        A = frames[i]
+        B = frames[min(n - 1, i + 1)]
+        span = (B["ts"] - A["ts"]) or 1.0
+        al = max(0.0, min(1.0, (t - A["ts"]) / span))
+        nxt = {o["gid"]: o for o in B["objects"]}
+        out = []
+        for o in A["objects"]:
+            b = nxt.get(o["gid"])
+            out.append({**o,
+                        "x": o["x"] + (b["x"] - o["x"]) * al if b else o["x"],
+                        "y": o["y"] + (b["y"] - o["y"]) * al if b else o["y"]})
+        return out
     n_intro = int(INTRO_SEC * out_fps)
     n_main = int(dur * out_fps)
     cur = {c: None for c in caps}
     pos = {c: -1 for c in caps}
     trail: list[tuple[float, float, float]] = []       # (ts, x, y)
+
+    def idr_at(t):
+        """그 시점의 IDR — 이미 **개시한 구역들의 평균 m/s**.
+
+        타임라인에는 개시 구역 수(zones_started)만 있어서 "1/1" 밖에 못 띄웠다.
+        지표 자체는 m/s 라 수치로 보여야 한다(④ 리플레이 카드와 같은 계산).
+        아직 아무 구역도 개시 안 했으면 None — 0 이 아니다.
+        """
+        done = [z for z in (res.get("zone_metrics") or [])
+                if z.get("evacuation_start_at") is not None
+                and z["evacuation_start_at"] <= t and z.get("idr") is not None]
+        if not done:
+            return None, 0, None
+        v = sum(z["idr"] for z in done) / len(done)
+        first = min(z["evacuation_start_at"] for z in done) - t0
+        return v, len(done), first
 
     def bar_panel(t, tp, obs, exits_now):
         bar = np.full((BAR_H, OW, 3), 22, np.uint8)
@@ -185,15 +256,23 @@ def main() -> int:
         m, s = int(el // 60), int(el % 60)
         put(bar, "경보 후 경과", (26, 12), 17, (150, 150, 150))
         put(bar, f"{m}:{s:02d}", (22, 34), 62, (255, 255, 255), True)
+        iv, idone, ifirst = idr_at(t)
         x = int(OW * 0.15)
-        for name, val in (("SEI", f1(tp.get("sei"))), ("EPFI", f1(tp.get("epfi_avg"))),
-                          ("CBS", f1(tp.get("cbs_total"), 2)),
-                          # TimelinePoint 에는 zones_started 만 있다 — 분모는 결과에서 센다
-                          ("IDR", f"{tp.get('zones_started', 0)}/{n_zones}")):
+        for name, val, sub in (
+                ("SEI", f1(tp.get("sei")), "출구 활용"),
+                ("EPFI", f1(tp.get("epfi_avg")), "경로 충실"),
+                ("CBS", f1(tp.get("cbs_total"), 2), "병목 누적"),
+                ("IDR", f1(iv, 2),
+                 (f"개시 {ifirst:.0f}s · {idone}/{n_zones} 구역" if iv is not None
+                  else f"미개시 · 0/{n_zones} 구역"))):
             main = (name == a.metric)
             col = ACCENT[name] if main else (140, 140, 140)
             put(bar, name, (x, 14), 20 if main else 16, col, True)
             put(bar, val, (x, 38), 52 if main else 34, col if main else (225, 225, 225), True)
+            if name == "IDR" and iv is not None:
+                put(bar, "m/s", (x + (118 if main else 84), 66 if main else 58),
+                    16, (150, 150, 150))
+            put(bar, sub, (x, 100 if main else 80), 15, (120, 120, 120))
             if main:                                  # 값 줄만 감싼다(바 전체가 아니라)
                 cv2.rectangle(bar, (x - 12, 8), (x + int(OW * 0.125), 96), col, 2)
             x += int(OW * 0.145)
@@ -242,8 +321,7 @@ def main() -> int:
         # ── ② 본편
         for k in range(n_main):
             t = t0 + k / out_fps
-            fr = latest_at(frames, t, key=lambda f: f["ts"])
-            obs = fr["objects"] if fr else []
+            obs = interp_objects(t)
             tp = latest_at(tl, t, key=lambda p: p["ts"]) or {}
             for o in obs:
                 trail.append((t, o["x"], o["y"]))

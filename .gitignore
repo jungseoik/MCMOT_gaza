@@ -235,3 +235,5 @@ data/seed_versions/auto-*/
 results/tracklet_purity/
 results/session_viz_v2/
 results/demo/*/*.mp4
+# 장애물 편집기 밑그림 — tools/annot_paths.py 로 언제든 다시 만든다(5MB+)
+results/demo/_annotate/*.png

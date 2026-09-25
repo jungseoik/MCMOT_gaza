@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>장애물 표시 편집기 — 발표 시각화 전용</title>
+<style>
+  :root{
+    --bg:#101014; --panel:#17171d; --line:#2a2a34; --fg:#e8e8ef; --dim:#9a9aab;
+    --chair:#b45309; --box:#7c3aed; --nogo:#dc2626;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.55 -apple-system,BlinkMacSystemFont,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+       height:100vh;display:flex;overflow:hidden}
+  aside{width:306px;flex:none;background:var(--panel);border-right:1px solid var(--line);
+        display:flex;flex-direction:column;overflow:hidden}
+  aside h1{font-size:14px;margin:0;padding:13px 14px 11px;border-bottom:1px solid var(--line);letter-spacing:-.2px}
+  aside h1 small{display:block;color:var(--dim);font-weight:400;font-size:11px;margin-top:3px}
+  .sec{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .sec>b{display:block;font-size:11px;color:var(--dim);font-weight:600;
+         letter-spacing:.4px;margin-bottom:7px}
+  .row{display:flex;gap:6px;flex-wrap:wrap}
+  button,select{background:#22222c;color:var(--fg);border:1px solid var(--line);
+                border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
+  button:hover{background:#2c2c38}
+  button.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+  button.pri{background:#16a34a;border-color:#16a34a;color:#fff;font-weight:600}
+  button.pri:disabled{background:#2a2a34;border-color:var(--line);color:var(--dim);cursor:default}
+  select{flex:1}
+  .tag{display:flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid var(--line);
+       border-radius:6px;cursor:pointer;background:#22222c;flex:1 1 100%}
+  .tag.on{border-color:#6b6b80;background:#2c2c38}
+  .sw{width:14px;height:14px;border-radius:3px;flex:none}
+  .hint{color:var(--dim);font-size:11px;margin-top:8px;line-height:1.6}
+  .hint kbd{background:#2c2c38;border:1px solid var(--line);border-radius:4px;
+            padding:0 4px;font-size:10px;font-family:inherit}
+  #list{flex:1;overflow-y:auto;padding:8px 10px}
+  #list .it{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:6px;font-size:12px}
+  #list .it:hover{background:#22222c}
+  #list .it span{flex:1;color:var(--dim)}
+  #list .it button{padding:1px 7px;font-size:11px;color:#f87171;border-color:transparent;background:none}
+  #list .empty{color:var(--dim);padding:10px 7px;font-size:12px}
+  main{flex:1;position:relative;overflow:hidden}
+  canvas{position:absolute;left:0;top:0;width:100%;height:100%;cursor:crosshair}
+  #status{position:absolute;left:12px;bottom:12px;background:rgba(16,16,20,.88);
+          border:1px solid var(--line);border-radius:7px;padding:6px 11px;
+          font-size:11px;color:var(--dim);pointer-events:none}
+  #toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);
+         background:#16a34a;color:#fff;padding:7px 15px;border-radius:7px;font-size:12px;
+         opacity:0;transition:opacity .2s;pointer-events:none;font-weight:600}
+  #toast.err{background:#dc2626}
+  #toast.on{opacity:1}
+</style>
+</head>
+<body>
+<aside>
+  <h1>장애물 표시 편집기
+    <small>발표 시각화 전용 · 운영 UI(:8900)·CAD 편집기(:8910)와 무관</small></h1>
+
+  <div class="sec">
+    <b>층</b>
+    <div class="row"><select id="floor"></select></div>
+    <div class="hint" id="floorNote"></div>
+  </div>
+
+  <div class="sec">
+    <b>배경</b>
+    <div class="row">
+      <button id="bgMap" class="on">도면만</button>
+      <button id="bgPaths">실제 동선 겹침</button>
+    </div>
+    <div class="hint">동선은 그 시나리오에서 사람이 실제로 지나간 자리다.
+      <b>사람이 다닌 곳은 막지 않는다</b>는 기준으로 찍는다.</div>
+  </div>
+
+  <div class="sec">
+    <b>종류</b>
+    <div class="row" id="tags"></div>
+  </div>
+
+  <div class="sec">
+    <b>그리기</b>
+    <div class="row">
+      <button id="tRect" class="on">사각형</button>
+      <button id="tPoly">다각형</button>
+    </div>
+    <div class="hint">
+      사각형 — 끌어서 그린다<br>
+      다각형 — 클릭으로 점을 찍고 <kbd>Enter</kbd> 또는 첫 점 클릭으로 닫는다<br>
+      <kbd>Esc</kbd> 그리던 것 취소 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 마지막 취소<br>
+      휠 확대 · 오른쪽 끌기(또는 <kbd>Space</kbd>+끌기) 이동
+    </div>
+  </div>
+
+  <div id="list"></div>
+
+  <div class="sec" style="border-bottom:none;border-top:1px solid var(--line)">
+    <div class="row">
+      <button class="pri" id="save" style="flex:1" disabled>저장</button>
+      <button id="reload">되돌리기</button>
+    </div>
+    <div class="hint" id="saveNote">저장 위치: results/demo/_annotate/obstacles_&lt;층&gt;.json</div>
+  </div>
+</aside>
+
+<main>
+  <canvas id="cv"></canvas>
+  <div id="status"></div>
+  <div id="toast"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const cv = $('#cv'), ctx = cv.getContext('2d');
+
+let TAGS = {}, FLOORS = [], floor = null;
+let obstacles = [];          // [{tag, points:[[x,y]..]}] — 맵 원본 px
+let draft = null;            // 그리는 중
+let tag = 'nogo', tool = 'rect', bg = 'map';
+let dirty = false;
+const imgs = {};             // key -> Image
+// 뷰: 맵 px -> 화면 px  (screen = map*k + [ox,oy])
+let k = 1, ox = 0, oy = 0, mapW = 0, mapH = 0;
+
+function toast(msg, err){
+  const t = $('#toast'); t.textContent = msg;
+  t.className = 'on' + (err ? ' err' : '');
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = '', 2200);
+}
+function setDirty(v){ dirty = v; $('#save').disabled = !v;
+  $('#save').textContent = v ? '저장 *' : '저장'; }
+
+/* ---------- 좌표 ---------- */
+const toScreen = p => [p[0]*k + ox, p[1]*k + oy];
+function toMap(ev){
+  const r = cv.getBoundingClientRect();
+  return [(ev.clientX - r.left - ox)/k, (ev.clientY - r.top - oy)/k];
+}
+function fit(){
+  cv.width = cv.clientWidth * devicePixelRatio;
+  cv.height = cv.clientHeight * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+}
+function fitView(){
+  if(!mapW) return;
+  const pad = 24, w = cv.clientWidth - pad*2, h = cv.clientHeight - pad*2;
+  k = Math.min(w/mapW, h/mapH);
+  ox = (cv.clientWidth - mapW*k)/2; oy = (cv.clientHeight - mapH*k)/2;
+}
+
+/* ---------- 이미지 ---------- */
+function loadImg(url){
+  if(imgs[url]) return Promise.resolve(imgs[url]);
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => { imgs[url] = im; res(im); };
+    im.onerror = () => rej(new Error(url));
+    im.src = url;
+  });
+}
+
+/* ---------- 그리기 ---------- */
+function hatch(color){
+  // CAD 편집기의 해치와 같은 인상 — 색만으로는 프린트·흑백에서 구별이 안 된다
+  const c = document.createElement('canvas'); c.width = c.height = 8;
+  const g = c.getContext('2d');
+  g.strokeStyle = color; g.lineWidth = 1.6;
+  g.beginPath(); g.moveTo(-2,10); g.lineTo(10,-2); g.moveTo(2,14); g.lineTo(14,2); g.stroke();
+  return ctx.createPattern(c, 'repeat');
+}
+const patt = {};
+function poly(pts, close){
+  ctx.beginPath();
+  pts.forEach((p,i) => { const s = toScreen(p); i ? ctx.lineTo(s[0],s[1]) : ctx.moveTo(s[0],s[1]); });
+  if(close) ctx.closePath();
+}
+function draw(){
+  ctx.clearRect(0,0,cv.clientWidth,cv.clientHeight);
+  ctx.fillStyle = '#101014'; ctx.fillRect(0,0,cv.clientWidth,cv.clientHeight);
+  if(!floor) return;
+  const im = imgs[bgUrl()];
+  if(im){
+    ctx.imageSmoothingEnabled = k < 1;
+    ctx.drawImage(im, ox, oy, mapW*k, mapH*k);
+  }
+  for(const o of obstacles) drawObs(o, 1);
+  if(draft && draft.points.length) drawObs(draft, .72, true);
+  drawStatus();
+}
+function drawObs(o, alpha, isDraft){
+  const col = TAGS[o.tag] ? '#' + rgbHex(TAGS[o.tag].rgb) : '#dc2626';
+  patt[o.tag] = patt[o.tag] || hatch(col);
+  const pts = o.points;
+  ctx.globalAlpha = alpha;
+  if(pts.length >= 3){
+    poly(pts, true);
+    ctx.fillStyle = 'rgba(255,255,255,.10)'; ctx.fill();
+    ctx.fillStyle = patt[o.tag]; ctx.fill();
+  } else if(pts.length === 2){ poly(pts, false); }
+  if(pts.length >= 2){
+    poly(pts, pts.length >= 3 && !isDraft);
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    ctx.setLineDash(isDraft ? [6,4] : []); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if(isDraft) for(const p of pts){
+    const s = toScreen(p);
+    ctx.beginPath(); ctx.arc(s[0],s[1],4,0,7); ctx.fillStyle = col; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4; ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+const rgbHex = rgb => rgb.split(',').map(n => (+n).toString(16).padStart(2,'0')).join('');
+function drawStatus(){
+  const n = obstacles.length;
+  $('#status').textContent =
+    `${floor.name} · ${mapW}×${mapH}px · 확대 ${(k*100).toFixed(0)}% · 장애물 ${n}개`;
+}
+
+/* ---------- 목록 ---------- */
+function renderList(){
+  const el = $('#list');
+  if(!obstacles.length){ el.innerHTML = '<div class="empty">아직 찍은 장애물이 없습니다.</div>'; return; }
+  el.innerHTML = '';
+  obstacles.forEach((o,i) => {
+    const d = document.createElement('div'); d.className = 'it';
+    const t = TAGS[o.tag] || {name:o.tag, rgb:'220,38,38'};
+    d.innerHTML = `<i class="sw" style="background:rgb(${t.rgb})"></i>`
+      + `<span>${i+1}. ${t.name} · ${o.points.length}점</span>`;
+    const b = document.createElement('button'); b.textContent = '삭제';
+    b.onclick = () => { obstacles.splice(i,1); setDirty(true); renderList(); draw(); };
+    d.appendChild(b);
+    d.onmouseenter = () => { draw(); drawObs(o, 1, true); };
+    d.onmouseleave = draw;
+    el.appendChild(d);
+  });
+}
+
+/* ---------- 데이터 ---------- */
+const bgUrl = () => (bg === 'map' ? '/img/map/' : '/img/paths/') + floor.id;
+
+async function selectFloor(fid){
+  floor = FLOORS.find(f => f.id === fid);
+  $('#floorNote').innerHTML = floor.alias.length
+    ? `같은 도면을 쓰는 <b>${floor.alias.join(', ')}</b> 에도 저장 시 함께 반영된다.`
+    : '이 층 단독으로 저장된다.';
+  await reload(true);
+}
+async function reload(refit){
+  const r = await fetch('/api/obstacles/' + floor.id);
+  obstacles = (await r.json()).obstacles || [];
+  draft = null; setDirty(false); renderList();
+  await ensureBg(refit);
+}
+async function ensureBg(refit){
+  try{
+    const im = await loadImg(bgUrl());
+    mapW = im.naturalWidth; mapH = im.naturalHeight;
+    if(refit) fitView();
+  }catch(e){
+    toast('배경 이미지를 못 읽었습니다: ' + bgUrl(), true);
+  }
+  draw();
+}
+async function save(){
+  const r = await fetch('/api/obstacles/' + floor.id, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({obstacles})
+  });
+  if(!r.ok){ toast('저장 실패: ' + (await r.text()).slice(0,120), true); return; }
+  const j = await r.json();
+  setDirty(false);
+  const op = [...$('#floor').options].find(o => o.value === floor.id);
+  if(op) op.textContent = `${floor.name} (${j.saved}개)`;
+  toast(`저장 ${j.saved}개 → ${j.path}` + (j.alias.length ? ` (+${j.alias.join(',')})` : ''));
+}
+
+/* ---------- 입력 ---------- */
+let drag = null, pan = null, space = false;
+
+cv.addEventListener('mousedown', ev => {
+  if(ev.button === 2 || ev.button === 1 || space){
+    pan = {x:ev.clientX, y:ev.clientY, ox, oy}; ev.preventDefault(); return;
+  }
+  if(ev.button !== 0 || !floor) return;
+  const p = toMap(ev);
+  if(tool === 'rect'){ drag = p; draft = {tag, points:[p,p,p,p]}; }
+  else {
+    if(!draft) draft = {tag, points:[]};
+    const f = draft.points[0];
+    if(f && draft.points.length >= 3 && Math.hypot(p[0]-f[0], p[1]-f[1])*k < 10){ closePoly(); return; }
+    draft.points.push(p);
+  }
+  draw();
+});
+addEventListener('mousemove', ev => {
+  if(pan){ ox = pan.ox + (ev.clientX-pan.x); oy = pan.oy + (ev.clientY-pan.y); draw(); return; }
+  if(drag){
+    const p = toMap(ev);
+    draft.points = [[drag[0],drag[1]],[p[0],drag[1]],[p[0],p[1]],[drag[0],p[1]]];
+    draw();
+  } else if(draft && tool === 'poly' && draft.points.length){ draw(); }
+});
+addEventListener('mouseup', ev => {
+  if(pan){ pan = null; return; }
+  if(!drag) return;
+  const p = toMap(ev);
+  drag = null;
+  // 손이 떨려서 생긴 1px 사각형은 장애물이 아니라 사고다 — 버린다
+  if(Math.abs(p[0]-draft.points[0][0])*k < 5 || Math.abs(p[1]-draft.points[0][1])*k < 5){
+    draft = null; draw(); return;
+  }
+  commit();
+});
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const r = cv.getBoundingClientRect(), mx = ev.clientX-r.left, my = ev.clientY-r.top;
+  const f = Math.exp(-ev.deltaY * 0.0014), nk = Math.max(0.05, Math.min(12, k*f));
+  ox = mx - (mx-ox)*(nk/k); oy = my - (my-oy)*(nk/k); k = nk; draw();
+}, {passive:false});
+
+function closePoly(){ if(draft && draft.points.length >= 3) commit(); else { draft = null; draw(); } }
+function commit(){
+  obstacles.push({tag:draft.tag, points:draft.points.map(p => [Math.round(p[0]), Math.round(p[1])])});
+  draft = null; setDirty(true); renderList(); draw();
+}
+addEventListener('keydown', ev => {
+  if(ev.code === 'Space'){ space = true; cv.style.cursor = 'grab'; }
+  if(ev.key === 'Escape'){ draft = null; drag = null; draw(); }
+  if(ev.key === 'Enter' && tool === 'poly') closePoly();
+  if((ev.ctrlKey||ev.metaKey) && ev.key === 'z'){
+    if(draft && draft.points.length) draft.points.pop();
+    else if(obstacles.length){ obstacles.pop(); setDirty(true); renderList(); }
+    draw();
+  }
+  if(ev.key === '1' || ev.key === '2' || ev.key === '3'){
+    const ks = Object.keys(TAGS); if(ks[+ev.key-1]) setTag(ks[+ev.key-1]);
+  }
+});
+addEventListener('keyup', ev => { if(ev.code === 'Space'){ space = false; cv.style.cursor = 'crosshair'; } });
+addEventListener('resize', () => { fit(); draw(); });
+new ResizeObserver(() => {
+  const first = !cv._sized && cv.clientWidth > 10;
+  fit(); if(first){ cv._sized = 1; fitView(); } draw();
+}).observe(cv.parentElement);
+addEventListener('beforeunload', e => { if(dirty){ e.preventDefault(); e.returnValue = ''; } });
+
+function setTag(t){
+  tag = t; if(draft) draft.tag = t;
+  document.querySelectorAll('#tags .tag').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  draw();
+}
+function setTool(t){
+  tool = t; draft = null;
+  $('#tRect').classList.toggle('on', t === 'rect');
+  $('#tPoly').classList.toggle('on', t === 'poly');
+  draw();
+}
+function setBg(b){
+  bg = b;
+  $('#bgMap').classList.toggle('on', b === 'map');
+  $('#bgPaths').classList.toggle('on', b === 'paths');
+  ensureBg(false);
+}
+
+/* ---------- 시작 ---------- */
+(async () => {
+  fit();
+  const meta = await (await fetch('/api/floors')).json();
+  TAGS = meta.tags; FLOORS = meta.floors;
+  const tg = $('#tags');
+  Object.entries(TAGS).forEach(([key,v], i) => {
+    const b = document.createElement('div');
+    b.className = 'tag'; b.dataset.t = key;
+    b.innerHTML = `<i class="sw" style="background:rgb(${v.rgb})"></i>${v.name}`
+      + `<span style="margin-left:auto;color:var(--dim);font-size:11px">${i+1}</span>`;
+    b.onclick = () => setTag(key);
+    tg.appendChild(b);
+  });
+  const sel = $('#floor');
+  FLOORS.forEach(f => {
+    const o = document.createElement('option');
+    o.value = f.id; o.textContent = `${f.name} (${f.count}개)`;
+    sel.appendChild(o);
+  });
+  sel.onchange = () => {
+    if(dirty && !confirm('저장하지 않은 내용이 있습니다. 층을 바꾸면 사라집니다. 계속할까요?')){
+      sel.value = floor.id; return;
+    }
+    selectFloor(sel.value);
+  };
+  $('#bgMap').onclick = () => setBg('map');
+  $('#bgPaths').onclick = () => setBg('paths');
+  $('#tRect').onclick = () => setTool('rect');
+  $('#tPoly').onclick = () => setTool('poly');
+  $('#save').onclick = save;
+  $('#reload').onclick = () => { if(!dirty || confirm('찍은 내용을 버리고 저장본을 다시 불러옵니다.')) reload(false); };
+  setTag('nogo');
+  await selectFloor(FLOORS[0].id);
+})();
+</script>
+</body>
+</html>

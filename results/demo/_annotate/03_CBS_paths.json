@@ -1,0 +1,11 @@
+{
+  "session_id": "sess-1789693478593",
+  "floor": "floor4",
+  "label": "08 CBS 문 앞 밀집 2회 (밀도)",
+  "map_png": "map_floor4.png",
+  "map_px": [
+    2000,
+    2013
+  ],
+  "tracks": 104
+}

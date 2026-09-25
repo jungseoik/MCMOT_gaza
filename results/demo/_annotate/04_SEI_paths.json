@@ -1,0 +1,11 @@
+{
+  "session_id": "sess-1789693805049",
+  "floor": "floor5",
+  "label": "14 1층 반반 나눠 나가기",
+  "map_png": "map_floor5.png",
+  "map_px": [
+    2000,
+    1678
+  ],
+  "tracks": 100
+}
