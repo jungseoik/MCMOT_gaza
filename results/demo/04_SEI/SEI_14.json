@@ -1,0 +1,50 @@
+{
+  "session_id": "sess-1789693805049",
+  "floor": "floor5",
+  "label": "14 1층 반반 나눠 나가기",
+  "metric": "SEI",
+  "epfi_avg": 59.823879794760394,
+  "sei": 91.07142857142857,
+  "cbs_total": 0.0,
+  "zone_metrics": [
+    {
+      "zone_id": "z1",
+      "evacuation_start_at": 1789693857.0489693,
+      "response_delay_sec": 52.0,
+      "graph_distance": 22.255267140837734,
+      "idr": 0.4279859065545718,
+      "idr_per_origin": [
+        0.4279859065545718
+      ],
+      "participant_ratio": 0.9090909090909091,
+      "status": "started"
+    }
+  ],
+  "exit_metrics": [
+    {
+      "exit_id": "exit-0",
+      "actual_count": 6,
+      "design_capacity": 13,
+      "actual_share": 0.375,
+      "design_share": 0.4642857142857143,
+      "width_m": 2.211,
+      "width_manual": false,
+      "q_design": 6.0
+    },
+    {
+      "exit_id": "exit-1",
+      "actual_count": 10,
+      "design_capacity": 15,
+      "actual_share": 0.625,
+      "design_share": 0.5357142857142857,
+      "width_m": 2.51,
+      "width_manual": false,
+      "q_design": 6.0
+    }
+  ],
+  "person_routes": {
+    "seeds": 101,
+    "made": 101,
+    "unreachable": 0
+  }
+}

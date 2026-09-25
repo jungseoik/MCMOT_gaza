@@ -1,0 +1,50 @@
+{
+  "session_id": "sess-1789693149252",
+  "floor": "floor4",
+  "label": "01 IDR 권장경로 · 우측 우회 2명",
+  "metric": "IDR",
+  "epfi_avg": 69.96175128954435,
+  "sei": 53.333333333333336,
+  "cbs_total": 0.0,
+  "zone_metrics": [
+    {
+      "zone_id": "z1",
+      "evacuation_start_at": 1789693158.2515159,
+      "response_delay_sec": 9.0,
+      "graph_distance": 20.372262381371534,
+      "idr": 2.2635847090412815,
+      "idr_per_origin": [
+        2.2635847090412815
+      ],
+      "participant_ratio": 0.7272727272727273,
+      "status": "started"
+    }
+  ],
+  "exit_metrics": [
+    {
+      "exit_id": "exit-0",
+      "actual_count": 10,
+      "design_capacity": 8,
+      "actual_share": 1.0,
+      "design_share": 0.5333333333333333,
+      "width_m": 1.251,
+      "width_manual": false,
+      "q_design": 6.0
+    },
+    {
+      "exit_id": "exit-1",
+      "actual_count": 0,
+      "design_capacity": 7,
+      "actual_share": 0.0,
+      "design_share": 0.4666666666666667,
+      "width_m": 1.167,
+      "width_manual": false,
+      "q_design": 6.0
+    }
+  ],
+  "person_routes": {
+    "seeds": 75,
+    "made": 74,
+    "unreachable": 1
+  }
+}

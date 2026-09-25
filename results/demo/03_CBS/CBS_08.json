@@ -1,0 +1,50 @@
+{
+  "session_id": "sess-1789693478593",
+  "floor": "floor4",
+  "label": "08 CBS 문 앞 밀집 2회 (밀도)",
+  "metric": "CBS",
+  "epfi_avg": 76.47180297481755,
+  "sei": 53.333333333333336,
+  "cbs_total": 4.177012122616855,
+  "zone_metrics": [
+    {
+      "zone_id": "z1",
+      "evacuation_start_at": null,
+      "response_delay_sec": null,
+      "graph_distance": 20.372262381371534,
+      "idr": null,
+      "idr_per_origin": [
+        null
+      ],
+      "participant_ratio": 0.0,
+      "status": "not_started"
+    }
+  ],
+  "exit_metrics": [
+    {
+      "exit_id": "exit-0",
+      "actual_count": 10,
+      "design_capacity": 8,
+      "actual_share": 1.0,
+      "design_share": 0.5333333333333333,
+      "width_m": 1.251,
+      "width_manual": false,
+      "q_design": 6.0
+    },
+    {
+      "exit_id": "exit-1",
+      "actual_count": 0,
+      "design_capacity": 7,
+      "actual_share": 0.0,
+      "design_share": 0.4666666666666667,
+      "width_m": 1.167,
+      "width_manual": false,
+      "q_design": 6.0
+    }
+  ],
+  "person_routes": {
+    "seeds": 108,
+    "made": 106,
+    "unreachable": 2
+  }
+}
