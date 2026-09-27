@@ -331,7 +331,7 @@ def build(frames, site, df, *, t0: float, n_people: int = N_PEOPLE,
             "people": [_resample(p) for p in people]}
 
 
-def _resample(person):
+def _resample(person, smooth_s: float = SMOOTH_S):
     """0.1초 격자로 리샘플 + 이동평균 — 관측 5fps 의 덜컥거림을 없앤다."""
     pts = person["pts"]
     t_a, t_b = pts[0][0], pts[-1][0]
@@ -341,7 +341,7 @@ def _resample(person):
     xs = np.array([p[1] for p in pts]); ys = np.array([p[2] for p in pts])
     grid = np.arange(t_a, t_b + DT * 0.5, DT)
     gx = np.interp(grid, ts, xs); gy = np.interp(grid, ts, ys)
-    w = max(3, int(SMOOTH_S / DT) | 1)
+    w = max(3, int(smooth_s / DT) | 1)
     if len(gx) > w:
         k = np.ones(w) / w
         pad = w // 2

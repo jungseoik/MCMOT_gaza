@@ -98,9 +98,8 @@ def sync_report(session, floor=None):
     for p in d["people"]:
         xy = p["xy"]
         k = int(np.argmin([dt._seg_dist(xy[-1], a, b) for a, b in ex]))
-        de = [dt._seg_dist(q, ex[k][0], ex[k][1]) * mpp for q in xy]
-        i = next((n for n, v in enumerate(de) if v < 1.0), len(de) - 1)
-        mine.append((p["t0"] + i * d["dt"], k))
+        # 경로는 문에서 끊긴다 — 마지막 점이 곧 통과하는 순간이다
+        mine.append((p["t0"] + (len(xy) - 1) * d["dt"], k))
     for k in sorted({q[1] for q in mine}):
         got = sorted(t for t, kk in mine if kk == k)
         want = sorted(real.get(f"exit-{k}", []))[:len(got)]
@@ -112,10 +111,43 @@ def sync_report(session, floor=None):
               f"   차이 평균 {sum(err)/len(err):.1f}s 최대 {max(err):.1f}s")
 
 
+def wall_report(session, floor=None):
+    """**선이 벽을 뚫는가** — 점만 보면 놓친다. 이웃한 두 점 사이를 다 본다."""
+    from system.evac.route_solver import _los
+    from tools.demo_tracks_build import distfield
+
+    db, fl = find_session(session, floor)
+    site = SiteConfig.model_validate(recorder.load_meta(db)["site_view"])
+    mpp = site.map.resolve_m_per_px()
+    df, _ = distfield(site, fl, mpp)
+    d = dt.load(session)
+    bad, tot = 0, 0
+    who = set()
+    for p in d["people"]:
+        for a, b in zip(p["xy"], p["xy"][1:]):
+            tot += 1
+            if not _los(df.wall, df.to_cell(*a), df.to_cell(*b)):
+                bad += 1
+                who.add(p["id"])
+    print(f"   벽 통과 선분 {bad}/{tot}" + (f"  ⚠ {sorted(who)}" if bad else "  ✅"))
+    # 출구를 지난 뒤 다시 나타나는가
+    ex = [[tuple(e.line[0]), tuple(e.line[1])] for e in site.exits if e.line]
+    revive = []
+    for p in d["people"]:
+        xy = p["xy"]
+        k = int(np.argmin([dt._seg_dist(xy[-1], a, b) for a, b in ex]))
+        de = [dt._seg_dist(q, ex[k][0], ex[k][1]) * mpp for q in xy]
+        i = next((n for n, v in enumerate(de) if v < 0.5), None)
+        if i is not None and i < len(de) - 3 and max(de[i + 1:]) > 3.0:
+            revive.append(p["id"])
+    print(f"   통과 후 재등장 {sorted(revive) or '없음'}" + ("" if not revive else "  ⚠"))
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--session", required=True)
     ap.add_argument("--floor")
     a = ap.parse_args()
     check(a.session, a.floor)
+    wall_report(a.session, a.floor)
     sync_report(a.session, a.floor)

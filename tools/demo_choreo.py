@@ -103,17 +103,30 @@ def _push_out(df, route, m_per_px):
         a = route[max(0, i - 2)]
         b = route[min(len(route) - 1, i + 2)]
         dx, dy = b[0] - a[0], b[1] - a[1]
-        n = math.hypot(dx, dy) or 1.0
-        ux, uy = -dy / n, dx / n
+        n = math.hypot(dx, dy)
         best = None
-        for k in range(1, 25):                      # 좌우로 번갈아 넓혀 가며 찾는다
-            for sgn in (1, -1):
-                px, py = x + ux * step * k * sgn, y + uy * step * k * sgn
-                if _free(df, px, py):
-                    best = [px, py]
+        if n > 1e-6:                                # 좌우로 번갈아 넓혀 가며
+            ux, uy = -dy / n, dx / n
+            for k in range(1, 25):
+                for sgn in (1, -1):
+                    px, py = x + ux * step * k * sgn, y + uy * step * k * sgn
+                    if _free(df, px, py):
+                        best = [px, py]
+                        break
+                if best:
                     break
-            if best:
-                break
+        if best is None:
+            # 서 있는 점은 진행방향이 없어 '옆'이 정의되지 않는다. 사방으로 찾는다
+            # (실측: 시작 슬롯이 장애물 안에 놓여 한 사람이 통째로 벽에 박혔다).
+            for k in range(1, 40):
+                for ang in range(0, 360, 30):
+                    t = math.radians(ang)
+                    px, py = x + math.cos(t) * step * k, y + math.sin(t) * step * k
+                    if _free(df, px, py):
+                        best = [px, py]
+                        break
+                if best:
+                    break
         out.append(best or [x, y])
         moved += 1
     return out, moved
@@ -339,6 +352,77 @@ def _bridge_around_exit(df, a_px, b_px, exits_px, keep_m, m_per_px):
     return [list(q) for q in dt._walk_path(df, a_px, b_px)[1:-1]]
 
 
+def _cut_at_exit(route, ex, m_per_px, near_m=0.4):
+    """출구선을 지나는 **그 점에서 경로를 끊는다**.
+
+    지나친 뒤를 남겨 두면 (ⓐ) 카운팅돼 나간 점이 벽을 통과해 다시 나타나고
+    (ⓑ) 시간 배분이 문 너머까지 퍼져 그리드보다 먼저 들어간 것처럼 보인다.
+    출구는 끝이다 — 카운팅되면 사라진다."""
+    d = [dt._seg_dist(q, ex[0], ex[1]) * m_per_px for q in route]
+    i = next((k for k, v in enumerate(d) if v <= near_m), None)
+    if i is None:
+        # 문에 닿지도 않는 경로를 '가장 가까웠던 점'에서 자르면 엉뚱한 데서
+        # 사라진다. 닿지 못했으면 자르지 않고 그대로 둔다.
+        if min(d) > 1.5:
+            return route
+        i = int(np.argmin(d))
+    return route[:max(2, i + 1)]
+
+
+def _unclip(df, route):
+    """이웃한 두 점 사이가 **벽으로 막혀 있으면** 돌아가는 길을 끼워 넣는다.
+
+    점만 벽 밖으로 밀어내면 두 점을 잇는 선분이 얇은 벽을 건너뛴다(0.35m 간격에
+    벽은 0.08m 격자다). 보이는 건 선이라 그 선이 벽을 뚫으면 안 된다."""
+    from system.evac.route_solver import _los
+    out = [route[0]]
+    for a, b in zip(route, route[1:]):
+        ca, cb = df.to_cell(*a), df.to_cell(*b)
+        if not _los(df.wall, ca, cb):
+            out.extend(dt._walk_path(df, a, b)[1:-1])
+        out.append(b)
+    return out
+
+
+def _hug(df, xy):
+    """이웃한 두 점 사이가 벽으로 막히면 **뒤 점을 앞 점 쪽으로 당겨** 붙인다.
+
+    점을 끼워 넣지 않는 이유: 이 단계의 xy 는 0.1초 격자라 개수가 곧 시간이다.
+    끼워 넣으면 시간이 밀린다. 막히는 건 보통 한 자릿수라 당겨도 그림이 안 변한다."""
+    from system.evac.route_solver import _los
+    out = [xy[0]]
+    for q in xy[1:]:
+        a = out[-1]
+        if not _los(df.wall, df.to_cell(*a), df.to_cell(*q)):
+            # ① 제자리 근처를 살짝 **옆으로** 밀어 본다 — 모서리를 자른 탓이라
+            #    대개 몇 십 cm 면 풀린다. 개수를 유지해야 시간이 안 밀린다.
+            hit = None
+            for rad in (0.3, 0.6, 1.0, 1.6):
+                r_px = rad / df.m_per_px
+                for ang in range(0, 360, 20):
+                    t = math.radians(ang)
+                    c = [q[0] + math.cos(t) * r_px, q[1] + math.sin(t) * r_px]
+                    if (_free(df, *c)
+                            and _los(df.wall, df.to_cell(*a), df.to_cell(*c))):
+                        hit = c
+                        break
+                if hit:
+                    break
+            # ② 그래도 안 되면 앞 점 쪽으로 당긴다
+            if hit is None:
+                for f in (0.75, 0.5, 0.3, 0.15):
+                    c = [a[0] + (q[0] - a[0]) * f, a[1] + (q[1] - a[1]) * f]
+                    if _los(df.wall, df.to_cell(*a), df.to_cell(*c)):
+                        hit = c
+                        break
+            # ③ 끝내 못 찾으면 **원래 자리**를 쓴다. 앞 점에 붙여 버리면 거기서
+            #    멈추고 그 뒤로도 계속 막혀 한 사람이 통째로 얼어붙는다
+            #    (실측: 02 EPFI 의 우회 3명이 출구에 못 닿고 끝났다).
+            q = hit if hit is not None else q
+        out.append(q)
+    return out
+
+
 def _from_point(route, pt, m_per_px, r_m=4.0):
     """경로의 앞머리를 버리고 **찍어 준 지점**에서 출발시킨다.
 
@@ -419,24 +503,25 @@ def build(ideal: dict, df, m_per_px: float, exits_px, spec: dict,
             lane = ((j - (n_g - 1) / 2) / max(1.0, (n_g - 1) / 2)
                     * g["spread"] / m_per_px)
             path = _offset(route, lane, phase=j * 1.7, df=df)
+            path = _cut_at_exit(path, exits_px[k_now], m_per_px)   # 문에서 끝
+            path = _unclip(df, path)                               # 선이 벽을 안 뚫게
             t_dep = t_move + j * g["gap"]
-            # **도착 시각은 실제 통과 시각**에 맞춘다 — 그리드에서 문을 지나는
-            # 순간에 점도 문을 지나야 한다. 출발(실측 개시)과 도착(실측 통과)을
-            # 양 끝으로 놓고 그 사이를 고르게 걷는다.
+            # **도착 = 실제 통과 시각.** 경로의 마지막 점이 곧 문을 지나는 점이라
+            # 그 순간에 카운팅되고 점이 사라진다 — 그리드와 어긋날 자리가 없다.
             t_arr = pass_q[j] if j < len(pass_q) else t_dep + dur
             if t_arr - t_dep < 3.0:
                 t_dep = max(0.0, t_arr - max(3.0, dur * 0.5))
-            # 통과 시각을 맞출 지점은 **문을 지나는 그 점**이다. 경로 끝(문을
-            # 1.5m 지난 자리)에 맞추면 그만큼 일찍 도착한 것처럼 보인다.
-            dex = [dt._seg_dist(q, exits_px[k_now][0], exits_px[k_now][1]) * m_per_px
-                   for q in path]
-            i_cross = next((n for n, v in enumerate(dex) if v < 0.6), len(path) - 1)
-            i_cross = max(1, i_cross)
-            total = (t_arr - t_dep) * (len(path) - 1) / i_cross
-            ts = np.linspace(t_dep, t_dep + total, len(path))
+            # 점 개수가 아니라 **걸은 거리**에 비례해 시간을 준다. 개수로 나누면
+            # 벽을 돌아가느라 점이 촘촘해진 구간에서 점이 느려져, 문 앞 1m 를
+            # 5초에 걸어가는 일이 생긴다(실측 최대 5.0s 오차).
+            arc = np.concatenate([[0.0], np.cumsum(
+                [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(path, path[1:])])])
+            ts = t_dep + (t_arr - t_dep) * arc / (arc[-1] or 1.0)
             pts = [[float(t), q[0], q[1]] for t, q in zip(ts, path)]
             if spec["mode"] == "cluster":
                 slot = dt._hub_slot(idx, 10, hub, m_per_px)
+                if not _free(df, *slot):           # 사람이 의자 위에 서 있을 수는 없다
+                    slot = tuple(_push_out(df, [list(slot)], m_per_px)[0][0])
                 lead = dt._walk_path(df, slot, (path[0][0], path[0][1]))
                 sec = dt._path_sec(lead, m_per_px, dt.HUB_WALK_MPS)
                 t_start = max(0.0, t_dep - sec)
@@ -456,10 +541,11 @@ def build(ideal: dict, df, m_per_px: float, exits_px, spec: dict,
 
     out = []
     for p in people:
-        r = dt._resample(p)
-        r["xy"], mv = _push_out(df, r["xy"], m_per_px)
+        r = dt._resample(p, smooth_s=0.3)   # 이미 매끄럽다. 세게 다듬으면 모서리를
+        r["xy"], mv = _push_out(df, r["xy"], m_per_px)   # 잘라 벽을 뚫는다
         moved_total += mv
         r["xy"] = [[round(a, 1), round(b, 1)] for a, b in r["xy"]]
+        r["xy"] = _hug(df, r["xy"])                      # 반올림 뒤에 마지막 확인
         out.append(r)
     return {"n": len(out), "t_end": ideal["t_end"], "dt": dt_s, "hub": list(hub),
             "people": out, "choreo": spec["label"], "pushed": moved_total,
