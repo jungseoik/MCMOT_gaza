@@ -229,6 +229,17 @@ def build(frames, site, df, *, t0: float, n_people: int = N_PEOPLE,
             raw[o["gid"]].append((f["ts"] - t0, float(o["x"]), float(o["y"])))
     frags = [sorted(v) for v in raw.values()
              if len(v) >= 2 and v[-1][0] - v[0][0] >= MIN_FRAG_S]
+    # **출구에서 거꾸로 나오는 조각**은 빼고 잇는다. 계단 쪽 카메라가 내려간
+    # 사람을 다시 잡거나 되돌아 들어온 사람을 문 근처에서 새로 잡은 것인데,
+    # 그대로 이으면 "출구에서 누가 역으로 나와 합류하는" 그림이 된다(실측:
+    # 02 EPFI 의 cam13:9·cam13:11 이 출구 2m 에서 13m 로 멀어졌다).
+    def _d_exit(q):
+        return min(_seg_dist((q[1], q[2]), e[0], e[1]) for e in exits_px) * m_per_px
+
+    def _out(fr):
+        return _d_exit(fr[0]) < 4.0 and _d_exit(fr[-1]) > 8.0
+
+    frags = [f for f in frags if not _out(f)]
     chains = _chain(frags, m_per_px)
 
     # ③ N개 고르기 — 출구에서 끝나고, 오래 살아남고, 일찍 시작한 사슬이 먼저

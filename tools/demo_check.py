@@ -48,14 +48,16 @@ def check(session, floor=None):
     conc = [len(dt.at(d, T * f)) for f in (0, .1, .25, .4, .55, .7, .85, 1.0)]
     grew = [i for i in range(1, len(conc)) if conc[i] > conc[i - 1]]
 
-    # 역주행 — 출구 쪽에서 되돌아 나오는 사람
+    # 역주행 — **자기가 나가는 문** 앞까지 갔다가 되돌아 나오는 사람.
+    # 모든 출구를 재면 우회조가 스쳐 지나간 반대편 문을 세어 오탐이 난다.
+    ex = [[tuple(e.line[0]), tuple(e.line[1])] for e in site.exits if e.line]
     back = []
     for p in d["people"]:
         xy = p["xy"]
         if len(xy) < 20:
             continue
-        ex = [[tuple(e.line[0]), tuple(e.line[1])] for e in site.exits if e.line]
-        de = [min(dt._seg_dist(q, a, b) for a, b in ex) * mpp for q in xy]
+        mine = ex[int(np.argmin([dt._seg_dist(xy[-1], a, b) for a, b in ex]))]
+        de = [dt._seg_dist(q, mine[0], mine[1]) * mpp for q in xy]
         # 출구 5m 안에 들어왔다가 다시 12m 넘게 멀어지면 역주행
         seen_near = False
         for v in de:
