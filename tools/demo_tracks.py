@@ -19,7 +19,9 @@
   ③ N개 고르기 — 오래 살아남았고 출구에서 끝나는 사슬을 우선
   ④ 메우기 — 사이가 빈 구간은 **벽을 피해** 잇는다(직선이 벽을 뚫으면 격자 A*)
   ⑤ 끝내기 — 마지막 점이 출구에서 멀면 최적 경로를 따라 걸어 나가 사라진다
-  ⑥ 시작 맞추기 — 경보(0:00)부터 제자리에 서 있다가 움직인다
+  ⑥ **시작지점에 모으기** — 10명 전부 경보 순간에는 출발 자리에 뭉쳐 있다가,
+     자기 차례에 거기서 걸어 나간다. 첫 관측이 건물 한복판인 사람도 그 자리에
+     가만히 서 있지 않는다 — 시작지점에서 걸어와 자기 동선에 올라탄다
   ⑦ 다듬기 — 0.1초 격자로 리샘플 + 이동평균. 관측 5fps 의 덜컥거림을 없앤다
 """
 from __future__ import annotations
@@ -45,6 +47,9 @@ SMOOTH_S = 0.9         # 이동평균 창
 EXIT_NEAR_M = 2.0      # 출구선에 이만큼 붙으면 '나갔다'
 EXIT_WALK_M = 10.0     # 경로 산출이 실패해도 이 거리 안이면 출구선까지 곧장 걸어 나간다
 EXIT_PAST_M = 1.5      # 선을 넘어 이만큼 더 가고 사라진다 — 문턱에서 증발하면 이상하다
+HUB_R_M = 7.0          # 시작지점 무리로 볼 반경
+HUB_SPREAD_M = 1.6     # 시작지점에서 10명이 퍼져 서 있는 정도 (겹쳐 그리면 한 점으로 보인다)
+HUB_WALK_MPS = 1.5     # 시작지점에서 자기 동선까지 걸어 나가는 속도
 
 
 def _seg_foot(p, a, b):
@@ -148,6 +153,66 @@ def _fill(df, p0, p1):
     return [list(df.to_px(c, r)) for c, r in cells[1:-1:step]]
 
 
+
+# ── ⑥ 시작지점 ────────────────────────────────────────────────────────────
+def _hub(chains, m_per_px):
+    """10명이 출발한 자리. 사슬 **첫 점들이 가장 빽빽한 곳**의 무게중심.
+
+    각본은 다 "한 곳에 모여 있다가 경보가 울리면 나간다"다. 그런데 트래커의
+    첫 관측은 사람마다 제각각이라(어떤 사람은 복도 한복판에서 처음 잡힌다) 그걸
+    그대로 출발 자리로 쓰면 건물 여기저기에 점이 박혀 있다 합류하는 그림이 된다.
+    실제로는 그런 일이 없었다.
+    """
+    firsts = [(c[0][1], c[0][2], c[0][0]) for c in chains]
+    r_px = HUB_R_M / m_per_px
+    best, best_n = None, -1
+    for x, y, _ in firsts:
+        near = [(a, b) for a, b, _ in firsts if math.hypot(a - x, b - y) <= r_px]
+        if len(near) > best_n:
+            best_n, best = len(near), near
+    return (sum(p[0] for p in best) / len(best),
+            sum(p[1] for p in best) / len(best)), best_n
+
+
+def _hub_slot(i, n, hub, m_per_px):
+    """시작지점에서 i번째 사람이 설 자리 — 겹쳐 그리면 10명이 한 점으로 보인다."""
+    r = HUB_SPREAD_M / m_per_px
+    ang = 2 * math.pi * i / max(1, n)
+    ring = 0.45 + 0.55 * ((i % 3) / 2.0)
+    return (hub[0] + math.cos(ang) * r * ring, hub[1] + math.sin(ang) * r * ring)
+
+
+def _walk_path(df, a, b):
+    """a → b 사람이 걸어갈 만한 점들. 벽이 막으면 돌아간다."""
+    mid = _fill(df, a, b) if df is not None else []
+    return [list(a)] + mid + [list(b)]
+
+
+def _path_sec(pts, m_per_px, mps):
+    d = sum(math.hypot(q[0] - p[0], q[1] - p[1]) for p, q in zip(pts, pts[1:]))
+    return d * m_per_px / mps
+
+
+def _lead_in(df, start, chain, m_per_px):
+    """시작지점 → 사슬 합류점. (앞머리 점들, 합류 인덱스) 를 돌려준다.
+
+    합류점을 뒤로 미루는 이유: 첫 관측이 이미 시작지점에서 먼 사람은 "경보와
+    동시에 저기 있었다"는 뜻인데, 이상적 그림에서는 그럴 수 없다. 걸어서 닿을 수
+    있는 첫 지점까지 사슬 앞머리를 잘라낸다.
+    """
+    step = max(1, len(chain) // 20)
+    for k in range(0, len(chain), step):
+        t_k, x_k, y_k = chain[k]
+        pts = _walk_path(df, start, (x_k, y_k))
+        sec = _path_sec(pts, m_per_px, HUB_WALK_MPS)
+        if sec <= t_k:
+            return pts, sec, k
+    # 어느 지점에도 제때 못 닿으면 마지막 점에 붙인다(그래도 서 있진 않는다)
+    t_k, x_k, y_k = chain[-1]
+    pts = _walk_path(df, start, (x_k, y_k))
+    return pts, min(_path_sec(pts, m_per_px, HUB_WALK_MPS), max(t_k, 1.0)), len(chain) - 1
+
+
 # ── 본체 ──────────────────────────────────────────────────────────────────
 def build(frames, site, df, *, t0: float, n_people: int = N_PEOPLE,
           m_per_px: float, exits_px) -> dict:
@@ -177,6 +242,7 @@ def build(frames, site, df, *, t0: float, n_people: int = N_PEOPLE,
         scored.append((-(dur + (25.0 if ex < EXIT_NEAR_M * 2 else 0.0)), ch[0][0], ch))
     scored.sort(key=lambda s: (s[0], s[1]))
     picked = [s[2] for s in scored[:n_people]]
+    hub, hub_n = _hub(picked, m_per_px)
 
     t_end = max(f["ts"] for f in frames) - t0
     people = []
@@ -226,14 +292,31 @@ def build(frames, site, df, *, t0: float, n_people: int = N_PEOPLE,
                     pts.append([t, q[0], q[1]])
                 exited_at = t
 
-        # ⑥ 경보 순간부터 존재한다 — 각본에 10명은 처음부터 있었다
-        if pts[0][0] > 0:
-            pts.insert(0, [0.0, pts[0][1], pts[0][2]])
+        # ⑥ 경보 순간엔 **시작지점에 뭉쳐** 있다가 자기 차례에 걸어 나간다.
+        # 첫 관측 자리에 세워 두면 건물 여기저기 점이 박혀 있다 합류하는,
+        # 실제로는 없었던 그림이 된다.
+        slot = _hub_slot(i, len(picked), hub, m_per_px)
+        lead, sec, k = _lead_in(df, slot, pts, m_per_px)
+        pts = pts[k:]
+        t_join = pts[0][0]
+        t_dep = max(0.0, t_join - sec)
+        head = [[0.0, slot[0], slot[1]]]                 # 경보 순간 — 제자리
+        if t_dep > 0.05:
+            head.append([t_dep, slot[0], slot[1]])       # 자기 차례까지 대기
+        span = max(t_join - t_dep, 0.2)
+        acc, segs = 0.0, []
+        total = sum(math.hypot(q[0] - p[0], q[1] - p[1])
+                    for p, q in zip(lead, lead[1:])) or 1.0
+        for pa, qa in zip(lead, lead[1:]):
+            acc += math.hypot(qa[0] - pa[0], qa[1] - pa[1])
+            segs.append([t_dep + span * acc / total, qa[0], qa[1]])
+        pts = head + segs[:-1] + pts
 
         people.append({"id": f"P{i + 1:02d}", "pts": pts,
                        "exit_at": exited_at, "t_end": min(pts[-1][0], t_end + 6.0)})
 
     return {"n": len(people), "t_end": t_end, "dt": DT,
+            "hub": [round(hub[0], 1), round(hub[1], 1)], "hub_n": hub_n,
             "people": [_resample(p) for p in people]}
 
 

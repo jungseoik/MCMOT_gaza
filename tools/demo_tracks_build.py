@@ -80,6 +80,11 @@ def preview(site, floor, data, out_png, raw_frames, t0):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3)
         cv2.putText(right, p["id"], (int(a[0][0]) + 16, int(a[0][1]) + 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, c, 2)
+    if data.get("hub"):
+        hx, hy = int(data["hub"][0]), int(data["hub"][1])
+        cv2.circle(right, (hx, hy), 46, (0, 0, 0), 3)
+        cv2.putText(right, "START", (hx - 52, hy - 56),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 3)
     cv2.putText(right, f"IDEAL {len(data['people'])} people", (30, 60),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.6, (0, 150, 0), 4)
     panes.append(right)
