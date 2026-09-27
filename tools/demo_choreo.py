@@ -51,7 +51,7 @@ SPECS = {
     # 03 — 처음부터 끝까지 **한 무리로 뭉쳐서**. 뒤처졌다 합류하는 사람은 없다
     "sess-1789693478593": {
         "label": "03 CBS", "mode": "cluster",
-        "groups": [{"n": 10, "via": None, "gap": 0.35, "spread": 1.5}],
+        "groups": [{"n": 10, "via": None, "gap": 0.35, "spread": 0.9}],
     },
     # 04 — 계단을 내려온 뒤 **계단 출구에서 차례로 나와** 두 출구로 반반
     "sess-1789693805049": {
@@ -60,6 +60,26 @@ SPECS = {
                    {"n": 5, "via": None, "exit": 1, "gap": 2.2, "spread": 1.1}],
     },
 }
+
+def passage_times(timeline, t0):
+    """출구별 **실제 통과 시각**(경보 기준 초). 카운팅이 1 늘어난 순간들이다.
+
+    이게 싱크의 정본이다 — 우측 그리드에서 사람이 문을 지나는 그 순간에 좌측
+    점도 문을 지나야 한다. 실측 대표의 길이만으로 시간을 매기면 어긋난다
+    (실측: 01 IDR 은 18~33초에 다 나갔는데 점은 30초에도 한참 멀리 있었다).
+    """
+    out, prev = {}, {}
+    for p in timeline:
+        d = p.model_dump() if hasattr(p, "model_dump") else p
+        for k, v in (d.get("exit_counts") or {}).items():
+            n = v - prev.get(k, 0)
+            if n > 0:
+                out.setdefault(k, []).extend([d["ts"] - t0] * n)
+                prev[k] = v
+    for k in out:
+        out[k].sort()
+    return out
+
 
 HUB_R_M = 3.0          # 시작지점을 벗어났다고 볼 거리
 WIGGLE = 0.40          # 좌우 흔들림 — 같은 선 위를 행진하면 기계 같다
@@ -118,11 +138,13 @@ def _resample_px(pts, step_px):
     return [[float(x), float(y)] for x, y in zip(xs, ys)]
 
 
-def _exit_target(exits_px, k, frm):
-    """출구선 위에서 frm 에 가장 가까운 점 + 선을 조금 넘어선 점."""
+def _exit_target(exits_px, k, frm=None):
+    """출구선 **한가운데** — 문 가운데로 나가야 한다.
+
+    수선의 발을 쓰면 문틀 끝, 즉 벽 쪽을 겨눠 점이 벽으로 걸어 들어간다
+    (실측: 02 EPFI 에서 dot 가 출구 벽을 향해 갔다)."""
     (x1, y1), (x2, y2) = exits_px[k]
-    _, foot = dt._seg_foot(frm, (x1, y1), (x2, y2))
-    return foot
+    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
 
 # ── base 에서 뽑아 쓰는 세 가지 ───────────────────────────────────────────
@@ -317,6 +339,23 @@ def _bridge_around_exit(df, a_px, b_px, exits_px, keep_m, m_per_px):
     return [list(q) for q in dt._walk_path(df, a_px, b_px)[1:-1]]
 
 
+def _from_point(route, pt, m_per_px, r_m=4.0):
+    """경로의 앞머리를 버리고 **찍어 준 지점**에서 출발시킨다.
+
+    계단 출구가 그렇다 — 계단을 내려오는 사람의 발끝 투영은 계단실 벽 안쪽에
+    찍혀서, 그대로 그리면 점이 **벽을 통과해** 나온다(실측: 04 SEI).
+
+    반경을 **마지막으로** 벗어난 지점부터 쓴다. 처음 벗어난 지점을 쓰면 계단실
+    안팎을 들락거린 잡음이 남아 점이 문 앞에서 맴돌다 나간다."""
+    r = r_m / m_per_px
+    inside = [k for k, q in enumerate(route)
+              if math.hypot(q[0] - pt[0], q[1] - pt[1]) <= r]
+    i = (inside[-1] + 1) if inside else 0
+    if i >= len(route) - 3:                    # 전부 안쪽이면 자르지 않는다
+        i = 0
+    return [list(pt)] + route[i:]
+
+
 def _trim_start(xy, hub, m_per_px):
     """시작지점 근처에서 맴돈 앞머리를 자른다 — 출발이 흐리면 각본이 안 읽힌다."""
     r = HUB_R_M / m_per_px
@@ -325,14 +364,23 @@ def _trim_start(xy, hub, m_per_px):
     return xy[i:], i
 
 
-def build(ideal: dict, df, m_per_px: float, exits_px, spec: dict) -> dict:
+def build(ideal: dict, df, m_per_px: float, exits_px, spec: dict,
+          passages: dict | None = None, anchors: dict | None = None) -> dict:
     dt_s = ideal["dt"]
-    hub = tuple(ideal["hub"])
+    anchors = anchors or {}
+    hub = tuple(anchors.get("start") or ideal["hub"])    # 사람이 찍어 준 자리가 우선
     main_k = _main_exit(ideal["people"], exits_px)
     main_pt = _exit_target(exits_px, main_k, hub)
     direct_p, right_p = _classify(ideal["people"], hub, main_pt)
     step_px = STEP_M / m_per_px
 
+    # 통과 시각을 출구 **번호**로 바꿔 담는다 — 각본은 번호로 문을 가리킨다
+    pass_pool = {}
+    for key, ts in (passages or {}).items():
+        try:
+            pass_pool[int(str(key).rsplit("-", 1)[-1])] = list(ts)
+        except ValueError:
+            continue
     people, idx, moved_total = [], 0, 0
     for g in spec["groups"]:
         pool = right_p if g.get("via") == "right" else direct_p
@@ -356,17 +404,36 @@ def build(ideal: dict, df, m_per_px: float, exits_px, spec: dict) -> dict:
         route, cut = _dedetour(df, route, [exits_px[k_now]], m_per_px)
         if cut:
             dur = max(3.0, dur - cut * dt_s * 0.5)    # 지운 만큼 조금 당긴다
+        if spec["mode"] == "emerge" and anchors.get("stair_exit"):
+            route = _from_point(route, anchors["stair_exit"], m_per_px)
         route = _resample_px(route, step_px)
         route, mv = _push_out(df, route, m_per_px)
         moved_total += mv
 
         n_g = g["n"]
+        # 이 무리가 쓸 통과 시각 — 나가는 문의 목록에서 순서대로 떼어 간다
+        avail = list(pass_pool.get(k_now) or [])
+        pass_q = avail[:n_g]
+        pass_pool[k_now] = avail[n_g:]
         for j in range(n_g):
             lane = ((j - (n_g - 1) / 2) / max(1.0, (n_g - 1) / 2)
                     * g["spread"] / m_per_px)
             path = _offset(route, lane, phase=j * 1.7, df=df)
             t_dep = t_move + j * g["gap"]
-            ts = np.linspace(t_dep, t_dep + dur, len(path))
+            # **도착 시각은 실제 통과 시각**에 맞춘다 — 그리드에서 문을 지나는
+            # 순간에 점도 문을 지나야 한다. 출발(실측 개시)과 도착(실측 통과)을
+            # 양 끝으로 놓고 그 사이를 고르게 걷는다.
+            t_arr = pass_q[j] if j < len(pass_q) else t_dep + dur
+            if t_arr - t_dep < 3.0:
+                t_dep = max(0.0, t_arr - max(3.0, dur * 0.5))
+            # 통과 시각을 맞출 지점은 **문을 지나는 그 점**이다. 경로 끝(문을
+            # 1.5m 지난 자리)에 맞추면 그만큼 일찍 도착한 것처럼 보인다.
+            dex = [dt._seg_dist(q, exits_px[k_now][0], exits_px[k_now][1]) * m_per_px
+                   for q in path]
+            i_cross = next((n for n, v in enumerate(dex) if v < 0.6), len(path) - 1)
+            i_cross = max(1, i_cross)
+            total = (t_arr - t_dep) * (len(path) - 1) / i_cross
+            ts = np.linspace(t_dep, t_dep + total, len(path))
             pts = [[float(t), q[0], q[1]] for t, q in zip(ts, path)]
             if spec["mode"] == "cluster":
                 slot = dt._hub_slot(idx, 10, hub, m_per_px)

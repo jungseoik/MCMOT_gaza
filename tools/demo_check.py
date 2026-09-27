@@ -76,9 +76,46 @@ def check(session, floor=None):
     return inside, bool(grew), bool(back)
 
 
+def sync_report(session, floor=None):
+    """점이 문을 지나는 시각 vs **실제 통과 시각** — 싱크의 정본."""
+    import numpy as np
+
+    from system.metrics.replay import run_replay
+    from tools import demo_choreo as dc
+    from tools import demo_ghosts as dg
+
+    db, fl = find_session(session, floor)
+    meta = recorder.load_meta(db)
+    site = SiteConfig.model_validate(meta["site_view"])
+    mpp = site.map.resolve_m_per_px()
+    ex = [[tuple(e.line[0]), tuple(e.line[1])] for e in site.exits if e.line]
+    gh = [g["key"] for g in dg.load(session)]
+    _, tl, _, _ = run_replay(db, {"exclude_tracks": gh} if gh else {}, fps=5.0)
+    real = dc.passage_times(tl, float(meta["alarm_ts"]))
+    d = dt.load(session)
+
+    mine = []
+    for p in d["people"]:
+        xy = p["xy"]
+        k = int(np.argmin([dt._seg_dist(xy[-1], a, b) for a, b in ex]))
+        de = [dt._seg_dist(q, ex[k][0], ex[k][1]) * mpp for q in xy]
+        i = next((n for n, v in enumerate(de) if v < 1.0), len(de) - 1)
+        mine.append((p["t0"] + i * d["dt"], k))
+    for k in sorted({q[1] for q in mine}):
+        got = sorted(t for t, kk in mine if kk == k)
+        want = sorted(real.get(f"exit-{k}", []))[:len(got)]
+        if not want:
+            continue
+        err = [abs(a - b) for a, b in zip(got, want)]
+        print(f"   exit-{k} 통과시각  실제 {[round(v) for v in want]}")
+        print(f"             점     {[round(v) for v in got]}"
+              f"   차이 평균 {sum(err)/len(err):.1f}s 최대 {max(err):.1f}s")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--session", required=True)
     ap.add_argument("--floor")
     a = ap.parse_args()
     check(a.session, a.floor)
+    sync_report(a.session, a.floor)

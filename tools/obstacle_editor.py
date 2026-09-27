@@ -46,7 +46,53 @@ FLOORS = [
      "paths": "floor5_paths.png", "alias": []},
 ]
 
+# 투영만으로는 못 정하는 기준점. 사람이 찍어 줘야 한다.
+#   start       각본에서 10명이 모여 출발한 자리
+#   stair_exit  계단을 내려온 사람이 **그 층 바닥으로 나오는** 문
+#               (계단을 내려오는 사람의 발끝 투영은 계단실 벽 안쪽에 찍힌다)
+ANCHORS = {"start": {"name": "시작지점", "rgb": "16,185,129"},
+           "stair_exit": {"name": "계단 출구", "rgb": "234,88,12"}}
+
 app = FastAPI(title="장애물 표시 편집기")
+
+
+def anchor_path(floor: str) -> Path:
+    return ANN / f"anchors_{floor}.json"
+
+
+def load_anchors(floor: str) -> dict:
+    p = anchor_path(floor)
+    if p.is_file():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {"floor": floor, "points": {}}
+
+
+@app.get("/api/anchors/{floor}")
+def get_anchors(floor: str):
+    _floor(floor)
+    return load_anchors(floor)
+
+
+@app.put("/api/anchors/{floor}")
+def put_anchors(floor: str, body: dict):
+    _floor(floor)
+    pts = {}
+    for k, v in (body.get("points") or {}).items():
+        if k not in ANCHORS:
+            raise HTTPException(422, f"기준점 이름은 {list(ANCHORS)} — 받은 값 {k!r}")
+        pts[k] = [float(v[0]), float(v[1])]
+    data = {"floor": floor, "points": pts}
+    anchor_path(floor).write_text(json.dumps(data, ensure_ascii=False, indent=1),
+                                  encoding="utf-8")
+    for al in _floor(floor)["alias"]:
+        anchor_path(al).write_text(json.dumps({**data, "floor": al, "_from": floor},
+                                              ensure_ascii=False, indent=1),
+                                   encoding="utf-8")
+    return {"saved": len(pts), "path": str(anchor_path(floor).relative_to(ROOT)),
+            "alias": _floor(floor)["alias"]}
 
 
 def ann_path(floor: str) -> Path:
@@ -66,7 +112,7 @@ def floors():
     for f in FLOORS:
         d = load_obstacles(f["id"])
         out.append({**f, "count": len(d["obstacles"])})
-    return {"floors": out, "tags": TAGS}
+    return {"floors": out, "tags": TAGS, "anchors": ANCHORS}
 
 
 def load_obstacles(floor: str) -> dict:

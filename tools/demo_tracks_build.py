@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -28,6 +29,21 @@ from tools import demo_tracks as dt                 # noqa: E402
 from tools.session_viz import find_session          # noqa: E402
 
 SITE = ROOT / "data/sites/default"
+ANCH = ROOT / "results/demo/_annotate"
+
+
+def anchors(floor: str) -> dict:
+    """사람이 :8920 에서 찍어 준 기준점 — 시작지점·계단 출구.
+
+    투영만으로는 못 정하는 자리가 있다(계단 출구가 대표적 — 계단을 내려오는
+    사람의 발끝 투영은 계단실 벽 안쪽에 찍힌다). 찍어 준 게 있으면 그걸 쓴다."""
+    p = ANCH / f"anchors_{floor}.json"
+    if not p.is_file():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8")).get("points") or {}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def distfield(site: SiteConfig, floor: str, m_per_px: float):
@@ -133,7 +149,13 @@ def main() -> int:
     spec = dc.SPECS.get(a.session)
     if spec and not a.raw_only:
         base_n = len(data["people"])
-        data = dc.build(data, df, m_per_px, exits, spec)
+        pas = dc.passage_times(tl, t0)
+        anc = anchors(floor)
+        print("[싱크] 출구 통과 실제 시각 "
+              + " · ".join(f"{k} {[round(v,1) for v in vs]}" for k, vs in sorted(pas.items())))
+        if anc:
+            print(f"[앵커] 사람이 찍어 준 지점 {sorted(anc)}")
+        data = dc.build(data, df, m_per_px, exits, spec, passages=pas, anchors=anc)
         print(f"[각본] {spec['label']} — base {base_n}명 → 연출 {data['n']}명")
         for g in spec["groups"]:
             via = "우측 우회" if g.get("via") == "right" else "곧장 출구"
