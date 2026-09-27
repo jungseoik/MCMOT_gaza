@@ -36,6 +36,7 @@ from system.metrics.replay import run_replay  # noqa: E402
 from tools import demo_ghosts as dghost       # noqa: E402
 from tools import demo_tracks as dtrk         # noqa: E402
 from tools import demo_obstacles as dobs      # noqa: E402
+from tools import demo_paths as dpaths        # noqa: E402
 from tools.session_viz import (                # noqa: E402
     drill_label, find_session, fit, latest_at, put, resolve_clips,
 )
@@ -174,9 +175,11 @@ def main() -> int:
                          "쓰면 화면에 그 사실을 표기한다(숨기면 오해를 부른다).")
     ap.add_argument("--map", default="dots", choices=("dots", "heat"),
                     help="2D 맵 표출 — dots(점+흔적) / heat(밀도 히트맵)")
-    ap.add_argument("--tracks", default="raw", choices=("raw", "ideal"),
-                    help="점의 출처 — raw(원 관측) / ideal(이어 붙인 N명, 표출 전용). "
-                         "ideal 은 tools/demo_tracks_build.py 로 먼저 만들어 둔다.")
+    ap.add_argument("--tracks", default="raw", choices=("raw", "ideal", "drawn"),
+                    help="점의 출처 — raw(원 관측, ④ 리플레이와 같은 그림) / "
+                         "ideal(이어 붙인 N명) / drawn(**사람이 :8930 편집기에서 "
+                         "직접 그린 동선** — 리플레이 타임라인 위에 찍은 것이라 "
+                         "그리드와 싱크가 맞는다).")
     a = ap.parse_args()
 
     db, floor = find_session(a.session, a.floor)
@@ -337,10 +340,18 @@ def main() -> int:
         return out
     # 이상적 궤적 — 카메라 경계에서 끊기는 id 를 이어 붙여 각본 인원만큼 만든
     # 연속 궤적. **표출 전용**이고 위의 지표(res/tl)는 원 관측 그대로다.
-    ideal = dtrk.load(a.session) if a.tracks == "ideal" else None
-    if a.tracks == "ideal" and ideal is None:
-        print("이상적 궤적이 없습니다 — tools/demo_tracks_build.py 를 먼저 돌리세요")
-        return 1
+    ideal = None
+    if a.tracks == "ideal":
+        ideal = dtrk.load(a.session)
+        if ideal is None:
+            print("이상적 궤적이 없습니다 — tools/demo_tracks_build.py 를 먼저 돌리세요")
+            return 1
+    elif a.tracks == "drawn":
+        ideal = dpaths.load(a.session, t_end=dur)
+        if ideal is None:
+            print("그린 동선이 없습니다 — tools/path_editor.py (:8930) 에서 먼저 그리세요")
+            return 1
+        print(f"[demo] {dpaths.summary(ideal)}")
     if ideal:
         print(f"[demo] 이상적 궤적 {ideal['n']}명 — 끊김 없이 표출(지표는 원 관측 그대로)")
 
