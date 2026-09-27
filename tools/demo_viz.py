@@ -34,6 +34,7 @@ import numpy as np                            # noqa: E402
 from system.metrics import recorder           # noqa: E402
 from system.metrics.replay import run_replay  # noqa: E402
 from tools import demo_ghosts as dghost       # noqa: E402
+from tools import demo_tracks as dtrk         # noqa: E402
 from tools import demo_obstacles as dobs      # noqa: E402
 from tools.session_viz import (                # noqa: E402
     drill_label, find_session, fit, latest_at, put, resolve_clips,
@@ -173,6 +174,9 @@ def main() -> int:
                          "쓰면 화면에 그 사실을 표기한다(숨기면 오해를 부른다).")
     ap.add_argument("--map", default="dots", choices=("dots", "heat"),
                     help="2D 맵 표출 — dots(점+흔적) / heat(밀도 히트맵)")
+    ap.add_argument("--tracks", default="raw", choices=("raw", "ideal"),
+                    help="점의 출처 — raw(원 관측) / ideal(이어 붙인 N명, 표출 전용). "
+                         "ideal 은 tools/demo_tracks_build.py 로 먼저 만들어 둔다.")
     a = ap.parse_args()
 
     db, floor = find_session(a.session, a.floor)
@@ -331,6 +335,18 @@ def main() -> int:
                         "x": o["x"] + (b["x"] - o["x"]) * al if b else o["x"],
                         "y": o["y"] + (b["y"] - o["y"]) * al if b else o["y"]})
         return out
+    # 이상적 궤적 — 카메라 경계에서 끊기는 id 를 이어 붙여 각본 인원만큼 만든
+    # 연속 궤적. **표출 전용**이고 위의 지표(res/tl)는 원 관측 그대로다.
+    ideal = dtrk.load(a.session) if a.tracks == "ideal" else None
+    if a.tracks == "ideal" and ideal is None:
+        print("이상적 궤적이 없습니다 — tools/demo_tracks_build.py 를 먼저 돌리세요")
+        return 1
+    if ideal:
+        print(f"[demo] 이상적 궤적 {ideal['n']}명 — 끊김 없이 표출(지표는 원 관측 그대로)")
+
+        def interp_objects(t):                       # noqa: F811
+            return dtrk.at(ideal, t - t0)
+
     n_intro = int(INTRO_SEC * out_fps)
     n_main = int(dur * out_fps)
     cur = {c: None for c in caps}
@@ -439,6 +455,24 @@ def main() -> int:
                 for o in obs:                       # 누가 몇 명인지는 남겨 둔다
                     cv2.circle(left, MP(o["x"], o["y"]), 4, (255, 255, 255), -1)
                     cv2.circle(left, MP(o["x"], o["y"]), 4, (30, 30, 30), 1)
+            elif ideal:
+                # 사람마다 **자기 자취**를 끝까지 남긴다 — id 가 유지된다는 게
+                # 눈에 보여야 한다. 최근 구간일수록 진하게 두 겹으로 긋는다.
+                ov = left.copy()
+                for pp in ideal["people"]:
+                    tr_ = dtrk.trail(ideal, pp, t - t0)
+                    if len(tr_) >= 2:
+                        cv2.polylines(ov, [np.array([MP(*q) for q in tr_], np.int32)],
+                                      False, DOT, 2, cv2.LINE_AA)
+                cv2.addWeighted(ov, 0.40, left, 0.60, 0, left)
+                for pp in ideal["people"]:
+                    tr_ = dtrk.trail(ideal, pp, t - t0, back=6.0)
+                    if len(tr_) >= 2:
+                        cv2.polylines(left, [np.array([MP(*q) for q in tr_], np.int32)],
+                                      False, DOT, 3, cv2.LINE_AA)
+                for o in obs:
+                    cv2.circle(left, MP(o["x"], o["y"]), 8, DOT, -1)
+                    cv2.circle(left, MP(o["x"], o["y"]), 8, (20, 20, 20), 1)
             else:
                 # 흔적 — 오래된 것일수록 흐리게. 세 단계로 나눠 겹쳐 그린다
                 # (점마다 알파를 주려면 매번 addWeighted 라 느리다).
