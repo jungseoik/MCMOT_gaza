@@ -42,6 +42,7 @@ V_LINK = 2.2           # 잇기 허용 속도 m/s — 이보다 빠르면 다른
 OVERLAP_S = 1.5        # 두 카메라가 겹쳐 본 구간 허용
 OVERLAP_M = 2.0
 WALK_MPS = 1.3         # 마무리로 걸어 나갈 때 속도
+FILL_MPS = 1.6         # 카메라 사각을 메울 때 걷는 속도
 DT = 0.1               # 출력 시간 격자
 SMOOTH_S = 0.9         # 이동평균 창
 EXIT_NEAR_M = 2.0      # 출구선에 이만큼 붙으면 '나갔다'
@@ -261,14 +262,29 @@ def build(frames, site, df, *, t0: float, n_people: int = N_PEOPLE,
         pts = [[p[0], p[1], p[2]] for p in ch]
 
         # ④ 빈 구간 메우기 — 직선이 벽을 뚫으면 격자를 돌아서
-        filled = [pts[0]]
+        filled, shift = [pts[0]], 0.0
         for a, b in zip(pts, pts[1:]):
             gap_t, gap_d = b[0] - a[0], math.hypot(b[1] - a[1], b[2] - a[2]) * m_per_px
             if gap_t > 0.6 and gap_d > 1.0 and df is not None:
                 mid = _fill(df, (a[1], a[2]), (b[1], b[2]))
-                for k, mp in enumerate(mid, 1):
-                    filled.append([a[0] + gap_t * k / (len(mid) + 1), mp[0], mp[1]])
-            filled.append(b)
+                if mid:
+                    # 돌아가는 길은 직선보다 훨씬 길다. 원래 공백 시간에 욱여넣으면
+                    # 그 구간만 전력 질주가 된다(실측 7~28 m/s). 걸리는 만큼 시간을
+                    # 주고 **뒤를 통째로 민다** — 끝은 어차피 통과 시각에 맞춘다.
+                    way = [[a[1], a[2]]] + mid + [[b[1], b[2]]]
+                    need = sum(math.hypot(q[0] - p[0], q[1] - p[1])
+                               for p, q in zip(way, way[1:])) * m_per_px / FILL_MPS
+                    extra = max(0.0, need - gap_t)
+                    span = gap_t + extra
+                    acc = 0.0
+                    for k, mp in enumerate(mid, 1):
+                        acc += math.hypot(way[k][0] - way[k - 1][0],
+                                          way[k][1] - way[k - 1][1])
+                        tot = sum(math.hypot(q[0] - p[0], q[1] - p[1])
+                                  for p, q in zip(way, way[1:])) or 1.0
+                        filled.append([a[0] + shift + span * acc / tot, mp[0], mp[1]])
+                    shift += extra
+            filled.append([b[0] + shift, b[1], b[2]])
         pts = filled
 
         # ⑤ 출구까지 마저 걸어 나간다 — 도중에 증발하지 않게
