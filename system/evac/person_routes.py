@@ -123,10 +123,12 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
     carve, blocks = _edits_from_floor_json(site_dir, floor_id, m_per_px)
     if not carve:
         carve = [r.points for r in site.routes if len(r.points) >= 2]
-    walls = list(blocks) + [list(w) for w in (extra_walls or [])]
+    # 장애물 표시는 **뚫기보다 세게** 막는다 — 피난경로 선이 의자 위를 지나가도
+    # 의자는 의자다(hard_walls). floor.json 의 막기 도형은 종전대로 extra_walls.
     df = build_distfield(str(png), exits, m_per_px,
                          carve_paths=carve or None, carve_w_m=2.0,
-                         clearance_m=0.15, extra_walls=walls or None)
+                         clearance_m=0.15, extra_walls=blocks or None,
+                         hard_walls=[list(w) for w in (extra_walls or [])] or None)
 
     # 트랙별 **첫 투영 위치** — 엔진과 같은 투영기(CameraProjector)를 쓴다.
     # 좌표계가 조금이라도 다르면 경로가 엉뚱한 데서 출발한다.

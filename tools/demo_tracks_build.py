@@ -23,6 +23,7 @@ from system.metrics import recorder                 # noqa: E402
 from system.metrics.replay import run_replay        # noqa: E402
 from tools import demo_ghosts as dg                 # noqa: E402
 from tools import demo_obstacles as dobs            # noqa: E402
+from tools import demo_choreo as dc                 # noqa: E402
 from tools import demo_tracks as dt                 # noqa: E402
 from tools.session_viz import find_session          # noqa: E402
 
@@ -38,10 +39,10 @@ def distfield(site: SiteConfig, floor: str, m_per_px: float):
     carve, blocks = _edits_from_floor_json(SITE, floor, m_per_px)
     if not carve:
         carve = [r.points for r in site.routes if len(r.points) >= 2]
-    walls = list(blocks) + [o["points"] for o in dobs.load(floor)]
     return build_distfield(str(png), exits, m_per_px, carve_paths=carve or None,
                            carve_w_m=2.0, clearance_m=0.15,
-                           extra_walls=walls or None), exits
+                           extra_walls=blocks or None,
+                           hard_walls=[o["points"] for o in dobs.load(floor)] or None), exits
 
 
 def preview(site, floor, data, out_png, raw_frames, t0):
@@ -69,6 +70,11 @@ def preview(site, floor, data, out_png, raw_frames, t0):
     panes.append(left)
 
     right = base.copy()
+    for o in dobs.load(floor):
+        poly = np.array(o["points"], np.int32)
+        ov = right.copy(); cv2.fillPoly(ov, [poly], (60, 60, 230))
+        cv2.addWeighted(ov, 0.30, right, 0.70, 0, right)
+        cv2.polylines(right, [poly], True, (40, 40, 210), 3)
     for i, p in enumerate(data["people"]):
         hsv = np.uint8([[[int(i * 180 / max(1, len(data["people"]))), 220, 230]]])
         c = tuple(int(v) for v in cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0][0])
@@ -80,6 +86,11 @@ def preview(site, floor, data, out_png, raw_frames, t0):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3)
         cv2.putText(right, p["id"], (int(a[0][0]) + 16, int(a[0][1]) + 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, c, 2)
+    if data.get("waypoint"):
+        wx, wy = int(data["waypoint"][0]), int(data["waypoint"][1])
+        cv2.circle(right, (wx, wy), 30, (140, 0, 140), 3)
+        cv2.putText(right, "VIA", (wx - 30, wy - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (140, 0, 140), 3)
     if data.get("hub"):
         hx, hy = int(data["hub"][0]), int(data["hub"][1])
         cv2.circle(right, (hx, hy), 46, (0, 0, 0), 3)
@@ -103,6 +114,8 @@ def main() -> int:
     ap.add_argument("--floor")
     ap.add_argument("--people", type=int, default=dt.N_PEOPLE)
     ap.add_argument("--png", help="대조 그림 경로")
+    ap.add_argument("--raw-only", action="store_true",
+                    help="각본 연출을 건너뛰고 이어 붙인 궤적만 저장")
     a = ap.parse_args()
 
     db, floor = find_session(a.session, a.floor)
@@ -116,6 +129,17 @@ def main() -> int:
     df, exits = distfield(site, floor, m_per_px)
     data = dt.build(frames, site, df, t0=t0, n_people=a.people,
                     m_per_px=m_per_px, exits_px=exits)
+    # 각본 연출 — 이어 붙인 궤적을 base 로 쓰고 각본 인원을 그 위에 배치한다
+    spec = dc.SPECS.get(a.session)
+    if spec and not a.raw_only:
+        base_n = len(data["people"])
+        data = dc.build(data, df, m_per_px, exits, spec)
+        print(f"[각본] {spec['label']} — base {base_n}명 → 연출 {data['n']}명")
+        for g in spec["groups"]:
+            via = "우측 우회" if g.get("via") == "right" else "곧장 출구"
+            ex = "" if g.get("exit") is None else f" · 출구 {g['exit']}"
+            print(f"        {g['n']}명 {via}{ex} · 출발간격 {g['gap']}s "
+                  f"· 좌우폭 {g['spread']}m")
     data["session_id"] = a.session
     data["floor"] = floor
     p = dt.save(a.session, data)

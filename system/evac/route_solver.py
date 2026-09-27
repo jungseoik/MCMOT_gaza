@@ -63,11 +63,15 @@ def _dilate(mask: np.ndarray, r: int) -> np.ndarray:
 def build_distfield(map_png: str, exits_px, m_per_px: float, *,
                     cell_m: float = CELL_M, clearance_m: float = CLEARANCE_M,
                     wall_gray: int = WALL_GRAY, extra_walls=None,
-                    carve_paths=None, carve_w_m: float = 1.2) -> DistField:
+                    carve_paths=None, carve_w_m: float = 1.2,
+                    hard_walls=None) -> DistField:
     """map.png + 출구선(맵 px) → 거리장.
 
     exits_px    : [[(x1,y1),(x2,y2)], ...] 출구 통과선 (맵 px)
-    extra_walls : 추가로 막을 다각형 [[(x,y),...], ...] (맵 px)
+    extra_walls : 추가로 막을 다각형 [[(x,y),...], ...] (맵 px). carve_paths 가
+                  지나가면 **다시 열린다**(문을 여는 게 우선이라 그렇게 둔다).
+    hard_walls  : carve 보다 **센** 막기. 뚫기 선이 지나가도 끝까지 막힌다.
+                  의자·적치물처럼 "문은 맞는데 지금 못 지나간다"를 표현할 때 쓴다.
     carve_paths : **뚫어야 할 통로** [[(x,y),...], ...] (맵 px). 보통 ① 맵 설정에서
                   사람이 그린 피난경로를 넣는다.
 
@@ -119,6 +123,17 @@ def build_distfield(map_png: str, exits_px, m_per_px: float, *,
             for i in range(len(q) - 1):
                 cv2.line(cm, q[i], q[i + 1], 1, thickness=half * 2 + 1)
         wall &= ~cm.astype(bool).T
+
+    # 뚫기보다 센 막기 — carve 뒤에 얹는다. 피난경로 선이 의자 위를 지나가도
+    # 의자는 의자다. 이걸 carve 앞에 두면 통로 뚫기가 도로 열어 버린다(실측:
+    # 발표 영상에서 점 179개가 장애물 안을 지났다).
+    if hard_walls:
+        for poly in hard_walls:
+            m = np.zeros((rows, cols), np.uint8)
+            pts = np.array([[int(x / cell_px), int(y / cell_px)] for x, y in poly], np.int32)
+            cv2.fillPoly(m, [pts], 1)
+            wall |= m.astype(bool).T
+        wall = _dilate(wall, int(round(clearance_m / cell_m)))
 
     # 출구 셀 — 선분을 따라 샘플링. 출구는 벽에 묻혀도 무조건 통행 가능으로 연다
     # (문틀 선 때문에 출구가 막히면 거리장이 통째로 무한대가 된다).
