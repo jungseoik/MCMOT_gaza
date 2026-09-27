@@ -163,7 +163,37 @@ def put_paths(sid: str, body: dict):
     paths_file(sid).write_text(json.dumps(data, ensure_ascii=False, indent=1),
                                encoding="utf-8")
     return {"saved": len(out), "keys": sum(len(v) for v in out.values()),
-            "path": str(paths_file(sid).relative_to(ROOT))}
+            "path": str(paths_file(sid).relative_to(ROOT)),
+            "warn": _wall_check(sid, out)}
+
+
+def _wall_check(sid: str, people: dict) -> list[str]:
+    """그린 선이 **벽·장애물을 뚫는지** 저장할 때 알려 준다.
+
+    브라우저에서 벽을 판정하려면 격자를 통째로 내려보내야 하고, 그린 뒤에 알게
+    되면 다시 그려야 한다. 저장 순간에 서버가 한 번 봐 주는 게 싸다."""
+    try:
+        from system.evac.route_solver import _los
+        from tools.demo_paths import _catmull
+        from tools.demo_tracks_build import distfield
+        s = _session(sid)
+        db, floor = find_session(sid, s["floor"])
+        site = SiteConfig.model_validate(recorder.load_meta(db)["site_view"])
+        df, _ = distfield(site, floor, site.map.resolve_m_per_px())
+    except Exception:
+        return []
+    import numpy as np
+    bad = []
+    for pid, ks in people.items():
+        if len(ks) < 2:
+            continue
+        grid = np.arange(ks[0]["t"], ks[-1]["t"] + 0.05, 0.1)
+        xy = _catmull(ks, grid)
+        hit = sum(1 for a, b in zip(xy, xy[1:])
+                  if not _los(df.wall, df.to_cell(*a), df.to_cell(*b)))
+        if hit:
+            bad.append(f"{pid}({hit})")
+    return bad
 
 
 @app.get("/img/map/{floor}")

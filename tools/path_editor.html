@@ -66,9 +66,36 @@
   </div>
 
   <div class="sec">
+    <b>배경</b>
+    <div class="row">
+      <button id="bAllT" class="on">전체 타임라인</button>
+      <button id="bRef" class="on">지금 이 순간</button>
+    </div>
+    <div class="hint" id="cbar">전체 타임라인 = 녹화된 모든 순간의 점을
+      <b>시각에 따라 색</b>으로 깐 것. 파랑=처음, 빨강=끝.</div>
+  </div>
+
+  <div class="sec">
+    <b>그리기</b>
+    <div class="row">
+      <button id="mSeq" class="on">차례 찍기</button>
+      <button id="mDrag">쭉 긋기</button>
+      <select id="gap" style="width:92px">
+        <option value="0.5">0.5초 간격</option>
+        <option value="1" selected>1초 간격</option>
+        <option value="1.5">1.5초 간격</option>
+        <option value="2">2초 간격</option>
+      </select>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="fit" style="flex:1">출구 시각에 맞추기</button>
+    </div>
+    <div class="hint" id="drawHint"></div>
+  </div>
+
+  <div class="sec">
     <b>보기</b>
     <div class="row">
-      <button id="bRef" class="on">녹화본 점</button>
       <button id="bTrail" class="on">지나온 자취</button>
       <button id="bAll" class="on">다른 사람도</button>
     </div>
@@ -83,10 +110,12 @@
       <button id="clr">이 사람 지우기</button>
     </div>
     <div class="hint">
-      사람 하나 고르고 <b>재생하면서 도면을 클릭</b> — 그 순간 그 자리에 점을 둔다.<br>
-      <kbd>Space</kbd> 재생/정지 · <kbd>←</kbd><kbd>→</kbd> 0.2초 · <kbd>Shift</kbd>+ 1초<br>
+      <b>차례 찍기</b> — 출발 자리부터 차례로 클릭하면 <b>1초씩</b> 붙는다.
+      다 찍고 [출구 시각에 맞추기]를 누르면 마지막 점이 그 사람의 <b>실제 통과
+      시각</b>에 딱 맞게 전체가 늘어난다.<br>
+      <b>쭉 긋기</b> — 끌어서 한 번에 긋는다(간격대로 자동으로 점이 박힌다).<br>
       <kbd>1</kbd>~<kbd>0</kbd> 사람 고르기 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 마지막 점 취소<br>
-      <kbd>X</kbd> 이 순간을 <b>퇴장</b>으로(문을 지나 사라짐)
+      <kbd>Space</kbd> 재생/정지 · <kbd>←</kbd><kbd>→</kbd> 0.2초(<kbd>Shift</kbd>+ 1초)
     </div>
   </div>
 </aside>
@@ -122,7 +151,8 @@
 const $=s=>document.querySelector(s);
 const cv=$('#cv'), ctx=cv.getContext('2d'), vid=$('#vid');
 let S=null, PATHS={}, EXITAT={}, cur='P01', t=0, playing=false, N=10;
-let showRef=true, showTrail=true, showAll=true, dirty=false;
+let showRef=true, showTrail=true, showAll=true, showAllT=true, dirty=false;
+let mode='seq', gap=1.0, ALLT=null, drag=null, EXITWANT={};
 let mapImg=null, k=1, ox=0, oy=0;
 const COL=['#ef4444','#f59e0b','#eab308','#84cc16','#22c55e',
            '#14b8a6','#3b82f6','#8b5cf6','#d946ef','#f43f5e'];
@@ -141,6 +171,29 @@ function fit(){
   if(S){const pad=14,w=cv.clientWidth-pad*2,h=cv.clientHeight-pad*2;
     k=Math.min(w/S.map_px[0], h/S.map_px[1]);
     ox=(cv.clientWidth-S.map_px[0]*k)/2; oy=(cv.clientHeight-S.map_px[1]*k)/2;}
+}
+
+/* ---------- 전체 타임라인: 녹화된 **모든 순간**을 한 장에 ---------- */
+function timeColor(u){                       // 0=처음 1=끝 · 파랑→청록→초록→노랑→빨강
+  const st=[[0,[56,110,235]],[.25,[40,190,190]],[.5,[80,200,90]],
+            [.75,[240,190,50]],[1,[235,60,55]]];
+  let a=st[0],b=st[st.length-1];
+  for(let i=0;i<st.length-1;i++) if(u>=st[i][0]&&u<=st[i+1][0]){a=st[i];b=st[i+1];break;}
+  const f=(u-a[0])/((b[0]-a[0])||1);
+  return `rgb(${a[1].map((v,i)=>Math.round(v+(b[1][i]-v)*f)).join(',')})`;
+}
+function bakeAll(){
+  // 매 프레임 수천 점을 다시 그리면 클릭이 굼떠진다. 한 번 구워 두고 얹는다.
+  if(!S) return;
+  const c=document.createElement('canvas');
+  c.width=S.map_px[0]; c.height=S.map_px[1];
+  const g=c.getContext('2d');
+  const T=S.t_end||1;
+  for(const fr of S.ref){
+    g.fillStyle=timeColor(fr.t/T);
+    for(const o of fr.o){ g.beginPath(); g.arc(o[0],o[1],5,0,7); g.fill(); }
+  }
+  ALLT=c;
 }
 
 /* ---------- 참고 점: 녹화본 그대로(④ 리플레이와 같은 내용) ---------- */
@@ -185,6 +238,11 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]);
     ctx.strokeStyle='#f59e0b'; ctx.lineWidth=4; ctx.stroke(); ctx.lineWidth=1.5;}
 
+  if(showAllT && ALLT){
+    ctx.globalAlpha=0.45;
+    ctx.drawImage(ALLT, ox, oy, S.map_px[0]*k, S.map_px[1]*k);
+    ctx.globalAlpha=1;
+  }
   if(showRef) for(const q of refAt(t)){const s=toScreen(q[0],q[1]);
     ctx.beginPath(); ctx.arc(s[0],s[1],4,0,7);
     ctx.fillStyle='rgba(150,150,165,.75)'; ctx.fill();}
@@ -212,6 +270,12 @@ function draw(){
         ctx.strokeStyle='rgba(0,0,0,.8)'; ctx.lineWidth=3;
         ctx.strokeText(p,s[0]+12,s[1]+4); ctx.fillText(p,s[0]+12,s[1]+4); ctx.lineWidth=1.5;}}
   }
+  if(drag&&drag.length>1){
+    ctx.beginPath();
+    drag.forEach((q,i)=>{const s2=toScreen(q[0],q[1]); i?ctx.lineTo(s2[0],s2[1]):ctx.moveTo(s2[0],s2[1]);});
+    ctx.strokeStyle=COL[cidx(cur)]; ctx.lineWidth=3; ctx.setLineDash([6,4]);
+    ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth=1.5;
+  }
   const done=Object.values(PATHS).filter(v=>v&&v.length).length;
   $('#status').textContent=`${S.name} · ${done}/${N}명 그림 · 키프레임 `
     + Object.values(PATHS).reduce((a,v)=>a+(v?v.length:0),0);
@@ -224,14 +288,27 @@ function renderIds(){
     const p=pid(i), ks=PATHS[p]||[];
     const d=document.createElement('div');
     d.className='pid'+(p===cur?' on':'');
-    const ex=EXITAT[p]!=null?` · 퇴장 ${EXITAT[p].toFixed(1)}s`:'';
+    const w=S?wantExit(p):null;
+    const ex=EXITAT[p]!=null?`→${EXITAT[p].toFixed(0)}s`
+             :(w!=null?`<span style="color:#f59e0b">통과 ${w.toFixed(0)}s</span>`:'');
     d.innerHTML=`<i style="background:${COL[i]}"></i><span>${p}</span>`
-      +`<em>${ks.length?ks.length+'점'+ex:'—'}</em>`;
-    d.onclick=()=>{cur=p; renderIds(); draw();};
+      +`<em>${ks.length?ks.length+'점 '+ex:ex||'—'}</em>`;
+    d.onclick=()=>{cur=p; renderIds(); hintDraw(); draw();};
     el.appendChild(d);
   }
 }
 function setDirty(v){dirty=v; $('#save').textContent=v?'저장 *':'저장';}
+function setMode(m){mode=m; drag=null;
+  $('#mSeq').classList.toggle('on',m==='seq');
+  $('#mDrag').classList.toggle('on',m==='drag');
+  cv.style.cursor=m==='drag'?'cell':'crosshair'; hintDraw(); draw();}
+function hintDraw(){
+  const ks=PATHS[cur]||[];
+  const nt=ks.length?(ks[ks.length-1].t+gap):t;
+  $('#drawHint').innerHTML=mode==='seq'
+    ? `다음 점은 <b>${nt.toFixed(1)}s</b> 에 찍힌다 (${gap}초씩)`
+    : `끌면 ${gap}초 간격으로 점이 박힌다`;
+}
 
 /* ---------- 시간 ---------- */
 function setT(v,seek){
@@ -258,15 +335,72 @@ function setPlay(v){
 }
 
 /* ---------- 입력 ---------- */
+function nextT(){
+  // 찍는 시각은 **자동**이다 — 마지막 점에서 간격만큼 뒤. 프레임마다 맞추는
+  // 노가다를 없애려고 이렇게 한다. 끝나고 [출구 시각에 맞추기]로 한 번에 늘린다.
+  const ks=PATHS[cur];
+  if(!ks||!ks.length) return +t.toFixed(2);     // 첫 점만 현재 시각에서 시작
+  return +(ks[ks.length-1].t+gap).toFixed(2);
+}
+function addKey(p, tt){
+  const ks=PATHS[cur]||(PATHS[cur]=[]);
+  const i=ks.findIndex(q=>Math.abs(q.t-tt)<0.05);
+  const key={t:tt, x:Math.round(p[0]), y:Math.round(p[1])};
+  if(i>=0) ks[i]=key; else {ks.push(key); ks.sort((a,b)=>a.t-b.t);}
+}
 cv.addEventListener('mousedown',ev=>{
   if(!S||ev.button!==0) return;
-  const p=toMap(ev);
-  const ks=PATHS[cur]||(PATHS[cur]=[]);
-  const i=ks.findIndex(q=>Math.abs(q.t-t)<0.12);
-  const key={t:+t.toFixed(2), x:Math.round(p[0]), y:Math.round(p[1])};
-  if(i>=0) ks[i]=key; else {ks.push(key); ks.sort((a,b)=>a.t-b.t);}
+  if(mode==='drag'){ drag=[toMap(ev)]; return; }
+  addKey(toMap(ev), nextT());
   setDirty(true); renderIds(); draw();
 });
+addEventListener('mousemove',ev=>{
+  if(!drag) return;
+  const p=toMap(ev), a=drag[drag.length-1];
+  if(Math.hypot(p[0]-a[0],p[1]-a[1])*k>6) drag.push(p);   // 화면 6px 마다
+  draw();
+});
+addEventListener('mouseup',()=>{
+  if(!drag) return;
+  const pts=drag; drag=null;
+  if(pts.length<2){ draw(); return; }
+  // 그은 선을 **간격대로** 점으로 바꾼다 — 등속으로 걸은 셈이 된다
+  const arc=[0]; for(let i=1;i<pts.length;i++)
+    arc.push(arc[i-1]+Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]));
+  const L=arc[arc.length-1]||1;
+  const n=Math.max(2, Math.round((PATHS[cur]&&PATHS[cur].length?1:0)+L*S.m_per_px/(1.2*gap)));
+  let t0=nextT();
+  for(let j=0;j<=n;j++){
+    const d=L*j/n; let i=1; while(i<arc.length-1 && arc[i]<d) i++;
+    const f=(d-arc[i-1])/((arc[i]-arc[i-1])||1);
+    addKey([pts[i-1][0]+(pts[i][0]-pts[i-1][0])*f,
+            pts[i-1][1]+(pts[i][1]-pts[i-1][1])*f], +(t0+j*gap).toFixed(2));
+  }
+  setDirty(true); renderIds(); draw();
+});
+
+/* ---------- 출구 시각에 맞추기 ---------- */
+function wantExit(p){
+  if(EXITWANT[p]!=null) return EXITWANT[p];
+  const all=Object.values(S.passes||{}).flat().sort((a,b)=>a-b);
+  const i=cidx(p);
+  return i<all.length?all[i]:null;
+}
+function fitExit(){
+  const ks=PATHS[cur];
+  if(!ks||ks.length<2) return toast('점을 2개 이상 찍으세요',true);
+  const want=wantExit(cur);
+  if(want==null) return toast('이 사람에게 배정된 통과 시각이 없습니다',true);
+  // 첫 점은 그대로 두고 **전체를 늘여** 마지막 점이 통과 시각에 오게 한다
+  const t0=ks[0].t, span=ks[ks.length-1].t-t0;
+  if(span<=0) return;
+  const r=(want-t0)/span;
+  if(r<=0) return toast('통과 시각이 출발보다 빠릅니다 — 출발을 당기세요',true);
+  ks.forEach(q=>q.t=+(t0+(q.t-t0)*r).toFixed(2));
+  EXITAT[cur]=want;
+  setDirty(true); renderIds(); hintDraw(); draw();
+  toast(`${cur} → 통과 ${want.toFixed(1)}s 에 맞춤 (${(span).toFixed(1)}s → ${(want-t0).toFixed(1)}s)`);
+}
 addEventListener('keydown',ev=>{
   if(ev.target.tagName==='SELECT'||ev.target.tagName==='INPUT') return;
   const st=ev.shiftKey?1:0.2;
@@ -274,7 +408,7 @@ addEventListener('keydown',ev=>{
   else if(ev.key==='ArrowLeft'){ev.preventDefault(); setPlay(false); setT(t-st,true);}
   else if(ev.key==='ArrowRight'){ev.preventDefault(); setPlay(false); setT(t+st,true);}
   else if(ev.key>='0'&&ev.key<='9'){const n=ev.key==='0'?9:+ev.key-1;
-    if(n<N){cur=pid(n); renderIds(); draw();}}
+    if(n<N){cur=pid(n); renderIds(); hintDraw(); draw();}}
   else if((ev.ctrlKey||ev.metaKey)&&ev.key==='z'){
     const ks=PATHS[cur]; if(ks&&ks.length){ks.pop(); setDirty(true); renderIds(); draw();}}
   else if(ev.key==='x'||ev.key==='X'){
@@ -301,7 +435,7 @@ async function loadSession(sid){
   if(S.cams.length) setCam(S.cams[0]);
   mapImg=await new Promise(res=>{const im=new Image();
     im.onload=()=>res(im); im.onerror=()=>res(null); im.src='/img/map/'+S.floor;});
-  fit(); setDirty(false); renderIds(); setT(0,true);
+  fit(); bakeAll(); setDirty(false); renderIds(); hintDraw(); setT(0,true);
 }
 function setCam(c){vid.src=`/video/${S.id}/${c}`; vid.currentTime=t;}
 
@@ -310,7 +444,11 @@ async function save(){
     body:JSON.stringify({people:PATHS, exit_at:EXITAT})});
   if(!r.ok){toast('저장 실패',true); return;}
   const j=await r.json(); setDirty(false);
-  toast(`${j.saved}명 · 키프레임 ${j.keys}개 저장 → ${j.path}`);
+  if(j.warn && j.warn.length){
+    toast(`저장했지만 ⚠ 벽·장애물 통과: ${j.warn.join(', ')}`, true);
+  } else {
+    toast(`${j.saved}명 · 키프레임 ${j.keys}개 저장 · 벽 통과 없음 ✅`);
+  }
 }
 
 (async()=>{
@@ -326,6 +464,11 @@ async function save(){
   $('#cam').onchange=e=>setCam(e.target.value);
   $('#mute').onclick=()=>{vid.muted=!vid.muted; $('#mute').classList.toggle('on',vid.muted);};
   $('#bRef').onclick=()=>{showRef=!showRef; $('#bRef').classList.toggle('on',showRef); draw();};
+  $('#bAllT').onclick=()=>{showAllT=!showAllT; $('#bAllT').classList.toggle('on',showAllT); draw();};
+  $('#mSeq').onclick=()=>setMode('seq');
+  $('#mDrag').onclick=()=>setMode('drag');
+  $('#gap').onchange=e=>{gap=parseFloat(e.target.value); hintDraw();};
+  $('#fit').onclick=fitExit;
   $('#bTrail').onclick=()=>{showTrail=!showTrail; $('#bTrail').classList.toggle('on',showTrail); draw();};
   $('#bAll').onclick=()=>{showAll=!showAll; $('#bAll').classList.toggle('on',showAll); draw();};
   $('#save').onclick=save;
