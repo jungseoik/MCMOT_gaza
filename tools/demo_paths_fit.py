@@ -136,6 +136,40 @@ def apply_pace(ks, table, t_pass, mpp, v_out):
     return out[keep:], keep
 
 
+def match_rate(sid: str, floor: str | None, people: dict, r_m=3.0, w_s=2.0):
+    """**찍은 (시각, 자리)가 실측 dot 와 맞나** — 이게 싱크의 실측 척도다.
+
+    각 키프레임에 대해 "그 시각 ±{w_s}초에 {r_m}m 안에 실측 dot 가 있었나"를 센다.
+    시각을 손볼 때마다 이 수치로 확인한다 — 눈으로는 좋아졌는지 나빠졌는지
+    못 가린다(실측: 걸음 리듬을 씌웠더니 03 CBS 가 80% → 75% 로 나빠졌다).
+    """
+    import math as _m
+
+    from system.metrics.replay import run_replay
+
+    db, fl = find_session(sid, floor)
+    meta = recorder.load_meta(db)
+    t0 = float(meta["alarm_ts"])
+    site = SiteConfig.model_validate(meta["site_view"])
+    mpp = site.map.resolve_m_per_px()
+    gh = [g["key"] for g in dghost.load(sid)]
+    _, _, frames, _ = run_replay(db, {"exclude_tracks": gh} if gh else {}, fps=5.0)
+    R = r_m / mpp
+    hit = tot = 0
+    ends = []
+    for ks in people.values():
+        if ks:
+            ends.append(ks[-1]["t"])
+        for q in ks:
+            tot += 1
+            hit += any(_m.hypot(o["x"] - q["x"], o["y"] - q["y"]) < R
+                       for fr in frames if abs(fr["ts"] - t0 - q["t"]) <= w_s
+                       for o in fr["objects"])
+    if not tot:
+        return None
+    return 100 * hit / tot, hit, tot, min(ends), max(ends)
+
+
 def passage_times(sid: str, floor: str | None):
     """**출구별** 통과 시각. 출구가 둘이면 한 줄로 섞으면 안 된다 — 왼쪽 문으로
     나간 사람에게 오른쪽 문 통과 시각을 주게 된다(04 SEI 가 그렇다)."""
@@ -168,6 +202,14 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="파일에 반영(원본은 .bak)")
     ap.add_argument("--no-pace", action="store_true",
                     help="실측 걸음 리듬을 쓰지 않고 단순 비례로만 늘인다")
+    ap.add_argument("--check", action="store_true",
+                    help="**실측 dot 와 얼마나 맞나** 만 재 본다(고치지 않는다). "
+                         "찍은 시각이 이미 맞는지, 통과 시각에 늘이는 게 나은지 "
+                         "이 수치로 고른다.")
+    ap.add_argument("--keep-time", action="store_true",
+                    help="**찍은 시각을 그대로 둔다.** 퇴장만 각자의 마지막 시각으로 "
+                         "박는다. 편집기에서 실측에 맞춰 찍었다면 그 시각이 이미 "
+                         "정답이다 — 통과 시각에 억지로 늘이면 오히려 어긋난다.")
     a = ap.parse_args()
 
     p = dp.path(a.session)
@@ -176,6 +218,16 @@ def main() -> int:
         return 1
     raw = json.loads(p.read_text(encoding="utf-8"))
     people = raw.get("people") or {}
+    if a.check:
+        for lab, f in (("현재", p), ("원본(.bak)", p.with_suffix(".json.bak"))):
+            if not f.is_file():
+                continue
+            d = json.loads(f.read_text(encoding="utf-8")).get("people") or {}
+            r = match_rate(a.session, a.floor, d)
+            if r:
+                print(f"  {lab:12} 실측 일치 {r[0]:3.0f}% ({r[1]}/{r[2]}) · "
+                      f"끝 {r[3]:.0f}~{r[4]:.0f}s")
+        return 0
     want, floor = passage_times(a.session, a.floor)
     for i, v in sorted(want.items()):
         print(f"실제 통과 시각 exit-{i}: {v}")
@@ -204,6 +256,24 @@ def main() -> int:
 
     exit_at = dict(raw.get("exit_at") or {})
     print(f"\n{'':5} {'문':>2} {'찍은 끝':>6} {'→통과':>6} {'늘임':>6} {'속도':>13}")
+    if a.keep_time:
+        # 찍은 시각이 곧 싱크다. 실측 dot 와의 일치율로 재 보면 손대는 쪽이
+        # 오히려 나쁠 때가 있다(실측: 03 CBS 80% → 75%).
+        exit_at = {}
+        print(f"\n{'':5} {'끝s':>6} {'점':>4}  (시각 그대로, 퇴장만 박음)")
+        for pid in sorted(people, key=lambda k: people[k][-1]["t"]):
+            ks = people[pid]
+            exit_at[pid] = float(ks[-1]["t"])
+            print(f"{pid:5} {ks[-1]['t']:6.1f} {len(ks):4}")
+        raw["exit_at"] = exit_at
+        if a.apply:
+            shutil.copy2(p, p.with_suffix(".json.bak2"))
+            p.write_text(json.dumps(raw, ensure_ascii=False, indent=1), encoding="utf-8")
+            print(f"\n반영 → {p.relative_to(ROOT)}")
+        else:
+            print("\n--apply 를 붙이면 파일에 반영합니다")
+        return 0
+
     table = None if a.no_pace else pace_table(a.session, floor)
     if table:
         print(f"\n실측 걸음 리듬: 표본 {table['n']} · 남은거리 {table['r'][-1]:.0f}m 까지 "
