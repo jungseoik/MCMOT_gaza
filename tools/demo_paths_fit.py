@@ -490,6 +490,83 @@ def dt_seg(q, e, mpp):
     return dtk._seg_dist((q["x"], q["y"]), e[0], e[1]) * mpp
 
 
+def even_speed(people: dict, mpp: float, cap: float = 1.25, rounds: int = 40):
+    """**빨라지는 구간만** 눌러 준다. 느려지는 건 그대로 둔다.
+
+    사람은 일정하게 걷다 느려질 수는 있어도 갑자기 빨라지지 않는다. 그런데 손으로
+    찍으면 클릭 간격이 고르지 않아 어떤 구간만 튄다(실측: 중앙 0.5 m/s 인데
+    최대 2.2). 자리는 그대로 두고 **시간만** 옮긴다 — 빠른 구간에 시간을 더 주고
+    그만큼 느린 구간에서 뺀다. 양 끝과 총 시간은 건드리지 않는다.
+    """
+    import numpy as np
+    fixed = 0
+    for pid, ks in people.items():
+        if len(ks) < 4:
+            continue
+        d = np.array([math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
+                      for a, b in zip(ks, ks[1:])])
+        dt = np.array([b["t"] - a["t"] for a, b in zip(ks, ks[1:])], float)
+        dt = np.maximum(dt, 0.05)
+        total = dt.sum()
+        v_max = float(np.median(d / dt)) * cap
+        if v_max <= 0:
+            continue
+        for _ in range(rounds):
+            need = d / v_max
+            over = need > dt + 1e-6
+            if not over.any():
+                break
+            short = float((need[over] - dt[over]).sum())
+            dt[over] = need[over]
+            slack = dt.copy()
+            slack[over] = 0.0
+            room = float(np.maximum(slack - 0.1, 0).sum())
+            if room <= 1e-6:
+                break
+            take = np.minimum(np.maximum(slack - 0.1, 0) * (short / room),
+                              np.maximum(slack - 0.1, 0))
+            dt = dt - take
+        dt = dt * (total / dt.sum())            # 총 시간은 그대로
+        t = ks[0]["t"]
+        for k, step in zip(ks[1:], dt):
+            t += float(step)
+            k["t"] = round(t, 2)
+        fixed += 1
+    return fixed
+
+
+def speed_check(sid: str, floor: str | None, people: dict, jump: float = 1.4):
+    """**빨라지는 구간**을 찾는다.
+
+    사람은 일정하게 걷다 느려질 수는 있어도 갑자기 빨라지지 않는다. 손으로 찍은
+    시각이 성기면 어떤 구간만 튀는데, 눈으로는 잘 안 보인다.
+    """
+    db, fl = find_session(sid, floor)
+    site = SiteConfig.model_validate(recorder.load_meta(db)["site_view"])
+    mpp = site.map.resolve_m_per_px()
+    import numpy as np
+    bad = []
+    for pid, ks in sorted(people.items()):
+        vs = []
+        for a, b in zip(ks, ks[1:]):
+            dtt = b["t"] - a["t"]
+            if dtt <= 0.05:
+                continue
+            vs.append(math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp / dtt)
+        if len(vs) < 3:
+            continue
+        med = float(np.median(vs))
+        hi = [v for v in vs if v > max(0.6, med * jump)]
+        if hi:
+            bad.append(f"{pid}({len(hi)}구간 최대 {max(hi):.1f})")
+        print(f"  {pid:5} 중앙 {med:.2f} m/s · 최대 {max(vs):.2f}"
+              + (f"  ⚠ {len(hi)}구간이 중앙의 {jump}배 초과" if hi else "  ✅"))
+    if bad:
+        print("  빨라지는 구간: " + " · ".join(bad))
+    else:
+        print("  ✅ 갑자기 빨라지는 구간 없음")
+
+
 def passage_times(sid: str, floor: str | None):
     """**출구별** 통과 시각. 출구가 둘이면 한 줄로 섞으면 안 된다 — 왼쪽 문으로
     나간 사람에게 오른쪽 문 통과 시각을 주게 된다(04 SEI 가 그렇다)."""
@@ -529,6 +606,9 @@ def main() -> int:
     ap.add_argument("--formation", action="store_true",
                     help="무리가 **같은 대형으로** 움직이게 한다. 진행 곡선을 무리끼리 "
                          "공유하고, 벌어지는 간격은 실제 통과 시각 차이 그대로.")
+    ap.add_argument("--even-speed", action="store_true",
+                    help="**빨라지는 구간만** 눌러 준다(느려지는 건 그대로). 자리는 "
+                         "두고 시간만 옮긴다 — 총 시간과 양 끝은 그대로.")
     ap.add_argument("--gain", type=float, default=1.0,
                     help="완급 대비. 1=실측 그대로, 2 이상이면 느린 구간이 더 "
                          "느려지고 빠른 구간이 더 빨라진다(평균은 그대로).")
@@ -562,6 +642,7 @@ def main() -> int:
             if r:
                 print(f"  {lab:12} 실측 일치 {r[0]:3.0f}% ({r[1]}/{r[2]}) · "
                       f"끝 {r[3]:.0f}~{r[4]:.0f}s")
+        speed_check(a.session, a.floor, people)
         return 0
     want, floor = passage_times(a.session, a.floor)
     for i, v in sorted(want.items()):
@@ -591,6 +672,12 @@ def main() -> int:
 
     exit_at = dict(raw.get("exit_at") or {})
     print(f"\n{'':5} {'문':>2} {'찍은 끝':>6} {'→통과':>6} {'늘임':>6} {'속도':>13}")
+    if getattr(a, "even_speed", False):
+        n = even_speed(people, SiteConfig.model_validate(
+            recorder.load_meta(find_session(a.session, a.floor)[0])["site_view"]
+        ).map.resolve_m_per_px())
+        print(f"가속 눌러줌: {n}명")
+
     if a.keep_time:
         # 찍은 시각이 곧 싱크다. 실측 dot 와의 일치율로 재 보면 손대는 쪽이
         # 오히려 나쁠 때가 있다(실측: 03 CBS 80% → 75%).

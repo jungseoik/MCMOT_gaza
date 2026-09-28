@@ -42,6 +42,12 @@
   #right{flex:1;display:flex;flex-direction:column;background:#000}
   canvas{position:absolute;left:0;top:0;width:100%;height:100%;cursor:crosshair}
   video{flex:1;width:100%;height:100%;object-fit:contain;background:#000}
+  #grid{flex:1;display:none;grid-gap:2px;background:#000;overflow:hidden}
+  #grid.on{display:grid}
+  #grid video{width:100%;height:100%;object-fit:cover;background:#111;flex:none}
+  #grid .cell{position:relative;overflow:hidden}
+  #grid .cell b{position:absolute;left:4px;top:3px;font-size:10px;color:#fff;
+                background:rgba(0,0,0,.55);padding:1px 5px;border-radius:4px;font-weight:600}
   .camsel{padding:6px 8px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;gap:6px}
   .camsel select{width:auto;flex:1}
   #bar{flex:none;background:var(--panel);border-top:1px solid var(--line);padding:9px 14px}
@@ -91,6 +97,7 @@
       <button id="mSeq" class="on">차례 찍기</button>
       <button id="mDrag">쭉 긋기</button>
       <button id="mPick">트랙 고르기</button>
+      <button id="mSnap">무리 스냅샷</button>
       <select id="gap" style="width:92px">
         <option value="0.5">0.5초 간격</option>
         <option value="1" selected>1초 간격</option>
@@ -138,6 +145,10 @@
       사람들이 거기에 가장 많이 있던 시각"을 찾아 시각을 정하고 자리도 무리
       중심으로 당긴다. 시각은 앞 점보다 뒤에서만 찾는다.<br>
       <b>자리만</b> — 시각은 내가 정한 대로 두고 자리만 실측으로 당긴다.<br>
+      <b>무리 스냅샷</b> — <b>지금 이 순간 10명이 어디 있나</b>를 한 번에 찍는다.
+      켜고 도면을 10번 클릭하면 P01~P10 에 그 시각 점이 하나씩 박힌다. 시간을
+      옮겨 또 10번 — 뭉치는 대형이 시간마다 그대로 남는다. 우측 [전체 그리드]로
+      그때 사람들이 어디 있는지 보면서 찍으면 된다.<br>
       <b>트랙 가져오기</b> — 배경의 트랙을 클릭해 고르고 <kbd>G</kbd>. 그 트랙이
       실제로 움직인 <b>시각 그대로</b> 키프레임이 된다(싱크가 저절로 맞는다).<br>
       휠 확대 · 오른쪽 끌기 이동 · <kbd>F</kbd> 화면 맞춤<br>
@@ -152,10 +163,12 @@
     <div class="pane" id="left"><canvas id="cv"></canvas><div id="status"></div></div>
     <div class="pane" id="right">
       <div class="camsel">
+        <button id="gOne" class="on">한 대</button>
+        <button id="gAll">전체 그리드</button>
         <select id="cam"></select>
-        <button id="mute" class="on">음소거</button>
       </div>
       <video id="vid" preload="auto" muted playsinline></video>
+      <div id="grid"></div>
     </div>
   </div>
   <div id="bar">
@@ -181,6 +194,7 @@ let S=null, PATHS={}, EXITAT={}, cur='P01', t=0, playing=false, N=10;
 let showRef=true, showTrail=true, showAll=true, showAllT=true, dirty=false;
 let mode='seq', gap=1.0, ALLT=null, drag=null, EXITWANT={};
 let colorBy='id', showLab=true, TRK=null, selTrk=null, pan=null;
+let snapN=0, gridOn=false, GV=[];
 let mapImg=null, k=1, ox=0, oy=0;
 const COL=['#ef4444','#f59e0b','#eab308','#84cc16','#22c55e',
            '#14b8a6','#3b82f6','#8b5cf6','#d946ef','#f43f5e'];
@@ -388,6 +402,8 @@ function setMode(m){mode=m; drag=null;
   $('#mSeq').classList.toggle('on',m==='seq');
   $('#mDrag').classList.toggle('on',m==='drag');
   $('#mPick').classList.toggle('on',m==='pick');
+  $('#mSnap').classList.toggle('on',m==='snap');
+  if(m==='snap') snapN=0;
   cv.style.cursor=m==='drag'?'cell':(m==='pick'?'pointer':'crosshair');
   hintDraw(); draw();}
 function setColorBy(c){colorBy=c;
@@ -401,6 +417,8 @@ function hintDraw(){
   $('#drawHint').innerHTML=mode==='seq'
     ? `다음 점은 <b>${nt.toFixed(1)}s</b> 에 찍힌다 (${gap}초씩)`
     : mode==='drag' ? `끌면 ${gap}초 간격으로 점이 박힌다`
+    : mode==='snap' ? `<b>${t.toFixed(1)}s</b> 스냅샷 — 다음은 `
+        + `<b style="color:${COL[snapN]}">${pid(snapN)}</b> (${snapN+1}/${N})`
     : `배경의 트랙을 클릭해 고르고 <kbd>G</kbd>`;
 }
 
@@ -409,7 +427,7 @@ function setT(v,seek){
   t=Math.max(0,Math.min(S?S.t_end:0,v));
   $('#time').textContent=`${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}.${Math.floor(t*10)%10}`;
   $('#scrub').value=S&&S.t_end?Math.round(t/S.t_end*1000):0;
-  if(seek&&vid.src&&Math.abs(vid.currentTime-t)>0.25) vid.currentTime=t;
+  if(seek) syncVideo(true);
   draw();
 }
 let raf=null,last=0;
@@ -417,15 +435,18 @@ function loop(ts){
   if(!playing) return;
   const dt=(ts-last)/1000; last=ts;
   setT(t+dt*parseFloat($('#rate').value), false);
-  if(vid.src&&Math.abs(vid.currentTime-t)>0.4) vid.currentTime=t;
+  syncVideo(false);
   if(t>=S.t_end) return setPlay(false);
   raf=requestAnimationFrame(loop);
 }
 function setPlay(v){
   playing=v; $('#play').textContent=v?'❚❚':'▶'; $('#play').classList.toggle('on',v);
-  if(v){last=performance.now(); vid.playbackRate=parseFloat($('#rate').value);
-    vid.currentTime=t; vid.play().catch(()=>{}); raf=requestAnimationFrame(loop);}
-  else {cancelAnimationFrame(raf); vid.pause();}
+  const vs = gridOn ? GV : [vid];
+  if(v){last=performance.now();
+    vs.forEach(x=>{ x.playbackRate=parseFloat($('#rate').value);
+                    try{x.currentTime=t;}catch(e){} x.play().catch(()=>{}); });
+    raf=requestAnimationFrame(loop);}
+  else {cancelAnimationFrame(raf); vs.forEach(x=>x.pause());}
 }
 
 /* ---------- 입력 ---------- */
@@ -492,6 +513,18 @@ cv.addEventListener('mousedown',ev=>{
     selTrk=pickTrack(toMap(ev)); trkInfo(); draw(); return;
   }
   if(mode==='pick'){ selTrk=pickTrack(toMap(ev)); trkInfo(); draw(); return; }
+  if(mode==='snap'){                    // 무리 스냅샷 — 이 순간 10명을 차례로
+    const p2=toMap(ev);
+    const pid2=pid(snapN);
+    const ks=PATHS[pid2]||(PATHS[pid2]=[]);
+    const i=ks.findIndex(q=>Math.abs(q.t-t)<0.05);
+    const key={t:+t.toFixed(2), x:Math.round(p2[0]), y:Math.round(p2[1])};
+    if(i>=0) ks[i]=key; else {ks.push(key); ks.sort((a,b)=>a.t-b.t);}
+    snapN=(snapN+1)%N;
+    if(snapN===0) toast(`${t.toFixed(1)}s 스냅샷 완료 — 시간을 옮겨 다음 대형을`);
+    setDirty(true); renderIds(); hintDraw(); draw();
+    return;
+  }
   if(mode==='drag'){ drag=[toMap(ev)]; return; }
   addKey(toMap(ev), nextT());
   setDirty(true); renderIds(); draw();
@@ -658,12 +691,43 @@ async function loadSession(sid){
   S.cams.forEach(c=>{const o=document.createElement('option');
     o.value=c; o.textContent=c.split('_').pop(); cs.appendChild(o);});
   if(S.cams.length) setCam(S.cams[0]);
+  if(gridOn) buildGrid();
   mapImg=await new Promise(res=>{const im=new Image();
     im.onload=()=>res(im); im.onerror=()=>res(null); im.src='/img/map/'+S.floor;});
   buildTracks(); fit(); bakeAll(); selTrk=null; trkInfo();
   setDirty(false); renderIds(); hintDraw(); setT(0,true);
 }
 function setCam(c){vid.src=`/video/${S.id}/${c}`; vid.currentTime=t;}
+function setGrid(on){
+  gridOn=on;
+  $('#gOne').classList.toggle('on',!on);
+  $('#gAll').classList.toggle('on',on);
+  $('#grid').classList.toggle('on',on);
+  vid.style.display=on?'none':'';
+  $('#cam').style.display=on?'none':'';
+  if(on) buildGrid(); else {GV.forEach(v=>{v.pause(); v.src='';}); GV=[];}
+  syncVideo(true);
+}
+function buildGrid(){
+  const g=$('#grid'); g.innerHTML=''; GV=[];
+  const n=S.cams.length, cols=Math.ceil(Math.sqrt(n));
+  g.style.gridTemplateColumns=`repeat(${cols},1fr)`;
+  g.style.gridTemplateRows=`repeat(${Math.ceil(n/cols)},1fr)`;
+  for(const c of S.cams){
+    const d=document.createElement('div'); d.className='cell';
+    const v=document.createElement('video');
+    v.muted=true; v.playsInline=true; v.preload='auto';
+    v.src=`/video/${S.id}/${c}`;
+    const b=document.createElement('b'); b.textContent=c.split('_').pop();
+    d.appendChild(v); d.appendChild(b); g.appendChild(d); GV.push(v);
+  }
+}
+function syncVideo(force){
+  const vs = gridOn ? GV : (vid.src ? [vid] : []);
+  for(const v of vs){
+    if(force || Math.abs(v.currentTime-t)>0.4){ try{ v.currentTime=t; }catch(e){} }
+  }
+}
 
 async function save(){
   const r=await fetch('/api/paths/'+S.id,{method:'PUT',headers:{'Content-Type':'application/json'},
@@ -686,14 +750,17 @@ async function save(){
   sel.onchange=()=>loadSession(sel.value);
   $('#play').onclick=()=>setPlay(!playing);
   $('#scrub').oninput=e=>{setPlay(false); setT(S.t_end*e.target.value/1000,true);};
-  $('#rate').onchange=()=>{vid.playbackRate=parseFloat($('#rate').value);};
+  $('#rate').onchange=()=>{(gridOn?GV:[vid]).forEach(x=>x.playbackRate=parseFloat($('#rate').value));};
   $('#cam').onchange=e=>setCam(e.target.value);
-  $('#mute').onclick=()=>{vid.muted=!vid.muted; $('#mute').classList.toggle('on',vid.muted);};
+
   $('#bRef').onclick=()=>{showRef=!showRef; $('#bRef').classList.toggle('on',showRef); draw();};
   $('#bAllT').onclick=()=>{showAllT=!showAllT; $('#bAllT').classList.toggle('on',showAllT); draw();};
   $('#mSeq').onclick=()=>setMode('seq');
   $('#mDrag').onclick=()=>setMode('drag');
   $('#mPick').onclick=()=>setMode('pick');
+  $('#mSnap').onclick=()=>setMode('snap');
+  $('#gOne').onclick=()=>setGrid(false);
+  $('#gAll').onclick=()=>setGrid(true);
   $('#cById').onclick=()=>setColorBy('id');
   $('#cByT').onclick=()=>setColorBy('t');
   $('#bLab').onclick=()=>{showLab=!showLab; $('#bLab').classList.toggle('on',showLab); draw();};
