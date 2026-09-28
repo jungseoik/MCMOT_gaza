@@ -202,6 +202,42 @@ def _wall_check(sid: str, people: dict) -> list[str]:
     return bad
 
 
+def jams_file(sid: str) -> Path:
+    return ANN / f"jams_{sid}.json"
+
+
+@app.get("/api/jams/{sid}")
+def get_jams(sid: str):
+    """**병목** — 어디서 · 몇 초부터 몇 초까지 · 몇 명이 뭉치나."""
+    _session(sid)
+    p = jams_file(sid)
+    if p.is_file():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {"session_id": sid, "jams": []}
+
+
+@app.put("/api/jams/{sid}")
+def put_jams(sid: str, body: dict):
+    _session(sid)
+    out = []
+    for j in (body.get("jams") or []):
+        t0, t1 = float(j["t0"]), float(j["t1"])
+        if t1 <= t0:
+            continue
+        out.append({"t0": round(t0, 1), "t1": round(t1, 1),
+                    "x": round(float(j["x"]), 1), "y": round(float(j["y"]), 1),
+                    "r": round(float(j.get("r", 2.5)), 1),
+                    "n": int(j.get("n", 10))})
+    out.sort(key=lambda z: z["t0"])
+    data = {"session_id": sid, "jams": out}
+    jams_file(sid).write_text(json.dumps(data, ensure_ascii=False, indent=1),
+                              encoding="utf-8")
+    return {"saved": len(out), "path": str(jams_file(sid).relative_to(ROOT))}
+
+
 @app.get("/img/map/{floor}")
 def img_map(floor: str):
     name = "map.png" if floor == "default" else f"map_{floor}.png"

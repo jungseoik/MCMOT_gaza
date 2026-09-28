@@ -35,6 +35,11 @@
   .pid i{width:14px;height:14px;border-radius:4px;flex:none}
   .pid span{flex:1;font-weight:600}
   .pid em{font-style:normal;color:var(--dim);font-size:11px}
+  #jams{margin-top:8px}
+  .jam{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;font-size:12px}
+  .jam:hover{background:#22222c}
+  .jam span{flex:1;color:var(--fg)}
+  .jam button{padding:1px 7px;font-size:11px;color:#f87171;border-color:transparent;background:none}
   main{flex:1;display:flex;flex-direction:column;overflow:hidden}
   .panes{flex:1;display:flex;min-height:0}
   .pane{position:relative;overflow:hidden}
@@ -117,6 +122,29 @@
   </div>
 
   <div class="sec">
+    <b>병목 — 어디서 얼마나 뭉치나</b>
+    <div class="row">
+      <button id="jamAdd">+ 여기서 시작</button>
+      <button id="jamEnd">여기서 끝</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <select id="jamN" style="width:88px">
+        <option value="10" selected>10명</option>
+        <option value="8">8명</option>
+        <option value="6">6명</option>
+        <option value="4">4명</option>
+      </select>
+      <select id="jamR" style="width:88px">
+        <option value="1.5">반경 1.5m</option>
+        <option value="2.5" selected>반경 2.5m</option>
+        <option value="4">반경 4m</option>
+      </select>
+    </div>
+    <div class="hint" id="jamHint"></div>
+    <div id="jams"></div>
+  </div>
+
+  <div class="sec">
     <b>보기</b>
     <div class="row">
       <button id="bTrail" class="on">지나온 자취</button>
@@ -191,6 +219,7 @@ let showRef=true, showTrail=true, showAll=true, showAllT=true, dirty=false;
 let mode='seq', gap=1.0, ALLT=null, drag=null, EXITWANT={};
 let colorBy='id', showLab=true, TRK=null, selTrk=null, pan=null;
 let snapN=0, gridOn=false, GV=[];
+let JAMS=[], jamNew=null;
 let mapImg=null, k=1, ox=0, oy=0;
 const COL=['#ef4444','#f59e0b','#eab308','#84cc16','#22c55e',
            '#14b8a6','#3b82f6','#8b5cf6','#d946ef','#f43f5e'];
@@ -343,6 +372,26 @@ function draw(){
     ctx.beginPath(); ctx.arc(s[0],s[1],4,0,7);
     ctx.fillStyle='rgba(150,150,165,.75)'; ctx.fill();}
 
+  for(const j of JAMS){                       // 병목 — 지금 열려 있으면 진하게
+    const on = t>=j.t0 && t<=j.t1;
+    const c=toScreen(j.x,j.y), rr=(j.r/S.m_per_px)*k;
+    ctx.beginPath(); ctx.arc(c[0],c[1],rr,0,7);
+    ctx.fillStyle=on?'rgba(239,68,68,.22)':'rgba(239,68,68,.07)'; ctx.fill();
+    ctx.strokeStyle=on?'#ef4444':'rgba(239,68,68,.45)';
+    ctx.lineWidth=on?2.5:1.2; ctx.setLineDash(on?[]:[5,4]); ctx.stroke();
+    ctx.setLineDash([]); ctx.lineWidth=1.5;
+    ctx.font='700 11px sans-serif'; ctx.fillStyle=on?'#fff':'rgba(239,68,68,.8)';
+    ctx.strokeStyle='rgba(0,0,0,.8)'; ctx.lineWidth=3;
+    const lab=`${j.t0.toFixed(0)}~${j.t1.toFixed(0)}s ${j.n}명`;
+    ctx.strokeText(lab,c[0]-rr,c[1]-rr-5); ctx.fillText(lab,c[0]-rr,c[1]-rr-5);
+    ctx.lineWidth=1.5;
+  }
+  if(jamNew){
+    const c=toScreen(jamNew.x,jamNew.y), rr=(jamNew.r/S.m_per_px)*k;
+    ctx.beginPath(); ctx.arc(c[0],c[1],rr,0,7);
+    ctx.strokeStyle='#fbbf24'; ctx.lineWidth=2.5; ctx.setLineDash([6,4]);
+    ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth=1.5;
+  }
   for(let i=0;i<N;i++){
     const p=pid(i); if(!showAll && p!==cur) continue;
     const ks=PATHS[p]; if(!ks||!ks.length) continue;
@@ -399,6 +448,7 @@ function setMode(m){mode=m; drag=null;
   $('#mDrag').classList.toggle('on',m==='drag');
   $('#mPick').classList.toggle('on',m==='pick');
   $('#mSnap').classList.toggle('on',m==='snap');
+  $('#jamAdd').classList.toggle('on',m==='jam');
   if(m==='snap') snapN=0;
   cv.style.cursor=m==='drag'?'cell':(m==='pick'?'pointer':'crosshair');
   hintDraw(); draw();}
@@ -509,6 +559,12 @@ cv.addEventListener('mousedown',ev=>{
     selTrk=pickTrack(toMap(ev)); trkInfo(); draw(); return;
   }
   if(mode==='pick'){ selTrk=pickTrack(toMap(ev)); trkInfo(); draw(); return; }
+  if(mode==='jam'){                      // 병목 자리 찍기
+    const q=toMap(ev);
+    jamNew={t0:+t.toFixed(1), x:Math.round(q[0]), y:Math.round(q[1]),
+            r:parseFloat($('#jamR').value), n:parseInt($('#jamN').value,10)};
+    jamHint(); draw(); return;
+  }
   if(mode==='snap'){                    // 무리 스냅샷 — 이 순간 10명을 차례로
     const p2=toMap(ev);
     const pid2=pid(snapN);
@@ -680,6 +736,8 @@ async function loadSession(sid){
   S=await (await fetch('/api/session/'+sid)).json();
   const pj=await (await fetch('/api/paths/'+sid)).json();
   PATHS=pj.people||{}; EXITAT=pj.exit_at||{};
+  JAMS=((await (await fetch('/api/jams/'+sid)).json()).jams)||[];
+  jamNew=null;
   const px=Object.entries(S.passes||{}).map(([k,v])=>`${k} ${v.length}명`).join(' · ');
   $('#sessInfo').innerHTML=`${S.floor} · 길이 ${S.t_end.toFixed(0)}s · 출구 통과 ${px}`
     +`<br>통과 시각 ${Object.values(S.passes||{}).flat().sort((a,b)=>a-b).map(v=>v.toFixed(0)).join('·')}s`;
@@ -728,15 +786,47 @@ function syncVideo(force){
   }
 }
 
+function jamHint(){
+  $('#jamHint').innerHTML = jamNew
+    ? `<b style="color:#fbbf24">${jamNew.t0.toFixed(1)}s 부터</b> 잡는 중 — `
+      + `시간을 옮기고 <b>[여기서 끝]</b>`
+    : `[+ 여기서 시작] 을 누르고 도면에서 <b>뭉치는 자리</b>를 클릭. `
+      + `시간을 옮겨 [여기서 끝].`;
+}
+function renderJams(){
+  const el=$('#jams');
+  if(!JAMS.length){ el.innerHTML=''; jamHint(); return; }
+  el.innerHTML='';
+  JAMS.forEach((j,i)=>{
+    const d=document.createElement('div'); d.className='jam';
+    d.innerHTML=`<i class="sw" style="background:#ef4444;width:10px;height:10px;`
+      +`border-radius:3px"></i><span>${j.t0.toFixed(0)}~${j.t1.toFixed(0)}s · ${j.n}명 · `
+      +`반경 ${j.r}m</span>`;
+    const b=document.createElement('button'); b.textContent='삭제';
+    b.onclick=()=>{JAMS.splice(i,1); setDirty(true); renderJams(); draw();};
+    d.appendChild(b);
+    d.onclick=e=>{ if(e.target.tagName!=='BUTTON'){ setPlay(false); setT(j.t0,true); } };
+    el.appendChild(d);
+  });
+  jamHint();
+}
+async function saveJams(){
+  const r=await fetch('/api/jams/'+S.id,{method:'PUT',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({jams:JAMS})});
+  return r.ok ? (await r.json()) : null;
+}
+
 async function save(){
   const r=await fetch('/api/paths/'+S.id,{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({people:PATHS, exit_at:EXITAT})});
   if(!r.ok){toast('저장 실패',true); return;}
+  const jm=await saveJams();
   const j=await r.json(); setDirty(false);
   if(j.warn && j.warn.length){
     toast(`저장했지만 ⚠ 벽·장애물 통과: ${j.warn.join(', ')}`, true);
   } else {
-    toast(`${j.saved}명 · 키프레임 ${j.keys}개 저장 · 벽 통과 없음 ✅`);
+    toast(`${j.saved}명 · 키프레임 ${j.keys}개`
+          + (jm ? ` · 병목 ${jm.saved}개` : '') + ` 저장 ✅`);
   }
 }
 
@@ -758,6 +848,14 @@ async function save(){
   $('#mDrag').onclick=()=>setMode('drag');
   $('#mPick').onclick=()=>setMode('pick');
   $('#mSnap').onclick=()=>setMode('snap');
+  $('#jamAdd').onclick=()=>{ setMode('jam'); jamNew=null; jamHint(); toast('도면에서 뭉치는 자리를 클릭'); };
+  $('#jamEnd').onclick=()=>{
+    if(!jamNew) return toast('먼저 [+ 여기서 시작] 으로 자리를 찍으세요',true);
+    if(t<=jamNew.t0) return toast('끝 시각이 시작보다 빨라요',true);
+    JAMS.push({...jamNew, t1:+t.toFixed(1)}); JAMS.sort((a,b)=>a.t0-b.t0);
+    jamNew=null; setMode('seq'); setDirty(true); renderJams(); draw();
+    toast(`병목 ${JAMS.length}개`);
+  };
   $('#gOne').onclick=()=>setGrid(false);
   $('#gAll').onclick=()=>setGrid(true);
   $('#cById').onclick=()=>setColorBy('id');

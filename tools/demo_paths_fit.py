@@ -490,6 +490,76 @@ def dt_seg(q, e, mpp):
     return dtk._seg_dist((q["x"], q["y"]), e[0], e[1]) * mpp
 
 
+def load_jams(sid: str):
+    """편집기(:8930)에서 찍어 준 **병목** — 어디서 · 몇 초부터 몇 초까지 · 몇 명."""
+    f = dp.ANN / f"jams_{sid}.json"
+    if not f.is_file():
+        return []
+    try:
+        return json.loads(f.read_text(encoding="utf-8")).get("jams") or []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def apply_jams(people: dict, order, t_pass: dict, mpp: float, jams, v: float,
+               t_start: float = 6.0):
+    """**찍어 준 병목대로** 시각을 매긴다.
+
+    "어디서 몇 초부터 몇 초까지 몇 명이 뭉치나"만 있으면 나머지는 정해진다 —
+    병목 사이는 **일정한 속도로** 걷고, 병목 안에서는 선다. 걷는 속도를 이쪽에서
+    추정할 필요가 없다(그 추정이 계속 틀렸다).
+
+    한 사람의 시간표는 이렇게 짜인다.
+        0 ~ t_start        시작 자리에서 기다린다
+        ~ 첫 병목          걸어간다
+        병목 t0~t1         선다(그 자리 반경 안에서 조금 흩어져)
+        다음 병목까지      또 걸어간다
+        마지막 ~ 통과 시각  걸어 나간다
+    """
+    import numpy as np
+    rows = []
+    for idx, (_k, pid) in enumerate(sorted(order, key=lambda z: t_pass[z[1]])):
+        ks = people[pid]
+        arc = np.concatenate([[0.0], np.cumsum(
+            [math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
+             for a, b in zip(ks, ks[1:])])])
+        L = arc[-1] or 1.0
+        mine = [j for j in jams if idx < j.get("n", 10)]
+        # 병목마다 **경로에서 가장 가까운 지점**을 찾는다 — 거기서 선다
+        stops = []
+        for j in mine:
+            d = [math.hypot(q["x"] - j["x"], q["y"] - j["y"]) * mpp for q in ks]
+            i = int(np.argmin(d))
+            if d[i] > j["r"] * 3:
+                continue                      # 그 사람 길에서 먼 병목은 건너뛴다
+            stops.append((arc[i], j["t0"], j["t1"], i))
+        stops.sort()
+        # 구간별로 시각을 준다 — 병목 사이는 등속
+        pts = [(0.0, t_start)]
+        for a_m, j0, j1, _i in stops:
+            pts.append((a_m, float(j0)))
+            pts.append((a_m + 1e-6, float(j1)))
+        pts.append((L, float(t_pass[pid])))
+        xs = [q[0] for q in pts]
+        ys = [q[1] for q in pts]
+        for i in range(1, len(ys)):           # 시간은 거꾸로 못 간다
+            ys[i] = max(ys[i], ys[i - 1] + 0.05)
+        for i, a_m in enumerate(arc):
+            ks[i]["t"] = round(float(np.interp(a_m, xs, ys)), 2)
+        ks.insert(0, {"t": 0.0, "x": ks[0]["x"], "y": ks[0]["y"]})
+        for a, b in zip(ks, ks[1:]):
+            b["t"] = max(b["t"], a["t"] + 0.05)
+        people[pid] = ks
+        segs = []
+        for i in range(len(xs) - 1):
+            dd, dt_ = xs[i + 1] - xs[i], ys[i + 1] - ys[i]
+            if dd > 0.3 and dt_ > 0.1:
+                segs.append(dd / dt_)
+        rows.append(f"{pid} 병목 {len(stops)}개 · 걷는속도 "
+                    + "/".join(f"{x:.2f}" for x in segs) + " m/s")
+    return rows
+
+
 def constant_walk(people: dict, order, t_pass: dict, mpp: float, exits,
                   v: float = 0.9, t_start: float = 6.0, door_m: float = 2.5,
                   pass_s: float = 2.0):
@@ -661,6 +731,9 @@ def main() -> int:
     ap.add_argument("--formation", action="store_true",
                     help="무리가 **같은 대형으로** 움직이게 한다. 진행 곡선을 무리끼리 "
                          "공유하고, 벌어지는 간격은 실제 통과 시각 차이 그대로.")
+    ap.add_argument("--jams", action="store_true",
+                    help="편집기(:8930)에서 찍어 준 **병목대로** 시각을 매긴다. "
+                         "병목 사이는 일정한 속도로 걷고 병목 안에서는 선다.")
     ap.add_argument("--walk", type=float, default=0.0,
                     help="**일정 속도로 걷다 문 앞에서 선다**(m/s). 빨라지는 구간이 "
                          "없다. 0.9 쯤이 실측(0.81)에 가깝다.")
@@ -822,7 +895,24 @@ def main() -> int:
         print("\n대형 맞춤: " + " · ".join(notes))
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
-    if a.walk > 0:
+    if a.jams:
+        jm = load_jams(a.session)
+        if not jm:
+            print("찍어 준 병목이 없습니다 — :8930 에서 [+ 여기서 시작] 으로 찍으세요")
+            return 1
+        print("\n찍어 준 병목: " + " · ".join(
+            f"{j['t0']:.0f}~{j['t1']:.0f}s {j['n']}명 반경 {j['r']}m" for j in jm))
+        rows = apply_jams(people, order,
+                          {pid: exit_at[pid] for _, pid in order}, mpp, jm,
+                          v=a.walk or 0.9, t_start=a.walk_start)
+        print("  " + "\n  ".join(rows))
+        for pid in exit_at:
+            exit_at[pid] = float(people[pid][-1]["t"])
+        if not a.even_speed:
+            print("  (병목 사이 구간마다 속도가 달라진다 — `--even-speed` 를 같이 "
+                  "쓰면 튀는 구간을 눌러 준다)")
+
+    if a.walk > 0 and not a.jams:
         rows = constant_walk(people, order,
                              {pid: exit_at[pid] for _, pid in order}, mpp, exits,
                              v=a.walk, t_start=a.walk_start)
