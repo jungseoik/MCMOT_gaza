@@ -236,6 +236,129 @@ def formation(people: dict, order, t_pass: dict, mpp: float):
     return notes
 
 
+def find_pause(sid: str, floor: str | None, win: float = 6.0, thr: float = 0.45):
+    """실측에서 **다들 멈춰 있던 때**를 찾는다.
+
+    03 CBS 각본은 "문 앞 밀집 **2회**"다. 실측을 보면 47%가 멈춰 있고 걷는
+    속도는 0.81 m/s — 그린 동선(0.73)보다 오히려 빠르다. 즉 차이는 속도가
+    아니라 **멈춤**이다. 그 멈춤을 안 넣으면 쉬지 않고 걷는 그림이 되고,
+    그래서 빨라 보인다.
+    """
+    import collections
+
+    import numpy as np
+
+    from system.metrics.replay import run_replay
+
+    db, fl = find_session(sid, floor)
+    meta = recorder.load_meta(db)
+    t0 = float(meta["alarm_ts"])
+    site = SiteConfig.model_validate(meta["site_view"])
+    mpp = site.map.resolve_m_per_px()
+    gh = [g["key"] for g in dghost.load(sid)]
+    _, _, frames, _ = run_replay(db, {"exclude_tracks": gh} if gh else {}, fps=5.0)
+    tr = collections.defaultdict(list)
+    for fr in frames:
+        for o in fr["objects"]:
+            tr[o["gid"]].append((fr["ts"] - t0, o["x"], o["y"]))
+    t_end = max(q[-1][0] for q in tr.values()) if tr else 0
+    best = None
+    for lo in np.arange(0, max(0.1, t_end - win), win / 2):
+        n = c = 0
+        for pts in tr.values():
+            for a, b in zip(pts, pts[1:]):
+                if not (lo <= a[0] < lo + win):
+                    continue
+                dtt = b[0] - a[0]
+                if dtt <= 0 or dtt > 0.5:
+                    continue
+                c += 1
+                if math.hypot(b[1] - a[1], b[2] - a[2]) * mpp / dtt >= 0.15:
+                    n += 1
+        if c > 40:
+            r = n / c
+            if r < thr and (best is None or r < best[2]):
+                best = (float(lo), float(lo + win), r)
+    return best
+
+
+def hold_at_door(people: dict, order, t_pass: dict, mpp: float, exits,
+                 enter_m: float = 2.5, walk_s: float = 3.0,
+                 gather_s: float = 3.0, step_s: float = 0.2, pause=None):
+    """문 앞에서 **잠깐 멈춰 밀집**하게 한다 — 병목이 눈에 보이게.
+
+    실측이 그렇다: 문 앞 5m 안에 42~44초에 몰렸다가 44~49초에 **차례로** 빠져
+    나간다(03 CBS). 병목 폴리곤 안 체류도 3.0~3.9초다. 그런데 통과 시각까지
+    고르게 진행시키면 다들 흘러가듯 지나가 **병목이 안 보인다**.
+
+    그래서 셋으로 나눠 시각을 준다.
+      ① 접근  — 출발 ~ 문 앞 {enter_m}m 까지. 모두 비슷한 때 도착한다
+      ② 대기  — 거기서 **자기 통과 시각 {walk_s}초 전까지 멈춘다.** 먼저 도착한
+                 사람일수록 오래 서 있다 = 밀집
+      ③ 통과  — 마지막 {walk_s}초에 문을 지난다
+    """
+    import numpy as np
+    seq = sorted(order, key=lambda z: t_pass[z[1]])
+    t_min = min(t_pass[pid] for _, pid in seq)
+    notes = []
+    for j, (_k, pid) in enumerate(seq):
+        ks = people[pid]
+        d = [min(dt_seg(q, e, mpp) for e in exits) for q in ks]
+        i_in = next((i for i, v in enumerate(d) if v <= enter_m), None)
+        if i_in is None or i_in < 2:
+            continue
+        t_a = ks[0]["t"]
+        t_go = t_pass[pid] - walk_s                    # 문을 향해 나서는 순간
+        t_in = min(t_go, t_min - gather_s + j * step_s)  # 문 앞 도착
+        t_in = max(t_in, t_a + 1.0)
+        # ① 접근 — 원래 걸음 비율을 지키며 t_in 까지.
+        #    가는 길에 **다 같이 멈춰 있던 때**(pause)가 있으면 그만큼 비워 둔다.
+        #    그래야 나머지 구간을 실측 걷는 속도로 갈 수 있다.
+        arc = np.concatenate([[0.0], np.cumsum(
+            [math.hypot(b["x"] - a["x"], b["y"] - a["y"])
+             for a, b in zip(ks[:i_in + 1], ks[1:i_in + 1])])])
+        L = arc[-1] or 1.0
+        pa, pb = pause if pause else (0.0, 0.0)
+        P = max(0.0, min(pb, t_in) - max(pa, t_a)) if pause else 0.0
+        walkable = max(1.0, (t_in - t_a) - P)
+        for i in range(i_in + 1):
+            w = t_a + walkable * arc[i] / L
+            ks[i]["t"] = round(w + P if (P > 0 and w >= pa) else w, 2)
+        if P > 0.5:
+            # **같은 자리에 두 점**을 박아야 진짜 멈춘다. 시각만 벌려 놓으면
+            # 사이를 보간해 '느리게 걷는' 그림이 된다(실측: 멈춤 2%).
+            fr = max(0.0, min(1.0, (pa - t_a) / walkable))
+            d_at = fr * L
+            k = int(np.searchsorted(arc, d_at))
+            k = max(1, min(k, i_in))
+            a0, b0 = ks[k - 1], ks[k]
+            span = (arc[k] - arc[k - 1]) or 1.0
+            g = (d_at - arc[k - 1]) / span
+            px = a0["x"] + (b0["x"] - a0["x"]) * g
+            py = a0["y"] + (b0["y"] - a0["y"]) * g
+            stop = [{"t": round(pa, 2), "x": round(px, 1), "y": round(py, 1)},
+                    {"t": round(pb, 2), "x": round(px, 1), "y": round(py, 1)}]
+            ks[k:k] = stop
+            i_in += 2
+        # ②③ 대기 뒤 통과
+        arc2 = np.concatenate([[0.0], np.cumsum(
+            [math.hypot(b["x"] - a["x"], b["y"] - a["y"])
+             for a, b in zip(ks[i_in:], ks[i_in + 1:])])])
+        L2 = arc2[-1] or 1.0
+        for k, i in enumerate(range(i_in, len(ks))):
+            ks[i]["t"] = round(t_go + walk_s * arc2[k] / L2, 2)
+        for a, b in zip(ks, ks[1:]):
+            b["t"] = max(b["t"], a["t"] + 0.05)
+        people[pid] = ks
+        notes.append(f"{pid} 도착 {t_in:.1f}s · 대기 {max(0.0, t_go - t_in):.1f}s")
+    return notes
+
+
+def dt_seg(q, e, mpp):
+    from tools import demo_tracks as dtk
+    return dtk._seg_dist((q["x"], q["y"]), e[0], e[1]) * mpp
+
+
 def passage_times(sid: str, floor: str | None):
     """**출구별** 통과 시각. 출구가 둘이면 한 줄로 섞으면 안 된다 — 왼쪽 문으로
     나간 사람에게 오른쪽 문 통과 시각을 주게 된다(04 SEI 가 그렇다)."""
@@ -275,6 +398,12 @@ def main() -> int:
     ap.add_argument("--formation", action="store_true",
                     help="무리가 **같은 대형으로** 움직이게 한다. 진행 곡선을 무리끼리 "
                          "공유하고, 벌어지는 간격은 실제 통과 시각 차이 그대로.")
+    ap.add_argument("--pause", action="store_true",
+                    help="실측에서 **다들 멈춰 있던 때**를 찾아 그만큼 멈춰 세운다. "
+                         "속도가 아니라 멈춤이 빠져서 빨라 보이는 경우에 쓴다.")
+    ap.add_argument("--hold", action="store_true",
+                    help="문 앞에서 **잠깐 멈춰 밀집**하게 한다 — 먼저 도착한 사람이 "
+                         "자기 통과 시각까지 서 있다가 차례로 빠져나간다.")
     ap.add_argument("--keep-time", action="store_true",
                     help="**찍은 시각을 그대로 둔다.** 퇴장만 각자의 마지막 시각으로 "
                          "박는다. 편집기에서 실측에 맞춰 찍었다면 그 시각이 이미 "
@@ -406,6 +535,17 @@ def main() -> int:
         notes = formation(people, order,
                           {pid: exit_at[pid] for _, pid in order}, mpp)
         print("\n대형 맞춤: " + " · ".join(notes))
+        for pid in exit_at:
+            exit_at[pid] = float(people[pid][-1]["t"])
+    if a.hold:
+        pz = find_pause(a.session, a.floor) if a.pause else None
+        if pz:
+            print(f"\n실측에서 다들 멈춰 있던 때: {pz[0]:.0f}~{pz[1]:.0f}s "
+                  f"({100 * pz[2]:.0f}% 만 움직임) — 여기서 같이 멈춘다")
+        notes = hold_at_door(people, order,
+                             {pid: exit_at[pid] for _, pid in order}, mpp, exits,
+                             pause=(pz[0], pz[1]) if pz else None)
+        print("\n문 앞 대기:\n  " + "\n  ".join(notes))
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
 
