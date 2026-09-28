@@ -185,6 +185,9 @@ def main() -> int:
     db, floor = find_session(a.session, a.floor)
     meta = recorder.load_meta(db)
     label = drill_label(a.session) or a.session
+    # 인트로 제목은 각본 설명 꼬리를 뗀다 — "01 IDR 권장경로 · 우측 우회 2명"의
+    # 뒷부분은 실측 트랙 이야기지 이 영상이 보여주려는 것이 아니다.
+    intro_title = label.split(" · ")[0]
     print(f"[demo] {a.session} · {floor} · {label} · 주지표 {a.metric}")
 
     # 장애물 표시(:8920 편집기) — 그림에도 얹고, **경로 산출에서는 벽**으로 친다.
@@ -447,12 +450,10 @@ def main() -> int:
             frame = np.full((OH, OW, 3), 20, np.uint8)
             frame[:PANE_H, :LEFT_W] = left
             right = np.full((PANE_H, RIGHT_W, 3), 18, np.uint8)
-            put(right, a.title or label, (40, int(PANE_H * 0.36)), 44, (255, 255, 255), True)
-            put(right, f"재실자별 피난경로 {len(proutes['routes'])}개",
+            put(right, a.title or intro_title, (40, int(PANE_H * 0.36)), 44,
+                (255, 255, 255), True)
+            put(right, "재실자별 피난경로",
                 (40, int(PANE_H * 0.36) + 70), 28, DOT, True)
-            if proutes["stats"]["unreachable"]:
-                put(right, f"경로 산출 불가 {proutes['stats']['unreachable']}명",
-                    (40, int(PANE_H * 0.36) + 112), 22, (150, 150, 150))
             put(right, a.metric, (40, int(PANE_H * 0.36) + 170), 34,
                 ACCENT[a.metric], True)
             put(right, METRIC_DESC[a.metric], (40, int(PANE_H * 0.36) + 216), 24,

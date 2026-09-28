@@ -79,6 +79,24 @@ def _catmull(ks, grid):
     return out
 
 
+def _smooth(xy, w=5):
+    """0.5초 이동평균 — 클릭 위치의 미세한 떨림만 없앤다.
+
+    Catmull-Rom 은 찍은 점을 **지나가므로** 손이 조금 흔들린 자리에서 곡선이
+    잘게 흔들린다. 양 끝은 그대로 둔다(출발 자리와 문은 못 박아야 한다).
+    """
+    a = np.asarray(xy, float)
+    if len(a) < w + 2:
+        return a
+    k = np.ones(w) / w
+    h = w // 2
+    sm = np.stack([np.convolve(np.pad(a[:, c], h, mode="edge"), k, "valid")
+                   for c in (0, 1)], axis=1)
+    sm[:h] = a[:h]
+    sm[-h:] = a[-h:]
+    return sm
+
+
 def _avoid(df, xy, m_per_px):
     """손으로 그린 선이 벽·장애물을 스치는 자리만 **옆으로 살짝** 비켜 준다.
 
@@ -153,6 +171,7 @@ def load(session_id: str, t_end: float | None = None, df=None,
             continue
         grid = np.arange(t_a, t_b + DT * 0.5, DT)
         xy = _catmull(ks, grid)
+        xy = _smooth(xy)                       # 손으로 찍은 떨림을 가볍게 편다
         if df is not None and m_per_px:
             xy, mv = _avoid(df, xy, m_per_px)
             moved_total[0] += mv

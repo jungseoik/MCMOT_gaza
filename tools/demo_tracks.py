@@ -389,15 +389,27 @@ def load(session_id: str) -> dict | None:
 
 
 def at(data: dict, t: float):
-    """t 시점의 [{id, x, y}] — 아직 안 나간 사람만."""
+    """t 시점의 [{id, x, y}] — 아직 안 나간 사람만.
+
+    궤적은 0.1초 격자인데 영상은 30fps 다. 반올림해서 집으면 같은 자리를 세 번
+    그리다 툭 건너뛰어 **자글자글해 보인다**. 사이를 선형으로 메워 매 프레임
+    조금씩 움직이게 한다 — 좌표를 지어내는 게 아니라 이미 정해진 두 점 사이를
+    지날 뿐이고, 지표 계산에는 쓰지 않는다.
+    """
     out = []
     for p in data["people"]:
-        i = int(round((t - p["t0"]) / data["dt"]))
-        if i < 0:
-            i = 0
+        u = (t - p["t0"]) / data["dt"]
+        if u < 0:
+            u = 0.0
+        i = int(u)
         if i >= len(p["xy"]):
             continue                              # 나갔다
-        out.append({"gid": p["id"], "x": p["xy"][i][0], "y": p["xy"][i][1]})
+        a = p["xy"][i]
+        b = p["xy"][min(len(p["xy"]) - 1, i + 1)]
+        f = u - i
+        out.append({"gid": p["id"],
+                    "x": a[0] + (b[0] - a[0]) * f,
+                    "y": a[1] + (b[1] - a[1]) * f})
     return out
 
 
