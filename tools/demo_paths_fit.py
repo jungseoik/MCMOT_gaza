@@ -170,6 +170,72 @@ def match_rate(sid: str, floor: str | None, people: dict, r_m=3.0, w_s=2.0):
     return 100 * hit / tot, hit, tot, min(ends), max(ends)
 
 
+def formation(people: dict, order, t_pass: dict, mpp: float):
+    """무리가 **같은 대형으로** 움직이게 시각을 다시 매긴다.
+
+    각자 자기 박자로 그리면 무리가 흩어진다 — 실측은 사람 사이 퍼짐이 4.2m 인데
+    그린 건 9m 였고(03 CBS), 우회조 선두는 2등보다 5.8m 앞섰다(02 EPFI).
+
+    방식: 무리의 **진행 곡선을 공유**한다. 각자를 자기 통과 시각 기준으로 겹쳐
+    놓고(τ = t − 통과시각) "통과 τ초 전에는 전체 경로의 몇 %를 갔나"의 중앙값을
+    구한 뒤, 모두 그 곡선을 따르게 한다. 벌어지는 간격은 **실제 통과 시각 차이**
+    그대로다 — 1초 먼저 나간 사람이 1초만큼 앞선다.
+
+    자리는 건드리지 않는다. 진행도(경로를 따라 얼마나 갔나)는 그대로이고 그
+    지점을 **언제** 지나는지만 바뀐다.
+    """
+    import numpy as np
+
+    def prof(ks):
+        t = np.array([k["t"] for k in ks], float)
+        d = np.concatenate([[0.0], np.cumsum(
+            [math.hypot(b["x"] - a["x"], b["y"] - a["y"])
+             for a, b in zip(ks, ks[1:])])])
+        return t, d / (d[-1] or 1.0)
+
+    groups: dict[tuple, list] = {}
+    for k_ex, pid in order:
+        groups.setdefault((k_ex,), []).append(pid)
+    # 통과 시각이 10초 넘게 벌어지면 다른 무리다(02 EPFI 의 직선조/우회조)
+    split = {}
+    for key, pids in groups.items():
+        pids = sorted(pids, key=lambda q: t_pass[q])
+        cur, out = [pids[0]], []
+        for a, b in zip(pids, pids[1:]):
+            if t_pass[b] - t_pass[a] > 10:
+                out.append(cur)
+                cur = []
+            cur.append(b)
+        out.append(cur)
+        for i, g in enumerate(out):
+            split[key + (i,)] = list(g)
+
+    notes = []
+    for key, pids in split.items():
+        if len(pids) < 2:
+            continue
+        spans = [t_pass[q] - people[q][0]["t"] for q in pids]
+        D = float(np.median(spans))
+        grid = np.arange(-D, 0.0001, 0.1)
+        rows = []
+        for q in pids:
+            t, u = prof(people[q])
+            rows.append(np.interp(t_pass[q] + grid, t, u, left=0.0, right=1.0))
+        U = np.median(np.stack(rows), axis=0)
+        for i in range(1, len(U)):                 # 진행도는 줄지 않는다
+            U[i] = max(U[i], U[i - 1] + 1e-6)
+        for q in pids:
+            t, u = prof(people[q])
+            tau = np.interp(u, U, grid)            # 그 진행도를 언제 지나나
+            for k, nt in zip(people[q], t_pass[q] + tau):
+                k["t"] = round(float(nt), 2)
+            for a, b in zip(people[q], people[q][1:]):
+                b["t"] = max(b["t"], a["t"] + 0.05)
+        notes.append(f"{'·'.join(pids)} ({len(pids)}명, 통과 "
+                     f"{min(t_pass[q] for q in pids):.0f}~{max(t_pass[q] for q in pids):.0f}s)")
+    return notes
+
+
 def passage_times(sid: str, floor: str | None):
     """**출구별** 통과 시각. 출구가 둘이면 한 줄로 섞으면 안 된다 — 왼쪽 문으로
     나간 사람에게 오른쪽 문 통과 시각을 주게 된다(04 SEI 가 그렇다)."""
@@ -206,6 +272,9 @@ def main() -> int:
                     help="**실측 dot 와 얼마나 맞나** 만 재 본다(고치지 않는다). "
                          "찍은 시각이 이미 맞는지, 통과 시각에 늘이는 게 나은지 "
                          "이 수치로 고른다.")
+    ap.add_argument("--formation", action="store_true",
+                    help="무리가 **같은 대형으로** 움직이게 한다. 진행 곡선을 무리끼리 "
+                         "공유하고, 벌어지는 간격은 실제 통과 시각 차이 그대로.")
     ap.add_argument("--keep-time", action="store_true",
                     help="**찍은 시각을 그대로 둔다.** 퇴장만 각자의 마지막 시각으로 "
                          "박는다. 편집기에서 실측에 맞춰 찍었다면 그 시각이 이미 "
@@ -332,6 +401,13 @@ def main() -> int:
         print(f"{pid:5} e{k_ex} {t_b:6.1f} {tgt:6.1f} {r:6.2f}x "
               f"{v0:5.2f} → {L / max(0.1, tgt - base):4.2f} m/s"
               + (f"  (출발 {base:.1f}s 로 당김)" if base < ks_t0 else ""))
+
+    if a.formation:
+        notes = formation(people, order,
+                          {pid: exit_at[pid] for _, pid in order}, mpp)
+        print("\n대형 맞춤: " + " · ".join(notes))
+        for pid in exit_at:
+            exit_at[pid] = float(people[pid][-1]["t"])
 
     raw["exit_at"] = exit_at
     if a.apply:
