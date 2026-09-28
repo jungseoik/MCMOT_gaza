@@ -236,6 +236,98 @@ def formation(people: dict, order, t_pass: dict, mpp: float):
     return notes
 
 
+def speed_profile(sid: str, floor: str | None, bin_s: float = 1.0):
+    """실측의 **1초 단위 평균 속도 곡선**. 언제 느리고 언제 빨랐나.
+
+    한 구간만 멈춰 세우는 걸로는 모자랐다. 실측(03 CBS)은 이렇게 간다.
+        0~8s   0.15~0.48 m/s   거의 안 움직인다(모여서 머뭇거림)
+        9~13s  0.64~0.97       한 번에 움직인다
+        14~17s 0.22~0.39       다시 선다
+        27~35s 0.25~0.50       또 느려진다
+    빠름·느림이 번갈아 온다. 그래서 **곡선 전체**를 따르게 한다 — 절대값이
+    아니라 **모양**만 쓴다(총 시간은 각자의 통과 시각에 맞춘다).
+    """
+    import collections
+
+    import numpy as np
+
+    from system.metrics.replay import run_replay
+
+    db, fl = find_session(sid, floor)
+    meta = recorder.load_meta(db)
+    t0 = float(meta["alarm_ts"])
+    site = SiteConfig.model_validate(meta["site_view"])
+    mpp = site.map.resolve_m_per_px()
+    gh = [g["key"] for g in dghost.load(sid)]
+    _, _, frames, _ = run_replay(db, {"exclude_tracks": gh} if gh else {}, fps=5.0)
+    tr = collections.defaultdict(list)
+    for fr in frames:
+        for o in fr["objects"]:
+            tr[o["gid"]].append((fr["ts"] - t0, o["x"], o["y"]))
+    if not tr:
+        return None
+    t_end = max(q[-1][0] for q in tr.values())
+    ts = np.arange(0, t_end + bin_s, bin_s)
+    vs = np.zeros(len(ts))
+    for k, lo in enumerate(ts):
+        acc, c = [], 0
+        for pts in tr.values():
+            for a, b in zip(pts, pts[1:]):
+                if not (lo <= a[0] < lo + bin_s):
+                    continue
+                dtt = b[0] - a[0]
+                if dtt <= 0 or dtt > 0.5:
+                    continue
+                acc.append(math.hypot(b[1] - a[1], b[2] - a[2]) * mpp / dtt)
+                c += 1
+        vs[k] = float(np.mean(acc)) if c >= 5 else np.nan
+    ok = ~np.isnan(vs)
+    if ok.sum() < 5:
+        return None
+    vs = np.interp(ts, ts[ok], vs[ok])
+    vs = np.maximum(vs, 0.05)                 # 완전 0 이면 영영 못 간다
+    return ts, vs
+
+
+def sharpen(prof, gain: float):
+    """완급의 **대비를 키운다** — 느린 구간은 더 느리게, 빠른 구간은 더 빠르게.
+
+    경로 길이와 통과 시각이 정해져 있으면 **평균 속도는 못 낮춘다**(03 CBS 는
+    33.4m ÷ 46s = 0.73 m/s 가 하한이다). 그래도 "멈췄다 간다"로 보이게 하려면
+    같은 평균 안에서 대비를 키우는 수밖에 없다 — 실측이 바로 그 모양이다
+    (멈춤 47% · 걸을 땐 0.81 m/s).
+    """
+    import numpy as np
+    ts, vs = prof
+    v = np.asarray(vs, float)
+    return ts, np.maximum(v.min() * 0.5, (v / v.mean()) ** gain * v.mean())
+
+
+def find_pauses(prof, thr: float = 0.40, min_s: float = 1.5):
+    """실측 속도 곡선에서 **느린 구간을 전부** 찾는다.
+
+    한 구간만 세우는 걸로는 모자랐다. 03 CBS 는 0~2s · 6~9s · 14~18s · 32~36s
+    네 번 느려진다. 다 세워야 "뭉쳤다 움직인다"가 보인다.
+
+    곡선의 대비를 키우는(gain) 방법도 써 봤지만 평균이 정해져 있어서 느린 만큼
+    다른 데가 빨라진다 — gain 3 에서 4.2 m/s 로 달렸다. 명시적으로 세우고
+    나머지를 고르게 걷는 편이 낫다.
+    """
+    import numpy as np
+    ts, vs = prof
+    out, run = [], None
+    for t, v in zip(ts, vs):
+        if v < thr:
+            run = (run[0], t + (ts[1] - ts[0])) if run else (t, t + (ts[1] - ts[0]))
+        elif run:
+            if run[1] - run[0] >= min_s:
+                out.append(run)
+            run = None
+    if run and run[1] - run[0] >= min_s:
+        out.append(run)
+    return out
+
+
 def find_pause(sid: str, floor: str | None, win: float = 6.0, thr: float = 0.45):
     """실측에서 **다들 멈춰 있던 때**를 찾는다.
 
@@ -284,7 +376,8 @@ def find_pause(sid: str, floor: str | None, win: float = 6.0, thr: float = 0.45)
 
 def hold_at_door(people: dict, order, t_pass: dict, mpp: float, exits,
                  enter_m: float = 2.5, walk_s: float = 3.0,
-                 gather_s: float = 3.0, step_s: float = 0.2, pause=None):
+                 gather_s: float = 3.0, step_s: float = 0.2, pause=None,
+                 prof=None):
     """문 앞에서 **잠깐 멈춰 밀집**하게 한다 — 병목이 눈에 보이게.
 
     실측이 그렇다: 문 앞 5m 안에 42~44초에 몰렸다가 44~49초에 **차례로** 빠져
@@ -311,35 +404,73 @@ def hold_at_door(people: dict, order, t_pass: dict, mpp: float, exits,
         t_go = t_pass[pid] - walk_s                    # 문을 향해 나서는 순간
         t_in = min(t_go, t_min - gather_s + j * step_s)  # 문 앞 도착
         t_in = max(t_in, t_a + 1.0)
-        # ① 접근 — 원래 걸음 비율을 지키며 t_in 까지.
-        #    가는 길에 **다 같이 멈춰 있던 때**(pause)가 있으면 그만큼 비워 둔다.
-        #    그래야 나머지 구간을 실측 걷는 속도로 갈 수 있다.
+        # ① 접근 — 문 앞까지. **실측 속도 곡선의 모양**을 따른다(느릴 때 느리게).
         arc = np.concatenate([[0.0], np.cumsum(
             [math.hypot(b["x"] - a["x"], b["y"] - a["y"])
              for a, b in zip(ks[:i_in + 1], ks[1:i_in + 1])])])
         L = arc[-1] or 1.0
-        pa, pb = pause if pause else (0.0, 0.0)
-        P = max(0.0, min(pb, t_in) - max(pa, t_a)) if pause else 0.0
+        if prof is not None:
+            pt, pv = prof
+            # 키프레임이 성기면(0.7~1.5초) 1초 단위 완급을 담을 수 없다 —
+            # 사이를 보간하며 등속이 된다. 접근 구간을 **0.5m 간격**으로 다시 뽑는다.
+            step = 0.5 / mpp
+            n_fine = max(4, int(L / step))
+            g = np.linspace(0, L, n_fine + 1)
+            xs = np.interp(g, arc, [q["x"] for q in ks[:i_in + 1]])
+            ys = np.interp(g, arc, [q["y"] for q in ks[:i_in + 1]])
+            tail = ks[i_in + 1:]
+            ks = ([{"t": 0.0, "x": round(float(x), 1), "y": round(float(y), 1)}
+                   for x, y in zip(xs, ys)] + tail)
+            i_in = n_fine
+            arc, L = g, (g[-1] or 1.0)
+            fine = np.arange(max(0.0, t_a), t_in + 0.05, 0.05)
+            w = np.interp(fine, pt, pv)
+            cum = np.concatenate([[0.0], np.cumsum(w[:-1]) * 0.05])
+            cum = cum / (cum[-1] or 1.0)
+            for i in range(i_in + 1):
+                ks[i]["t"] = round(float(np.interp(arc[i] / L, cum, fine)), 2)
+            for a, b in zip(ks, ks[1:i_in + 1]):
+                b["t"] = max(b["t"], a["t"] + 0.05)
+            for a, b in zip(ks, ks[1:]):
+                b["t"] = max(b["t"], a["t"] + 0.05)
+            arc2 = np.concatenate([[0.0], np.cumsum(
+                [math.hypot(b["x"] - a["x"], b["y"] - a["y"])
+                 for a, b in zip(ks[i_in:], ks[i_in + 1:])])])
+            L2 = arc2[-1] or 1.0
+            for k, i in enumerate(range(i_in, len(ks))):
+                ks[i]["t"] = round(t_go + walk_s * arc2[k] / L2, 2)
+            for a, b in zip(ks, ks[1:]):
+                b["t"] = max(b["t"], a["t"] + 0.05)
+            people[pid] = ks
+            notes.append(f"{pid} 도착 {t_in:.1f}s · 대기 {max(0.0, t_go - t_in):.1f}s")
+            continue
+        zones = [z for z in (pause or []) if z[1] > t_a and z[0] < t_in]
+        P = sum(min(b1, t_in) - max(a1, t_a) for a1, b1 in zones)
         walkable = max(1.0, (t_in - t_a) - P)
         for i in range(i_in + 1):
             w = t_a + walkable * arc[i] / L
-            ks[i]["t"] = round(w + P if (P > 0 and w >= pa) else w, 2)
+            for a1, b1 in zones:                   # 지나온 멈춤만큼 뒤로 민다
+                if w >= a1:
+                    w += min(b1, t_in) - max(a1, t_a)
+            ks[i]["t"] = round(w, 2)
         if P > 0.5:
             # **같은 자리에 두 점**을 박아야 진짜 멈춘다. 시각만 벌려 놓으면
             # 사이를 보간해 '느리게 걷는' 그림이 된다(실측: 멈춤 2%).
-            fr = max(0.0, min(1.0, (pa - t_a) / walkable))
-            d_at = fr * L
-            k = int(np.searchsorted(arc, d_at))
-            k = max(1, min(k, i_in))
-            a0, b0 = ks[k - 1], ks[k]
-            span = (arc[k] - arc[k - 1]) or 1.0
-            g = (d_at - arc[k - 1]) / span
-            px = a0["x"] + (b0["x"] - a0["x"]) * g
-            py = a0["y"] + (b0["y"] - a0["y"]) * g
-            stop = [{"t": round(pa, 2), "x": round(px, 1), "y": round(py, 1)},
-                    {"t": round(pb, 2), "x": round(px, 1), "y": round(py, 1)}]
-            ks[k:k] = stop
-            i_in += 2
+            for pa1, pb1 in reversed(zones):
+                if pb1 <= t_a or pa1 >= t_in:
+                    continue
+                fr = max(0.0, min(1.0, (pa1 - t_a) / walkable))
+                d_at = fr * L
+                k = int(np.searchsorted(arc, d_at))
+                k = max(1, min(k, i_in))
+                a0, b0 = ks[k - 1], ks[k]
+                span = (arc[k] - arc[k - 1]) or 1.0
+                g = (d_at - arc[k - 1]) / span
+                px = a0["x"] + (b0["x"] - a0["x"]) * g
+                py = a0["y"] + (b0["y"] - a0["y"]) * g
+                ks[k:k] = [{"t": round(pa1, 2), "x": round(px, 1), "y": round(py, 1)},
+                           {"t": round(pb1, 2), "x": round(px, 1), "y": round(py, 1)}]
+                i_in += 2
         # ②③ 대기 뒤 통과
         arc2 = np.concatenate([[0.0], np.cumsum(
             [math.hypot(b["x"] - a["x"], b["y"] - a["y"])
@@ -398,6 +529,12 @@ def main() -> int:
     ap.add_argument("--formation", action="store_true",
                     help="무리가 **같은 대형으로** 움직이게 한다. 진행 곡선을 무리끼리 "
                          "공유하고, 벌어지는 간격은 실제 통과 시각 차이 그대로.")
+    ap.add_argument("--gain", type=float, default=1.0,
+                    help="완급 대비. 1=실측 그대로, 2 이상이면 느린 구간이 더 "
+                         "느려지고 빠른 구간이 더 빨라진다(평균은 그대로).")
+    ap.add_argument("--profile", action="store_true",
+                    help="**실측 속도 곡선의 모양**을 따른다 — 실측이 느릴 때 느리고 "
+                         "빠를 때 빠르다. 한 구간만 멈추는 --pause 보다 낫다.")
     ap.add_argument("--pause", action="store_true",
                     help="실측에서 **다들 멈춰 있던 때**를 찾아 그만큼 멈춰 세운다. "
                          "속도가 아니라 멈춤이 빠져서 빨라 보이는 경우에 쓴다.")
@@ -538,18 +675,28 @@ def main() -> int:
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
     if a.hold:
-        pz = find_pause(a.session, a.floor) if a.pause else None
-        if pz:
-            print(f"\n실측에서 다들 멈춰 있던 때: {pz[0]:.0f}~{pz[1]:.0f}s "
-                  f"({100 * pz[2]:.0f}% 만 움직임) — 여기서 같이 멈춘다")
+
+        pf = speed_profile(a.session, a.floor) if a.profile else None
+        if pf is not None and a.gain != 1.0:
+            pf = sharpen(pf, a.gain)
+        if pf is not None:
+            v = pf[1]
+            print("\n실측 속도 곡선(1초): "
+                  + " ".join(f"{int(t)}s{v[i]:.2f}" for i, t in enumerate(pf[0][:20:2])))
+        zs = find_pauses(pf) if (pf is not None and a.pause) else None
+        if zs:
+            print("실측에서 다들 느렸던 때: "
+                  + " · ".join(f"{a1:.0f}~{b1:.0f}s" for a1, b1 in zs)
+                  + f"  (합 {sum(b1 - a1 for a1, b1 in zs):.0f}초)")
         notes = hold_at_door(people, order,
                              {pid: exit_at[pid] for _, pid in order}, mpp, exits,
-                             pause=(pz[0], pz[1]) if pz else None)
+                             pause=zs, prof=None)
         print("\n문 앞 대기:\n  " + "\n  ".join(notes))
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
 
     raw["exit_at"] = exit_at
+    raw["paced"] = bool(a.profile or a.pause or a.hold or a.formation)
     if a.apply:
         shutil.copy2(p, p.with_suffix(".json.bak"))
         p.write_text(json.dumps(raw, ensure_ascii=False, indent=1), encoding="utf-8")

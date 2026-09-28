@@ -167,6 +167,9 @@ def load(session_id: str, t_end: float | None = None, obstacles=None,
     except (OSError, json.JSONDecodeError):
         return None
     exits = raw.get("exit_at") or {}
+    # 시각을 이미 정교하게 매긴 파일은 **걸음 고르기를 끈다.** 등속 쪽으로 섞으면
+    # 애써 넣은 완급(문 앞 대기·중간 정체)이 도로 뭉개진다.
+    even = 0.0 if raw.get("paced") else EVEN
     people = []
     moved_total = [0]
     for pid, ks in sorted((raw.get("people") or {}).items()):
@@ -174,7 +177,7 @@ def load(session_id: str, t_end: float | None = None, obstacles=None,
         if len(ks) < 2:
             continue
         ks = [dict(k) for k in ks]
-        for k, nt in zip(ks, _even_times(ks)):
+        for k, nt in zip(ks, _even_times(ks, even)):
             k["t"] = nt
         t_a = ks[0]["t"]
         t_b = ks[-1]["t"]
