@@ -490,6 +490,61 @@ def dt_seg(q, e, mpp):
     return dtk._seg_dist((q["x"], q["y"]), e[0], e[1]) * mpp
 
 
+def constant_walk(people: dict, order, t_pass: dict, mpp: float, exits,
+                  v: float = 0.9, t_start: float = 6.0, door_m: float = 2.5,
+                  pass_s: float = 2.0):
+    """**일정한 속도로 걷다 문 앞에서 선다.** 빨라지는 구간이 없다.
+
+    멈춤을 많이 넣을수록 걷는 구간이 빨라진다 — 경로 길이와 통과 시각이 묶여
+    있기 때문이다(03 CBS: 31.2m ÷ 46s). 멈춤 24초를 넣었더니 걸을 때 1.02 m/s
+    가 됐다(실측 0.81). 그래서 거꾸로 간다.
+
+      ① 출발 전 — 시작 자리에서 뭉쳐 기다린다(0 ~ t_start)
+      ② 이동   — **줄곧 같은 속도** v 로 문 앞 {door_m}m 까지. 빨라질 일이 없다
+      ③ 문 앞  — 자기 통과 시각까지 선다. 먼저 온 사람일수록 오래 선다 = 밀집
+      ④ 통과   — 마지막 {pass_s}초에 문을 지난다
+
+    시간이 모자라면 그 사람만 속도를 올린다(아래 표에 표시된다).
+    """
+    import numpy as np
+    rows = []
+    for _k, pid in sorted(order, key=lambda z: t_pass[z[1]]):
+        ks = people[pid]
+        d = [min(dt_seg(q, e, mpp) for e in exits) for q in ks]
+        i_in = next((i for i, x in enumerate(d) if x <= door_m), len(ks) - 2)
+        i_in = max(2, i_in)
+        arc = np.concatenate([[0.0], np.cumsum(
+            [math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
+             for a, b in zip(ks, ks[1:])])])
+        L_in = arc[i_in]
+        # 문 앞~출구 구간도 **같은 속도로** 걷게 한다. 2초에 몰아 넣으면 거기서만
+        # 2.4 m/s 로 튄다(문 앞에서 왔다갔다 그린 사람은 그 구간이 길다).
+        span_m = arc[-1] - arc[i_in]
+        ps = max(pass_s, span_m / v)
+        t_go = t_pass[pid] - ps
+        vv = v
+        if t_start + L_in / vv > t_go:            # 시간이 모자라면 그만큼만 빠르게
+            vv = L_in / max(1.0, t_go - t_start)
+        t_arr = t_start + L_in / vv
+        for i in range(i_in + 1):
+            ks[i]["t"] = round(t_start + arc[i] / vv, 2)
+        for i in range(i_in + 1):                 # 출발 전엔 제자리
+            if ks[i]["t"] < t_start:
+                ks[i]["t"] = round(t_start, 2)
+        ks.insert(0, {"t": 0.0, "x": ks[0]["x"], "y": ks[0]["y"]})
+        i_in += 1
+        span = (arc[-1] - arc[i_in - 1]) or 1.0
+        for i in range(i_in, len(ks)):
+            f = (arc[i - 1] - arc[i_in - 1]) / span
+            ks[i]["t"] = round(t_go + ps * f, 2)
+        for a, b in zip(ks, ks[1:]):
+            b["t"] = max(b["t"], a["t"] + 0.05)
+        people[pid] = ks
+        rows.append(f"{pid} 출발 {t_start:.0f}s · 문앞 {t_arr:.1f}s · "
+                    f"대기 {max(0.0, t_go - t_arr):.1f}s · {vv:.2f} m/s")
+    return rows
+
+
 def even_speed(people: dict, mpp: float, cap: float = 1.25, rounds: int = 40):
     """**빨라지는 구간만** 눌러 준다. 느려지는 건 그대로 둔다.
 
@@ -606,6 +661,12 @@ def main() -> int:
     ap.add_argument("--formation", action="store_true",
                     help="무리가 **같은 대형으로** 움직이게 한다. 진행 곡선을 무리끼리 "
                          "공유하고, 벌어지는 간격은 실제 통과 시각 차이 그대로.")
+    ap.add_argument("--walk", type=float, default=0.0,
+                    help="**일정 속도로 걷다 문 앞에서 선다**(m/s). 빨라지는 구간이 "
+                         "없다. 0.9 쯤이 실측(0.81)에 가깝다.")
+    ap.add_argument("--walk-start", type=float, default=6.0,
+                    help="--walk 에서 움직이기 시작하는 시각(초). 그 전엔 시작 "
+                         "자리에서 뭉쳐 기다린다.")
     ap.add_argument("--even-speed", action="store_true",
                     help="**빨라지는 구간만** 눌러 준다(느려지는 건 그대로). 자리는 "
                          "두고 시간만 옮긴다 — 총 시간과 양 끝은 그대로.")
@@ -761,6 +822,14 @@ def main() -> int:
         print("\n대형 맞춤: " + " · ".join(notes))
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
+    if a.walk > 0:
+        rows = constant_walk(people, order,
+                             {pid: exit_at[pid] for _, pid in order}, mpp, exits,
+                             v=a.walk, t_start=a.walk_start)
+        print("\n일정 속도 걷기:\n  " + "\n  ".join(rows))
+        for pid in exit_at:
+            exit_at[pid] = float(people[pid][-1]["t"])
+
     if a.hold:
 
         pf = speed_profile(a.session, a.floor) if a.profile else None

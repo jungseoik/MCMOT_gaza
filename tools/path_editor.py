@@ -65,6 +65,11 @@ app = FastAPI(title="동선 편집기")
 _cache: dict = {}
 
 
+def _grid_ready(sid: str) -> bool:
+    from tools import grid_mp4
+    return grid_mp4.path(sid).is_file()
+
+
 def _session(sid: str) -> dict:
     for s in SESSIONS:
         if s["id"] == sid:
@@ -112,6 +117,7 @@ def _load(sid: str) -> dict:
         "bottlenecks": [{"id": b.id, "polygon": b.polygon} for b in site.bottlenecks],
         "obstacles": dobs.load(floor),
         "cams": [c for c in cams if c in clips],
+        "grid": _grid_ready(sid),
         "passes": passes,
     }
     _cache[sid] = data
@@ -200,6 +206,18 @@ def _wall_check(sid: str, people: dict) -> list[str]:
 def img_map(floor: str):
     name = "map.png" if floor == "default" else f"map_{floor}.png"
     return FileResponse(SITE / name)
+
+
+@app.get("/grid/{sid}")
+def grid_video(sid: str):
+    """**격자로 합친 mp4 한 개.** 카메라마다 따로 틀면 브라우저가 수백 MB 를
+    물고 멈춘다(03 CBS 7대 = 622MB). 합본은 몇 MB 짜리 비디오 하나다.
+    없으면 `python tools/grid_mp4.py --session <id>` 로 만든다."""
+    from tools import grid_mp4
+    p = grid_mp4.path(sid)
+    if not p.is_file():
+        raise HTTPException(404, "격자 합본이 없습니다 — tools/grid_mp4.py 로 만드세요")
+    return FileResponse(p, media_type="video/mp4")
 
 
 _caps: dict = {}
