@@ -35,20 +35,28 @@ V_MAX = 1.6            # 훈련 보행 속도 상한 — 이보다 빠르면 달
 
 
 def passage_times(sid: str, floor: str | None):
+    """**출구별** 통과 시각. 출구가 둘이면 한 줄로 섞으면 안 된다 — 왼쪽 문으로
+    나간 사람에게 오른쪽 문 통과 시각을 주게 된다(04 SEI 가 그렇다)."""
     db, fl = find_session(sid, floor)
     meta = recorder.load_meta(db)
     t0 = float(meta["alarm_ts"])
     gh = [g["key"] for g in dghost.load(sid)]
     _, tl, _, _ = run_replay(db, {"exclude_tracks": gh} if gh else {}, fps=5.0)
-    out, prev = [], {}
+    out, prev = {}, {}
     for p in tl:
         d = p.model_dump() if hasattr(p, "model_dump") else p
         for k, v in (d.get("exit_counts") or {}).items():
             n = v - prev.get(k, 0)
             if n > 0:
-                out.extend([round(d["ts"] - t0, 1)] * n)
+                try:
+                    i = int(str(k).rsplit("-", 1)[-1])
+                except ValueError:
+                    continue
+                out.setdefault(i, []).extend([round(d["ts"] - t0, 1)] * n)
                 prev[k] = v
-    return sorted(out), fl
+    for i in out:
+        out[i].sort()
+    return out, fl
 
 
 def main() -> int:
@@ -65,24 +73,41 @@ def main() -> int:
     raw = json.loads(p.read_text(encoding="utf-8"))
     people = raw.get("people") or {}
     want, floor = passage_times(a.session, a.floor)
-    print(f"실제 통과 시각 {len(want)}건: {want}")
+    for i, v in sorted(want.items()):
+        print(f"실제 통과 시각 exit-{i}: {v}")
 
     db, _ = find_session(a.session, floor)
     site = SiteConfig.model_validate(recorder.load_meta(db)["site_view"])
     mpp = site.map.resolve_m_per_px()
+    exits = [[tuple(e.line[0]), tuple(e.line[1])] for e in site.exits if e.line]
 
-    order = sorted(people, key=lambda k: people[k][-1]["t"])
-    if len(want) < len(order):
-        print(f"통과 시각이 {len(want)}건뿐이라 {len(order)}명을 다 못 맞춥니다")
-        return 1
+    # 누가 **어느 문으로** 나갔나 — 마지막 점에서 가장 가까운 출구
+    import numpy as np
+    from tools import demo_tracks as dtk
+    by_exit: dict[int, list[str]] = {}
+    for pid, ks in people.items():
+        q = (ks[-1]["x"], ks[-1]["y"])
+        k = int(np.argmin([dtk._seg_dist(q, e[0], e[1]) for e in exits]))
+        by_exit.setdefault(k, []).append(pid)
+    for k in by_exit:
+        by_exit[k].sort(key=lambda pid: people[pid][-1]["t"])
+        if len(want.get(k, [])) < len(by_exit[k]):
+            print(f"exit-{k}: 통과 시각 {len(want.get(k, []))}건 < 사람 {len(by_exit[k])}명")
+            return 1
+    print("\n문별 배정: " + " · ".join(
+        f"exit-{k} {len(v)}명" for k, v in sorted(by_exit.items())))
+    order = [(k, pid) for k in sorted(by_exit) for pid in by_exit[k]]
 
     exit_at = dict(raw.get("exit_at") or {})
-    print(f"\n{'':5} {'찍은 끝':>7} {'→ 통과':>7} {'늘임':>6} {'속도':>13}")
-    for i, pid in enumerate(order):
+    print(f"\n{'':5} {'문':>2} {'찍은 끝':>6} {'→통과':>6} {'늘임':>6} {'속도':>13}")
+    seen: dict[int, int] = {}
+    for k_ex, pid in order:
+        i = seen.get(k_ex, 0)
+        seen[k_ex] = i + 1
+        tgt = want[k_ex][i]
         ks = people[pid]
         t_a, t_b = ks[0]["t"], ks[-1]["t"]
         ks_t0 = t_a
-        tgt = want[i]
         if tgt <= t_a:
             print(f"{pid:5} 통과 {tgt}s 가 출발 {t_a}s 보다 빠릅니다 — 출발을 0 으로 당깁니다")
             ks[0]["t"] = t_a = max(0.0, tgt - 3.0)
@@ -103,7 +128,7 @@ def main() -> int:
         for q in ks:
             q["t"] = round(base + (q["t"] - base) * r, 2)
         exit_at[pid] = float(tgt)
-        print(f"{pid:5} {t_b:7.1f} {tgt:7.1f} {r:6.2f}x "
+        print(f"{pid:5} e{k_ex} {t_b:6.1f} {tgt:6.1f} {r:6.2f}x "
               f"{v0:5.2f} → {L / max(0.1, tgt - base):4.2f} m/s"
               + (f"  (출발 {base:.1f}s 로 당김)" if base < ks_t0 else ""))
 

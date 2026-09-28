@@ -97,54 +97,68 @@ def _smooth(xy, w=5):
     return sm
 
 
-def _avoid(df, xy, m_per_px):
-    """손으로 그린 선이 벽·장애물을 스치는 자리만 **옆으로 살짝** 비켜 준다.
+def _avoid(polys, xy, m_per_px, max_m=1.5):
+    """**장애물 위를 지나는 구간만** 옆으로 비껴 준다.
 
-    대충 그리라고 만든 도구다 — 모서리를 조금 질러가는 건 당연하다. 점 개수를
-    유지해야 시각이 안 밀리므로 끼워 넣지 않고 **그 점만 민다**(최대 0.8m).
+    왜 장애물만인가: 도면 벽선(문틀·계단 난간)까지 피하게 하면 문 앞 좁은 통로가
+    통째로 막혀 점이 튄다(실측: 1.1 m/s 동선이 11.6 m/s). 그런데 그 자리는
+    **실측 트랙이 실제로 지나간 자리**다 — 격자가 보수적일 뿐 사람이 못 가는
+    곳이 아니다. 반면 의자·적치물 위를 지나는 건 한눈에 틀려 보인다.
+
+    비킴량은 이웃과 섞어 **완만하게** 만든 뒤 한꺼번에 적용한다. 점마다 따로
+    밀면 단차가 생기고, 단차가 곧 튐이다.
     """
-    import math
+    import cv2
+    if not polys:
+        return [[float(x), float(y)] for x, y in xy], 0
+    a = np.asarray(xy, float)
+    n = len(a)
 
-    from system.evac.route_solver import _los, _nearest_free
-    W, H = df.wall.shape
-    step = 0.2 / m_per_px
-    out, moved = [], 0
-    for q in xy:
-        x, y = float(q[0]), float(q[1])
-        c, r = df.to_cell(x, y)
-        if 0 <= c < W and 0 <= r < H and df.wall[c, r]:
-            n = _nearest_free(df, c, r, 30)
-            if n is not None:
-                x, y = df.to_px(n[0], n[1])
-                moved += 1
-        if out:
-            a = out[-1]
-            if not _los(df.wall, df.to_cell(*a), df.to_cell(x, y)):
-                fixed = None
-                for kk in range(1, 5):
-                    for ang in range(0, 360, 30):
-                        t = math.radians(ang)
-                        nx, ny = x + math.cos(t) * step * kk, y + math.sin(t) * step * kk
-                        cc, rr = df.to_cell(nx, ny)
-                        if (0 <= cc < W and 0 <= rr < H and not df.wall[cc, rr]
-                                and _los(df.wall, df.to_cell(*a), (cc, rr))):
-                            fixed = (nx, ny)
-                            break
-                    if fixed:
-                        break
-                if fixed:
-                    x, y = fixed
-                    moved += 1
-        out.append([x, y])
-    return out, moved
+    def inside(x, y):
+        return any(cv2.pointPolygonTest(q, (float(x), float(y)), False) >= 0
+                   for q in polys)
+
+    nb = np.roll(a, -3, axis=0); nb[-3:] = a[-1]
+    pv = np.roll(a, 3, axis=0); pv[:3] = a[0]
+    d = nb - pv
+    ln = np.hypot(d[:, 0], d[:, 1]); ln[ln < 1e-6] = 1.0
+    nx, ny = -d[:, 1] / ln, d[:, 0] / ln
+
+    step = 0.15 / m_per_px
+    lim = int(max_m / 0.15)
+    off = np.zeros(n)
+    hit = 0
+    for i in range(n):
+        if not inside(*a[i]):
+            continue
+        hit += 1
+        for kk in range(1, lim + 1):
+            for sgn in (1, -1):
+                if not inside(a[i][0] + nx[i] * step * kk * sgn,
+                              a[i][1] + ny[i] * step * kk * sgn):
+                    off[i] = step * kk * sgn
+                    break
+            if off[i]:
+                break
+    if not hit:
+        return [[float(x), float(y)] for x, y in a], 0
+    w = 11
+    sm = np.convolve(np.pad(off, w // 2, mode="edge"), np.ones(w) / w, "valid")
+    sgn = np.sign(off)
+    sm = np.where(off != 0, np.where(sgn >= 0, np.maximum(sm, off),
+                                     np.minimum(sm, off)), sm)
+    a = a + np.stack([nx * sm, ny * sm], axis=1)
+    return [[float(x), float(y)] for x, y in a], hit
 
 
-def load(session_id: str, t_end: float | None = None, df=None,
+def load(session_id: str, t_end: float | None = None, obstacles=None,
          m_per_px: float | None = None) -> dict | None:
     """편집기 파일 → demo_viz 가 쓰는 궤적 묶음(demo_tracks 와 같은 모양).
 
-    df 를 주면 벽·장애물을 스치는 자리를 비켜 준다(그린 선은 그대로 두고 표출만).
+    obstacles 를 주면 그 위를 지나는 자리만 비켜 준다(그린 선은 그대로, 표출만).
     """
+    import cv2
+    polys = [np.array(o["points"], np.int32) for o in (obstacles or [])]
     p = path(session_id)
     if not p.is_file():
         return None
@@ -172,9 +186,10 @@ def load(session_id: str, t_end: float | None = None, df=None,
         grid = np.arange(t_a, t_b + DT * 0.5, DT)
         xy = _catmull(ks, grid)
         xy = _smooth(xy)                       # 손으로 찍은 떨림을 가볍게 편다
-        if df is not None and m_per_px:
-            xy, mv = _avoid(df, xy, m_per_px)
+        if polys and m_per_px:
+            xy, mv = _avoid(polys, xy, m_per_px)
             moved_total[0] += mv
+            xy = _smooth(xy, 3)                # 비킨 자국을 한 번 더 편다
         out = [[round(float(a), 1), round(float(b), 1)] for a, b in xy]
         if HOLD and t_a > 0:
             # 각본상 10명은 경보 순간부터 그 자리에 있었다. 찍기 시작한 시각부터
@@ -196,4 +211,4 @@ def summary(data: dict) -> str:
     keys = sum(len(q["xy"]) for q in data["people"])
     mv = data.get("moved") or 0
     return (f"사람이 그린 동선 {n}명 · 표본 {keys}개"
-            + (f" · 벽 비켜감 {mv}점" if mv else " · 벽 통과 없음"))
+            + (f" · 장애물 비켜감 {mv}점" if mv else " · 장애물 통과 없음"))
