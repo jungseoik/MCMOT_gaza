@@ -202,6 +202,42 @@ def img_map(floor: str):
     return FileResponse(SITE / name)
 
 
+_caps: dict = {}
+
+
+@app.get("/frame/{sid}/{cam}")
+def frame(sid: str, cam: str, t: float = 0.0, w: int = 420):
+    """그 시각의 **프레임 한 장**(JPEG).
+
+    <video> 7개를 한꺼번에 띄우면 브라우저가 622MB 를 물고 멈춘다(실측: 03 CBS).
+    스크럽하며 보는 작업이라 프레임 한 장이면 충분하고, 그게 훨씬 가볍다.
+    """
+    import cv2
+    from fastapi.responses import Response
+
+    _load(sid)
+    fp = _cache.get("_clips", {}).get(sid, {}).get(cam)
+    if not fp:
+        raise HTTPException(404, f"영상 없음: {cam}")
+    key = (sid, cam)
+    cap = _caps.get(key)
+    if cap is None:
+        cap = cv2.VideoCapture(str(fp))
+        if not cap.isOpened():
+            raise HTTPException(404, f"영상을 못 엽니다: {cam}")
+        _caps[key] = cap
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(t * fps)))
+    ok, im = cap.read()
+    if not ok:
+        raise HTTPException(404, "프레임 없음")
+    h = max(1, int(im.shape[0] * w / im.shape[1]))
+    im = cv2.resize(im, (w, h))
+    ok, buf = cv2.imencode(".jpg", im, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
+    return Response(buf.tobytes(), media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.get("/video/{sid}/{cam}")
 def video(sid: str, cam: str):
     _load(sid)

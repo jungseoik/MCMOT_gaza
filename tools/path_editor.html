@@ -44,7 +44,7 @@
   video{flex:1;width:100%;height:100%;object-fit:contain;background:#000}
   #grid{flex:1;display:none;grid-gap:2px;background:#000;overflow:hidden}
   #grid.on{display:grid}
-  #grid video{width:100%;height:100%;object-fit:cover;background:#111;flex:none}
+  #grid img{width:100%;height:100%;object-fit:cover;background:#111;display:block}
   #grid .cell{position:relative;overflow:hidden}
   #grid .cell b{position:absolute;left:4px;top:3px;font-size:10px;color:#fff;
                 background:rgba(0,0,0,.55);padding:1px 5px;border-radius:4px;font-weight:600}
@@ -441,12 +441,11 @@ function loop(ts){
 }
 function setPlay(v){
   playing=v; $('#play').textContent=v?'❚❚':'▶'; $('#play').classList.toggle('on',v);
-  const vs = gridOn ? GV : [vid];
   if(v){last=performance.now();
-    vs.forEach(x=>{ x.playbackRate=parseFloat($('#rate').value);
-                    try{x.currentTime=t;}catch(e){} x.play().catch(()=>{}); });
+    if(!gridOn){ vid.playbackRate=parseFloat($('#rate').value);
+                 try{vid.currentTime=t;}catch(e){} vid.play().catch(()=>{}); }
     raf=requestAnimationFrame(loop);}
-  else {cancelAnimationFrame(raf); vs.forEach(x=>x.pause());}
+  else {cancelAnimationFrame(raf); if(!gridOn) vid.pause();}
 }
 
 /* ---------- 입력 ---------- */
@@ -705,27 +704,39 @@ function setGrid(on){
   $('#grid').classList.toggle('on',on);
   vid.style.display=on?'none':'';
   $('#cam').style.display=on?'none':'';
-  if(on) buildGrid(); else {GV.forEach(v=>{v.pause(); v.src='';}); GV=[];}
+  if(on) buildGrid(); else {GV=[]; $('#grid').innerHTML='';}
   syncVideo(true);
 }
 function buildGrid(){
+  // 카메라마다 **프레임 한 장**(JPEG)만 받는다. <video> 7개를 띄우면 브라우저가
+  // 622MB 를 물고 멈춘다(실측: 03 CBS).
   const g=$('#grid'); g.innerHTML=''; GV=[];
   const n=S.cams.length, cols=Math.ceil(Math.sqrt(n));
   g.style.gridTemplateColumns=`repeat(${cols},1fr)`;
   g.style.gridTemplateRows=`repeat(${Math.ceil(n/cols)},1fr)`;
   for(const c of S.cams){
     const d=document.createElement('div'); d.className='cell';
-    const v=document.createElement('video');
-    v.muted=true; v.playsInline=true; v.preload='auto';
-    v.src=`/video/${S.id}/${c}`;
+    const im=document.createElement('img'); im.dataset.cam=c; im.loading='eager';
     const b=document.createElement('b'); b.textContent=c.split('_').pop();
-    d.appendChild(v); d.appendChild(b); g.appendChild(d); GV.push(v);
+    d.appendChild(im); d.appendChild(b); g.appendChild(d); GV.push(im);
   }
+  gridAt(t, true);
+}
+let _gT=0, _gPend=null;
+function gridAt(tt, force){
+  if(!gridOn||!GV.length) return;
+  const now=performance.now();
+  if(!force && now-_gT<220){                    // 너무 자주 요청하지 않는다
+    clearTimeout(_gPend); _gPend=setTimeout(()=>gridAt(tt,true), 220);
+    return;
+  }
+  _gT=now;
+  for(const im of GV) im.src=`/frame/${S.id}/${im.dataset.cam}?t=${tt.toFixed(2)}`;
 }
 function syncVideo(force){
-  const vs = gridOn ? GV : (vid.src ? [vid] : []);
-  for(const v of vs){
-    if(force || Math.abs(v.currentTime-t)>0.4){ try{ v.currentTime=t; }catch(e){} }
+  if(gridOn){ gridAt(t, !!force); return; }
+  if(vid.src && (force || Math.abs(vid.currentTime-t)>0.4)){
+    try{ vid.currentTime=t; }catch(e){}
   }
 }
 
@@ -750,7 +761,7 @@ async function save(){
   sel.onchange=()=>loadSession(sel.value);
   $('#play').onclick=()=>setPlay(!playing);
   $('#scrub').oninput=e=>{setPlay(false); setT(S.t_end*e.target.value/1000,true);};
-  $('#rate').onchange=()=>{(gridOn?GV:[vid]).forEach(x=>x.playbackRate=parseFloat($('#rate').value));};
+  $('#rate').onchange=()=>{ if(!gridOn) vid.playbackRate=parseFloat($('#rate').value); };
   $('#cam').onchange=e=>setCam(e.target.value);
 
   $('#bRef').onclick=()=>{showRef=!showRef; $('#bRef').classList.toggle('on',showRef); draw();};
