@@ -501,59 +501,106 @@ def load_jams(sid: str):
         return []
 
 
-def apply_jams(people: dict, order, t_pass: dict, mpp: float, jams, v: float,
-               t_start: float = 6.0):
-    """**찍어 준 병목대로** 시각을 매긴다.
+def apply_jams(people: dict, order, t_pass: dict, mpp: float, jams, v: float = 0.9,
+               t_start: float = 0.0, step_s: float = 0.7):
+    """**찍어 준 병목대로** 다시 만든다 — 사이는 걷고, 안에서는 **서성인다.**
 
-    "어디서 몇 초부터 몇 초까지 몇 명이 뭉치나"만 있으면 나머지는 정해진다 —
-    병목 사이는 **일정한 속도로** 걷고, 병목 안에서는 선다. 걷는 속도를 이쪽에서
-    추정할 필요가 없다(그 추정이 계속 틀렸다).
+    병목은 가만히 서 있는 게 아니다. 반경 안에서 자리를 바꾸며 왔다갔다 한다 —
+    그게 뭉쳐 있는 모습이다. 그래서 병목 구간에는 **그 원 안을 도는 점**을
+    {step_s}초 간격으로 새로 박는다(사람마다 다른 자리에서 다른 방향으로).
 
-    한 사람의 시간표는 이렇게 짜인다.
-        0 ~ t_start        시작 자리에서 기다린다
-        ~ 첫 병목          걸어간다
-        병목 t0~t1         선다(그 자리 반경 안에서 조금 흩어져)
-        다음 병목까지      또 걸어간다
-        마지막 ~ 통과 시각  걸어 나간다
+    걷는 속도는 이쪽에서 정하지 않는다. 병목과 병목 사이의 **거리 ÷ 시간**이
+    곧 속도다 — 찍어 준 시각이 그걸 정한다.
     """
     import numpy as np
     rows = []
-    for idx, (_k, pid) in enumerate(sorted(order, key=lambda z: t_pass[z[1]])):
+    seq = sorted(order, key=lambda z: t_pass[z[1]])
+    for idx, (_k, pid) in enumerate(seq):
         ks = people[pid]
         arc = np.concatenate([[0.0], np.cumsum(
             [math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
              for a, b in zip(ks, ks[1:])])])
         L = arc[-1] or 1.0
-        mine = [j for j in jams if idx < j.get("n", 10)]
-        # 병목마다 **경로에서 가장 가까운 지점**을 찾는다 — 거기서 선다
         stops = []
-        for j in mine:
+        for j in jams:
+            if idx >= int(j.get("n", 10)):
+                continue                      # 그 병목에 안 끼는 사람
             d = [math.hypot(q["x"] - j["x"], q["y"] - j["y"]) * mpp for q in ks]
             i = int(np.argmin(d))
             if d[i] > j["r"] * 3:
-                continue                      # 그 사람 길에서 먼 병목은 건너뛴다
-            stops.append((arc[i], j["t0"], j["t1"], i))
+                continue                      # 그 사람 길에서 먼 병목
+            stops.append((arc[i], i, j))
         stops.sort()
-        # 구간별로 시각을 준다 — 병목 사이는 등속
-        pts = [(0.0, t_start)]
-        for a_m, j0, j1, _i in stops:
-            pts.append((a_m, float(j0)))
-            pts.append((a_m + 1e-6, float(j1)))
-        pts.append((L, float(t_pass[pid])))
-        xs = [q[0] for q in pts]
-        ys = [q[1] for q in pts]
-        for i in range(1, len(ys)):           # 시간은 거꾸로 못 간다
-            ys[i] = max(ys[i], ys[i - 1] + 0.05)
-        for i, a_m in enumerate(arc):
-            ks[i]["t"] = round(float(np.interp(a_m, xs, ys)), 2)
-        ks.insert(0, {"t": 0.0, "x": ks[0]["x"], "y": ks[0]["y"]})
-        for a, b in zip(ks, ks[1:]):
+
+        out, prev_i, t_cur = [], 0, float(t_start)
+        t_end = float(t_pass[pid])
+        for sn, (a_m, i, j) in enumerate(stops):
+            j0, j1 = float(j["t0"]), float(j["t1"])
+            if j0 < t_cur:
+                j0 = t_cur
+            # 찍어 준 병목이 그 사람의 통과 시각을 넘을 수 있다 — 문 앞 병목이
+            # 그렇다(47~55s 인데 통과는 44~49s). 사람마다 **자기 차례에** 빠져
+            # 나가야 하므로 거기서 끊는다.
+            last = sn == len(stops) - 1
+            lim = t_end - (1.2 if last else 0.3)
+            j1 = min(float(j1), lim)
+            if j1 <= j0:
+                j1 = min(j0 + 0.5, lim)
+            if j1 <= j0:
+                continue
+            # ① 여기까지 걸어온다 — 구간 거리 ÷ 구간 시간이 속도다.
+            #    걸어올 시간이 없으면(첫 병목이 0초부터면) 그냥 **거기서 시작**한다.
+            #    억지로 욱여넣으면 그 한 칸이 순간이동이 된다(실측 3.9 m/s).
+            if j0 - t_cur >= 0.4:
+                seg = ks[prev_i:i + 1]
+                sa = arc[prev_i:i + 1] - arc[prev_i]
+                span = sa[-1] or 1.0
+                for q, am in zip(seg, sa):
+                    out.append({"t": round(t_cur + (j0 - t_cur) * am / span, 2),
+                                "x": q["x"], "y": q["y"]})
+            elif not out:
+                out.append({"t": round(j0, 2),
+                            "x": round(j["x"], 1), "y": round(j["y"], 1)})
+            # ② 병목 안에서 **서성인다** — 원 안을 천천히 돈다.
+            #    도는 각도는 반경에 맞춰 줄인다(큰 원에서 같은 각도로 돌면 빨리
+            #    걷는 셈이 된다 — 실측으로 반경 2.5m 에서 1.31 m/s 가 나왔다).
+            n_w = max(2, int((j1 - j0) / step_s))
+            ph = idx * 2 * math.pi / max(1, len(seq))
+            r_px = j["r"] / mpp
+            turn = min(0.5, (0.35 * step_s) / max(0.3, j["r"]))
+            turn = turn if idx % 2 == 0 else -turn
+            for w in range(1, n_w + 1):
+                if w == n_w:
+                    # 마지막 점은 **경로로 되돌아온다**. 원 가장자리에서 바로
+                    # 다음 구간으로 넘어가면 그 한 칸이 순간이동이 된다(67 m/s).
+                    out.append({"t": round(j1, 2), "x": ks[i]["x"], "y": ks[i]["y"]})
+                    break
+                ang = ph + turn * w
+                rr = r_px * (0.35 + 0.35 * ((w * 3 + idx * 2) % 5) / 4.0)
+                out.append({"t": round(j0 + (j1 - j0) * w / n_w, 2),
+                            "x": round(j["x"] + math.cos(ang) * rr, 1),
+                            "y": round(j["y"] + math.sin(ang) * rr, 1)})
+            t_cur, prev_i = j1, i
+        # ③ 마지막 병목 ~ 통과
+        seg = ks[prev_i:]
+        sa = arc[prev_i:] - arc[prev_i]
+        span = sa[-1] or 1.0
+        for q, am in zip(seg, sa):
+            out.append({"t": round(t_cur + (t_end - t_cur) * am / span, 2),
+                        "x": q["x"], "y": q["y"]})
+        for a, b in zip(out, out[1:]):
             b["t"] = max(b["t"], a["t"] + 0.05)
-        people[pid] = ks
-        segs = []
-        for i in range(len(xs) - 1):
-            dd, dt_ = xs[i + 1] - xs[i], ys[i + 1] - ys[i]
-            if dd > 0.3 and dt_ > 0.1:
+        people[pid] = out
+
+        # 구간별 걷는 속도(병목 사이) — 눈으로 확인하라고 찍어 준다
+        segs, k0 = [], 0
+        marks = [0.0] + [st[0] for st in stops] + [L]
+        tms = [t_start] + [float(j["t1"]) for _a, _i, j in stops] + [t_end]
+        t0s = [t_start] + [float(j["t0"]) for _a, _i, j in stops]
+        for n in range(len(marks) - 1):
+            dd = marks[n + 1] - marks[n]
+            dt_ = (t0s[n + 1] if n + 1 < len(t0s) else t_end) - tms[n]
+            if dd > 0.5 and dt_ > 0.2:
                 segs.append(dd / dt_)
         rows.append(f"{pid} 병목 {len(stops)}개 · 걷는속도 "
                     + "/".join(f"{x:.2f}" for x in segs) + " m/s")
@@ -806,12 +853,6 @@ def main() -> int:
 
     exit_at = dict(raw.get("exit_at") or {})
     print(f"\n{'':5} {'문':>2} {'찍은 끝':>6} {'→통과':>6} {'늘임':>6} {'속도':>13}")
-    if getattr(a, "even_speed", False):
-        n = even_speed(people, SiteConfig.model_validate(
-            recorder.load_meta(find_session(a.session, a.floor)[0])["site_view"]
-        ).map.resolve_m_per_px())
-        print(f"가속 눌러줌: {n}명")
-
     if a.keep_time:
         # 찍은 시각이 곧 싱크다. 실측 dot 와의 일치율로 재 보면 손대는 쪽이
         # 오히려 나쁠 때가 있다(실측: 03 CBS 80% → 75%).
@@ -904,7 +945,7 @@ def main() -> int:
             f"{j['t0']:.0f}~{j['t1']:.0f}s {j['n']}명 반경 {j['r']}m" for j in jm))
         rows = apply_jams(people, order,
                           {pid: exit_at[pid] for _, pid in order}, mpp, jm,
-                          v=a.walk or 0.9, t_start=a.walk_start)
+                          v=a.walk or 0.9, t_start=0.0)
         print("  " + "\n  ".join(rows))
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
@@ -940,6 +981,12 @@ def main() -> int:
         print("\n문 앞 대기:\n  " + "\n  ".join(notes))
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
+
+    if getattr(a, "even_speed", False):
+        n = even_speed(people, SiteConfig.model_validate(
+            recorder.load_meta(find_session(a.session, a.floor)[0])["site_view"]
+        ).map.resolve_m_per_px())
+        print(f"가속 눌러줌: {n}명 (자리는 그대로, 시간만 옮김)")
 
     raw["exit_at"] = exit_at
     raw["paced"] = bool(a.profile or a.pause or a.hold or a.formation)
