@@ -347,7 +347,20 @@ def main() -> int:
             print("이상적 궤적이 없습니다 — tools/demo_tracks_build.py 를 먼저 돌리세요")
             return 1
     elif a.tracks == "drawn":
-        ideal = dpaths.load(a.session, t_end=dur)
+        from system.evac.person_routes import _edits_from_floor_json
+        from system.evac.route_solver import build_distfield
+        _carve, _blocks = _edits_from_floor_json(ROOT / "data/sites/default",
+                                                 floor, m_per_px)
+        if not _carve:
+            _carve = [r["points"] for r in (site.get("routes") or [])
+                      if len(r.get("points") or []) >= 2]
+        _df = build_distfield(str(mapf),
+                              [[tuple(e["line"][0]), tuple(e["line"][1])]
+                               for e in (site.get("exits") or []) if e.get("line")],
+                              m_per_px, carve_paths=_carve or None, carve_w_m=2.0,
+                              clearance_m=0.15, extra_walls=_blocks or None,
+                              hard_walls=[o["points"] for o in obstacles] or None)
+        ideal = dpaths.load(a.session, t_end=dur, df=_df, m_per_px=m_per_px)
         if ideal is None:
             print("그린 동선이 없습니다 — tools/path_editor.py (:8930) 에서 먼저 그리세요")
             return 1

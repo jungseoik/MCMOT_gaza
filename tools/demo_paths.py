@@ -20,10 +20,39 @@ ROOT = Path(__file__).resolve().parents[1]
 ANN = ROOT / "results/demo/_annotate"
 
 DT = 0.1
+EVEN = 0.65            # 걸음 고르기 — 0=찍은 시각 그대로, 1=완전 등속
+HOLD = True            # 경보 순간부터 첫 자리에 서 있게 한다
 
 
 def path(session_id: str) -> Path:
     return ANN / f"paths_{session_id}.json"
+
+
+def _even_times(ks, alpha=EVEN):
+    """**걸음을 고른다** — 찍은 시각을 등속 쪽으로 섞는다.
+
+    손으로 찍으면 클릭 간격이 고르지 않아 어떤 구간은 멀리, 어떤 구간은 가깝게
+    찍힌다. 그대로 두면 그 구간만 4 m/s 로 달린다(실측). 시작·끝 시각은 **그대로
+    두고** 사이만 호 길이에 비례한 시각 쪽으로 당긴다 — 싱크의 양 끝은 지키면서
+    중간의 덜컥거림만 없앤다.
+    """
+    import math
+    if len(ks) < 3:
+        return [k["t"] for k in ks]
+    t = [k["t"] for k in ks]
+    arc = [0.0]
+    for a, b in zip(ks, ks[1:]):
+        arc.append(arc[-1] + math.hypot(b["x"] - a["x"], b["y"] - a["y"]))
+    L = arc[-1] or 1.0
+    t_a, t_b = t[0], t[-1]
+    out = [t_a]
+    for i in range(1, len(ks) - 1):
+        u = t_a + (t_b - t_a) * arc[i] / L
+        out.append((1 - alpha) * t[i] + alpha * u)
+    out.append(t_b)
+    for i in range(1, len(out)):                  # 순서가 뒤집히지 않게
+        out[i] = max(out[i], out[i - 1] + 0.05)
+    return out
 
 
 def _catmull(ks, grid):
@@ -50,8 +79,54 @@ def _catmull(ks, grid):
     return out
 
 
-def load(session_id: str, t_end: float | None = None) -> dict | None:
-    """편집기 파일 → demo_viz 가 쓰는 궤적 묶음(demo_tracks 와 같은 모양)."""
+def _avoid(df, xy, m_per_px):
+    """손으로 그린 선이 벽·장애물을 스치는 자리만 **옆으로 살짝** 비켜 준다.
+
+    대충 그리라고 만든 도구다 — 모서리를 조금 질러가는 건 당연하다. 점 개수를
+    유지해야 시각이 안 밀리므로 끼워 넣지 않고 **그 점만 민다**(최대 0.8m).
+    """
+    import math
+
+    from system.evac.route_solver import _los, _nearest_free
+    W, H = df.wall.shape
+    step = 0.2 / m_per_px
+    out, moved = [], 0
+    for q in xy:
+        x, y = float(q[0]), float(q[1])
+        c, r = df.to_cell(x, y)
+        if 0 <= c < W and 0 <= r < H and df.wall[c, r]:
+            n = _nearest_free(df, c, r, 30)
+            if n is not None:
+                x, y = df.to_px(n[0], n[1])
+                moved += 1
+        if out:
+            a = out[-1]
+            if not _los(df.wall, df.to_cell(*a), df.to_cell(x, y)):
+                fixed = None
+                for kk in range(1, 5):
+                    for ang in range(0, 360, 30):
+                        t = math.radians(ang)
+                        nx, ny = x + math.cos(t) * step * kk, y + math.sin(t) * step * kk
+                        cc, rr = df.to_cell(nx, ny)
+                        if (0 <= cc < W and 0 <= rr < H and not df.wall[cc, rr]
+                                and _los(df.wall, df.to_cell(*a), (cc, rr))):
+                            fixed = (nx, ny)
+                            break
+                    if fixed:
+                        break
+                if fixed:
+                    x, y = fixed
+                    moved += 1
+        out.append([x, y])
+    return out, moved
+
+
+def load(session_id: str, t_end: float | None = None, df=None,
+         m_per_px: float | None = None) -> dict | None:
+    """편집기 파일 → demo_viz 가 쓰는 궤적 묶음(demo_tracks 와 같은 모양).
+
+    df 를 주면 벽·장애물을 스치는 자리를 비켜 준다(그린 선은 그대로 두고 표출만).
+    """
     p = path(session_id)
     if not p.is_file():
         return None
@@ -61,10 +136,14 @@ def load(session_id: str, t_end: float | None = None) -> dict | None:
         return None
     exits = raw.get("exit_at") or {}
     people = []
+    moved_total = [0]
     for pid, ks in sorted((raw.get("people") or {}).items()):
         ks = sorted(ks, key=lambda k: k["t"])
         if len(ks) < 2:
             continue
+        ks = [dict(k) for k in ks]
+        for k, nt in zip(ks, _even_times(ks)):
+            k["t"] = nt
         t_a = ks[0]["t"]
         t_b = ks[-1]["t"]
         ex = exits.get(pid)
@@ -74,13 +153,21 @@ def load(session_id: str, t_end: float | None = None) -> dict | None:
             continue
         grid = np.arange(t_a, t_b + DT * 0.5, DT)
         xy = _catmull(ks, grid)
-        people.append({"id": pid, "t0": float(t_a), "exit_at": ex,
-                       "xy": [[round(float(a), 1), round(float(b), 1)] for a, b in xy]})
+        if df is not None and m_per_px:
+            xy, mv = _avoid(df, xy, m_per_px)
+            moved_total[0] += mv
+        out = [[round(float(a), 1), round(float(b), 1)] for a, b in xy]
+        if HOLD and t_a > 0:
+            # 각본상 10명은 경보 순간부터 그 자리에 있었다. 찍기 시작한 시각부터
+            # 등장하면 도면이 텅 비어 있다가 하나씩 나타난다(실측: 0초에 2명).
+            out = [list(out[0])] * int(round(t_a / DT)) + out
+            t_a = 0.0
+        people.append({"id": pid, "t0": float(t_a), "exit_at": ex, "xy": out})
     if not people:
         return None
     end = t_end if t_end is not None else max(
         q["t0"] + len(q["xy"]) * DT for q in people)
-    return {"n": len(people), "t_end": float(end), "dt": DT,
+    return {"n": len(people), "t_end": float(end), "dt": DT, "moved": moved_total[0],
             "people": people, "authored": True,
             "hub": people[0]["xy"][0] if people else [0, 0]}
 
@@ -88,4 +175,6 @@ def load(session_id: str, t_end: float | None = None) -> dict | None:
 def summary(data: dict) -> str:
     n = len(data["people"])
     keys = sum(len(q["xy"]) for q in data["people"])
-    return f"사람이 그린 동선 {n}명 · 표본 {keys}개"
+    mv = data.get("moved") or 0
+    return (f"사람이 그린 동선 {n}명 · 표본 {keys}개"
+            + (f" · 벽 비켜감 {mv}점" if mv else " · 벽 통과 없음"))
