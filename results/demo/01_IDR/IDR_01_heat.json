@@ -9,15 +9,15 @@
   "zone_metrics": [
     {
       "zone_id": "z1",
-      "evacuation_start_at": 1789693158.2515159,
-      "response_delay_sec": 9.0,
+      "evacuation_start_at": null,
+      "response_delay_sec": null,
       "graph_distance": 20.372262381371534,
-      "idr": 2.2635847090412815,
+      "idr": null,
       "idr_per_origin": [
-        2.2635847090412815
+        null
       ],
-      "participant_ratio": 0.7272727272727273,
-      "status": "started"
+      "participant_ratio": 0.0,
+      "status": "not_started"
     }
   ],
   "exit_metrics": [
@@ -44,8 +44,8 @@
   ],
   "person_routes": {
     "seeds": 75,
-    "made": 73,
-    "unreachable": 2,
+    "made": 69,
+    "unreachable": 6,
     "extra_walls": 10
   }
 }

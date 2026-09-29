@@ -22,6 +22,9 @@ ANN = ROOT / "results/demo/_annotate"
 DT = 0.1
 EVEN = 0.65            # 걸음 고르기 — 0=찍은 시각 그대로, 1=완전 등속
 HOLD = True            # 경보 순간부터 첫 자리에 서 있게 한다
+NO_HOLD = {"sess-1789693709646"}   # 계단에서 **나오는** 각본 — 나오기 전엔 안 보여야
+                                   # 한다. 붙잡아 두면 계단 출구에 10명이 0초부터
+                                   # 서 있게 된다.
 
 
 def path(session_id: str) -> Path:
@@ -194,7 +197,7 @@ def load(session_id: str, t_end: float | None = None, obstacles=None,
             moved_total[0] += mv
             xy = _smooth(xy, 3)                # 비킨 자국을 한 번 더 편다
         out = [[round(float(a), 1), round(float(b), 1)] for a, b in xy]
-        if HOLD and t_a > 0:
+        if HOLD and t_a > 0 and session_id not in NO_HOLD:
             # 각본상 10명은 경보 순간부터 그 자리에 있었다. 찍기 시작한 시각부터
             # 등장하면 도면이 텅 비어 있다가 하나씩 나타난다(실측: 0초에 2명).
             out = [list(out[0])] * int(round(t_a / DT)) + out
@@ -206,6 +209,7 @@ def load(session_id: str, t_end: float | None = None, obstacles=None,
         q["t0"] + len(q["xy"]) * DT for q in people)
     return {"n": len(people), "t_end": float(end), "dt": DT, "moved": moved_total[0],
             "people": people, "authored": True,
+            "hold": session_id not in NO_HOLD,
             "hub": people[0]["xy"][0] if people else [0, 0]}
 
 

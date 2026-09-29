@@ -18,6 +18,8 @@ session_viz.py 와 목적이 다르다. 그쪽은 **진단**(기록이 맞나)�
 from __future__ import annotations
 
 import argparse
+import collections
+import math
 import json
 import subprocess
 import sys
@@ -34,6 +36,14 @@ import numpy as np                            # noqa: E402
 from system.metrics import recorder           # noqa: E402
 from system.metrics.replay import run_replay  # noqa: E402
 from tools import demo_ghosts as dghost       # noqa: E402
+
+# 그린 10명 **말고** 실측 그대로 얹을 트랙 (세션별)
+#   before — 이 시각 **이전에 시작하는** 트랙 전부 (12 SEI 의 계단 구간)
+#   gids   — 따로 지정한 트랙 (다 나간 뒤 뒤늦게 나오는 사람)
+EXTRA_RAW = {
+    "sess-1789693709646": {"before": 39.0,
+                           "gids": ["rh_aihub2_cam36:15", "rh_aihub2_cam35:18"]},
+}
 from tools import demo_tracks as dtrk         # noqa: E402
 from tools import demo_obstacles as dobs      # noqa: E402
 from tools import demo_paths as dpaths        # noqa: E402
@@ -168,6 +178,14 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--fps", type=float, default=0)
     ap.add_argument("--sec", type=float, default=0)
+    ap.add_argument("--metrics", default="v1", choices=("v1", "v2"),
+                    help="v1=원 관측(기본) · v2=**좌측 맵의 그 점**으로 재산출")
+    ap.add_argument("--drop-exits", default="",
+                    help="v2 — 없앤 셈 칠 출구 id(콤마). 아무도 안 쓴 가까운 출구를 "
+                         "빼면 SEI 가 실제 쓰임새를 반영한다")
+    ap.add_argument("--drop-bn", default="", help="v2 — 없앤 셈 칠 병목 id(콤마)")
+    ap.add_argument("--v-th", type=float, default=0.30,
+                    help="v2 의 피난개시 속도 임계 (사이트 기본 0.5)")
     ap.add_argument("--title", default="")
     ap.add_argument("--th", default="",
                     help='임계값 오버라이드 JSON — 예 \'{"dt_hold":1.0}\'. '
@@ -200,8 +218,11 @@ def main() -> int:
     # 개인 경로(있으면) — 인트로에 쓴다
     from system.evac import person_routes as pr
     proutes = pr.load(db)
-    if proutes is None or proutes.get("_obstacles_sig") != osig:
-        why = "없음" if proutes is None else "장애물 표시가 바뀜"
+    if (proutes is None or proutes.get("_obstacles_sig") != osig
+            or proutes.get("algo_ver") != pr.ALGO_VER):
+        why = ("없음" if proutes is None else
+               "장애물 표시가 바뀜" if proutes.get("_obstacles_sig") != osig
+               else f"산출 방식이 바뀜(v{proutes.get('algo_ver')}→v{pr.ALGO_VER})")
         print(f"[demo] 재실자별 경로 산출 중… ({why})")
         proutes = pr.generate(db, ROOT / "data/sites/default",
                               extra_walls=[o["points"] for o in obstacles] or None)
@@ -228,6 +249,21 @@ def main() -> int:
     result, timeline, frames, _m = run_replay(db, ov, fps=5.0)
     res = result.model_dump()
     tl = [t.model_dump() for t in timeline]
+    if a.metrics == "v2":
+        # **화면에 보이는 그 점으로** 다시 낸 수치. 원 관측은 트랙이 끊기고
+        # 카메라 사각이 있어, 보는 것과 세는 것이 어긋난다.
+        from tools.demo_metrics_v2 import run_v2
+        _de = [x for x in a.drop_exits.split(",") if x.strip()]
+        _db2 = [x for x in a.drop_bn.split(",") if x.strip()]
+        _d1, _d2, _dots, _site2, _tl2 = run_v2(
+            a.session, a.floor, a.tracks if a.tracks != "raw" else "drawn",
+            v_th=a.v_th, verbose=False, drop_exits=_de, drop_bn=_db2)
+        if _de or _db2:
+            print(f"[demo] 없앤 셈 친 것 — 출구 {_de or '—'} · 병목 {_db2 or '—'}")
+        res = _d2
+        tl = [t.model_dump() if hasattr(t, "model_dump") else t for t in _tl2]
+        print(f"[demo] **v2 지표** — 그린 점 {_dots['n']}명 기준 · "
+              f"개인 경로 {len(_site2.routes)}개 · v_th {a.v_th}")
     site = meta["site_view"]
 
     cam_ids = sorted({c["cam_id"] for c in meta.get("cameras", [])})
@@ -304,7 +340,9 @@ def main() -> int:
     DOT = session_color(a.session)
     outdir = ROOT / a.out
     outdir.mkdir(parents=True, exist_ok=True)
-    stem = f"{a.metric}_{label.split()[0]}" + ("_heat" if a.map == "heat" else "")
+    stem = (f"{a.metric}_{label.split()[0]}"
+            + ("_v2" if a.metrics == "v2" else "")
+            + ("_heat" if a.map == "heat" else ""))
     tmp, final = outdir / f"{stem}.tmp.mp4", outdir / f"{stem}.mp4"
     vw = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (OW, OH))
 
@@ -356,6 +394,61 @@ def main() -> int:
             print("그린 동선이 없습니다 — tools/path_editor.py (:8930) 에서 먼저 그리세요")
             return 1
         print(f"[demo] {dpaths.summary(ideal)}")
+        # **그리지 않은 사람은 실측 그대로** 얹는다. 12 SEI 는 10명이 다 나간 뒤
+        # 75초쯤 뒤늦게 한둘이 더 나온다 — 그건 손으로 그릴 게 아니라 있는 그대로
+        # 보여 주는 게 맞다.
+        _ex = EXTRA_RAW.get(a.session) or {}
+        _raw = collections.defaultdict(list)
+        for fr in frames:
+            for o in fr["objects"]:
+                _raw[o["gid"]].append((fr["ts"] - t0, o["x"], o["y"]))
+        _want = list(_ex.get("gids") or [])
+        _bef = _ex.get("before")
+        if _bef is not None:
+            # 계단에서 나오기 전은 **손대지 않고 있는 그대로** 보여 준다.
+            _want += [g for g, v in _raw.items()
+                      if v and min(q[0] for q in v) < _bef and g not in _want]
+        for gid in _want:
+            pts = sorted(_raw.get(gid) or [])
+            if len(pts) < 2:
+                continue
+            dt_ = ideal["dt"]
+            ta, tb = pts[0][0], pts[-1][0]
+            g = np.arange(ta, tb + dt_ * 0.5, dt_)
+            xs = np.interp(g, [q[0] for q in pts], [q[1] for q in pts])
+            ys = np.interp(g, [q[0] for q in pts], [q[2] for q in pts])
+            ideal["people"].append({
+                "id": gid.split(":")[-1] and f"R{len(ideal['people']) + 1:02d}",
+                "t0": float(ta), "exit_at": None,
+                "xy": [[round(float(x), 1), round(float(y), 1)] for x, y in zip(xs, ys)]})
+            if gid in (_ex.get("gids") or []):
+                print(f"        + 실측 그대로 {gid} ({ta:.1f}~{tb:.1f}s)")
+        if _want:
+            print(f"        + 계단 구간 실측 {len(_want)}개 그대로")
+        ideal["n"] = len(ideal["people"])
+    # 출구 통과 카운트도 **그린 점 기준**으로 센다. 실측 타임라인을 그대로 쓰면
+    # 점은 아직 문 앞에 있는데 카운트만 올라간다(실측 44~49s, 그린 건 46~56s).
+    door_ev = None
+    if ideal:
+        exl = [(e.get("id"), e.get("line")) for e in (site.get("exits") or [])
+               if e.get("line")]
+
+        def _sd(q, a, b):
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            u = max(0.0, min(1.0, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy)
+                             / ((dx * dx + dy * dy) or 1.0)))
+            return math.hypot(q[0] - (a[0] + u * dx), q[1] - (a[1] + u * dy))
+
+        door_ev = []
+        for pp in ideal["people"]:
+            if pp.get("exit_at") is None:
+                continue          # 실측 그대로 얹은 트랙 — 통과 시각이 없다
+            lx, ly = pp["xy"][-1]
+            eid = (min(exl, key=lambda e: _sd((lx, ly), e[1][0], e[1][1]))[0]
+                   if exl else "exit-0")
+            door_ev.append((float(pp["exit_at"]), eid))
+        door_ev.sort()
+
     if ideal:
         print(f"[demo] 이상적 궤적 {ideal['n']}명 — 끊김 없이 표출(지표는 원 관측 그대로)")
 
@@ -384,6 +477,38 @@ def main() -> int:
         first = min(z["evacuation_start_at"] for z in done) - t0
         return v, len(done), first
 
+    # 병목 면적(m²) — CBS × 면적 = **정원 초과 인·초**. 그걸 재실 인원으로 나누면
+    # "1인당 몇 초 밀렸나"가 된다. 밀도·적분 대신 이걸 근거로 붙인다.
+    # 훈련 참여 인원 — 시점별 재실이 아니라 **전체 인원**으로 나눈다
+    _n_people = (ideal["n"] if ideal else
+                 max((len(f["objects"]) for f in frames), default=10)) or 10
+    _bn_area = {}
+    for _b in (site.get("bottlenecks") or []):
+        _pg = _b.get("polygon") or []
+        if len(_pg) >= 3:
+            _a = abs(sum(_pg[i][0] * _pg[(i + 1) % len(_pg)][1]
+                         - _pg[(i + 1) % len(_pg)][0] * _pg[i][1]
+                         for i in range(len(_pg)))) / 2.0
+            _bn_area[_b["id"]] = _a * (m_per_px or 0) ** 2
+
+    # 타임라인에는 병목 **밀도**만 들어 있다(bottleneck_density). 누적 CBS 를
+    # 1인당 초로 환산하려면 면적이 필요한데, 병목마다 면적이 달라 총합만으로는
+    # 못 나눈다 — 그래서 면적 가중 평균을 쓴다. 병목 하나면 정확히 같은 값이다.
+    _area_avg = ((sum(_bn_area.values()) / len(_bn_area)) if _bn_area else 0.0)
+    _peak_seen = {"v": 0.0}
+
+    def _cbs_note(tp) -> str:
+        """CBS 아래 작은 글씨 — 사람이 읽을 수 있는 근거."""
+        bd = tp.get("bottleneck_density") or {}
+        cur = max((v or 0.0 for v in bd.values()), default=0.0)
+        _peak_seen["v"] = max(_peak_seen["v"], cur)
+        c = tp.get("cbs_total") or 0.0
+        peak = _peak_seen["v"]
+        if c <= 0:
+            return f"임계 초과 없음 · 최대 {peak:.1f}명/m²"
+        return (f"1인당 {c * _area_avg / max(1, _n_people):.1f}초 지체 "
+                f"· 최대 {peak:.1f}명/m²")
+
     def bar_panel(t, tp, obs, exits_now):
         bar = np.full((BAR_H, OW, 3), 22, np.uint8)
         el = max(0.0, t - t0)
@@ -395,7 +520,9 @@ def main() -> int:
         for name, val, sub in (
                 ("SEI", f1(tp.get("sei")), "출구 활용"),
                 ("EPFI", f1(tp.get("epfi_avg")), "경로 충실"),
-                ("CBS", f1(tp.get("cbs_total"), 2), "병목 누적"),
+                ("CBS", (f"{100 - (tp.get('cbs_total') or 0.0):.1f}"
+                         if tp.get("cbs_total") is not None else "—"),
+                 _cbs_note(tp)),
                 ("IDR", f1(iv, 2),
                  (f"개시 {ifirst:.0f}s · {idone}/{n_zones} 구역" if iv is not None
                   else f"미개시 · 0/{n_zones} 구역"))):
@@ -525,6 +652,11 @@ def main() -> int:
                 right[gy * ch:(gy + 1) * ch, gx * cw:(gx + 1) * cw] = cell
 
             ec = tp.get("exit_counts") or {}
+            if door_ev is not None:
+                ec = {}
+                for et, eid in door_ev:
+                    if t - t0 >= et:
+                        ec[eid] = ec.get(eid, 0) + 1
             frame = np.full((OH, OW, 3), 20, np.uint8)
             frame[:PANE_H, :LEFT_W] = left
             frame[:PANE_H, LEFT_W:] = right

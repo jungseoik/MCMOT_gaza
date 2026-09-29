@@ -56,8 +56,10 @@ SESSIONS = [
      "name": "02 EPFI · 우측 빙 돌아 줄서서 4명"},
     {"id": "sess-1789693478593", "floor": "floor4", "tag": "03_CBS",
      "name": "03 CBS · 한 무리로 뭉쳐서"},
+    {"id": "sess-1789693709646", "floor": "floor5", "tag": "04_SEI",
+     "name": "12 SEI · 1층 출구 나가기(계단에서 나옴)"},
     {"id": "sess-1789693805049", "floor": "floor5", "tag": "04_SEI",
-     "name": "04 SEI · 1층 반반 나눠 나가기"},
+     "name": "14 SEI · 1층 반반 나눠 나가기"},
 ]
 N_PEOPLE = 10
 

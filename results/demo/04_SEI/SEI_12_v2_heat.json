@@ -1,0 +1,41 @@
+{
+  "session_id": "sess-1789693709646",
+  "floor": "floor5",
+  "label": "12 1층 출구 나가기",
+  "metric": "SEI",
+  "epfi_avg": 78.72230533036063,
+  "sei": 100.0,
+  "cbs_total": 0.0,
+  "zone_metrics": [
+    {
+      "zone_id": "z1",
+      "evacuation_start_at": 1789693749.6460185,
+      "response_delay_sec": 40.0,
+      "graph_distance": 22.255267140837734,
+      "idr": 0.5563816785209433,
+      "idr_per_origin": [
+        0.5563816785209433
+      ],
+      "participant_ratio": 1.0,
+      "status": "started"
+    }
+  ],
+  "exit_metrics": [
+    {
+      "exit_id": "exit-1",
+      "actual_count": 10,
+      "design_capacity": 15,
+      "actual_share": 1.0,
+      "design_share": 1.0,
+      "width_m": 2.51,
+      "width_manual": false,
+      "q_design": 6.0
+    }
+  ],
+  "person_routes": {
+    "seeds": 73,
+    "made": 73,
+    "unreachable": 0,
+    "extra_walls": 3
+  }
+}

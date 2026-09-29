@@ -23,6 +23,11 @@ from system.evac.route_solver import build_distfield, solve_path
 from system.metrics import recorder
 
 ROUTES_SUFFIX = ".routes.json"
+# 경로 산출 **방식**이 바뀌면 올린다. 사이드카 재사용 여부는 장애물 지문만으로는
+# 판단할 수 없다 — 장애물이 그대로여도 푸는 법이 달라지면 결과가 달라진다.
+# (실측: hard_walls 도입 전에 저장된 사이드카가 지문이 같다는 이유로 계속 쓰여
+#  발표 영상 인트로의 경로 9.1% 가 장애물 위를 지났다.)
+ALGO_VER = 2
 MAX_ROUTES = 200          # 안전 상한 — 트랙이 수백 개인 세션에서 경로가 폭발하지 않게
 
 
@@ -84,7 +89,7 @@ def _edits_from_floor_json(site_dir: Path, floor_id: str, m_per_px: float):
 
 
 def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
-             extra_walls=None) -> dict:
+             extra_walls=None, site_override: SiteConfig | None = None) -> dict:
     """녹화본 → 자동 피난경로 목록. 반환값이 곧 사이드카 내용.
 
     {"floor_id", "m_per_px", "routes":[{id,name,points}],
@@ -96,7 +101,9 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
     """
     site_dir = Path(site_dir)
     meta = recorder.load_meta(db_path)
-    site = SiteConfig.model_validate(meta["site_view"])
+    # site_override: 출구를 빼거나 임계를 바꾼 **가정 하의** 경로를 만들 때 쓴다
+    # (발표용 v2 — "가까운 출구가 없다면"). 녹화 메타는 그대로 둔다.
+    site = site_override or SiteConfig.model_validate(meta["site_view"])
     floor_id = meta.get("floor_id") or "default"
 
     mp = site.map
@@ -166,6 +173,7 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
                        "points": r["points"],
                        "_dist_m": r["dist_m"], "_from": key})
     return {
+        "algo_ver": ALGO_VER,
         "floor_id": floor_id, "m_per_px": m_per_px,
         "routes": routes,
         "stats": {"seeds": len(first), "made": len(routes),

@@ -400,6 +400,10 @@ def at(data: dict, t: float):
     for p in data["people"]:
         u = (t - p["t0"]) / data["dt"]
         if u < 0:
+            # 기본은 첫 자리에 세워 둔다(경보 순간부터 거기 있었다는 각본).
+            # 계단에서 **나오는** 각본은 나오기 전엔 보이면 안 된다.
+            if not data.get("hold", True):
+                continue
             u = 0.0
         i = int(u)
         if i >= len(p["xy"]):

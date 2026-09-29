@@ -58,6 +58,12 @@ SPECS = {
         "label": "03 CBS", "mode": "cluster",
         "groups": [{"n": 10, "via": None, "gap": 0.35, "spread": 0.9}],
     },
+    # 12 — 계단을 내려온 뒤 계단 출구에서 차례로 나와 **한 출구로** 다 나간다
+    #      (실측 exit-1 10명). 04 와 같은 emerge 라 계단 안에서 시작하지 않는다.
+    "sess-1789693709646": {
+        "label": "12 1층 출구 나가기", "mode": "emerge",
+        "groups": [{"n": 10, "via": None, "exit": 1, "gap": 2.0, "spread": 1.2}],
+    },
     # 04 — 계단을 내려온 뒤 **계단 출구에서 차례로 나와** 두 출구로 반반
     "sess-1789693805049": {
         "label": "04 SEI", "mode": "emerge",

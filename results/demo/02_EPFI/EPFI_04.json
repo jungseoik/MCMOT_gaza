@@ -44,8 +44,8 @@
   ],
   "person_routes": {
     "seeds": 82,
-    "made": 80,
-    "unreachable": 2,
+    "made": 79,
+    "unreachable": 3,
     "extra_walls": 10
   }
 }

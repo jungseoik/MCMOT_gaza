@@ -501,8 +501,186 @@ def load_jams(sid: str):
         return []
 
 
+def fit_exit_times(people: dict, order, exit_at: dict, ets, mpp: float,
+                   v_target: float = 0.0):
+    """통과 시각을 **실측(또는 지정값)에 맞춰** 키프레임 시각을 늘린다.
+
+    시작(계단에서 나오는 시각)은 찍어 준 그대로 두고 끝만 민다 — 그 사이가
+    늘어나면서 속도가 떨어진다. 손으로 찍으면 대개 빠르게 그려진다(12 SEI 는
+    중앙 1.2~1.95 m/s, 뛰는 속도였다).
+    """
+    rows = []
+    # **찍은 순서**(계단에서 나온 순서)대로 배정한다. 끝 시각으로 줄 세우면
+    # 중간에 천천히 그린 사람이 뒤로 밀린다(12 SEI 의 P05 가 5번째 → 8번째).
+    seq = sorted(order, key=lambda z: people[z[1]][0]["t"])
+    for n, (_k, pid) in enumerate(seq):
+        if n >= len(ets):
+            break
+        ks = people[pid]
+        t_a, t_b = ks[0]["t"], ks[-1]["t"]
+        tgt = float(ets[n])
+        if v_target:
+            # 보통 걸음으로 가도록 **나오는 시각을 앞당긴다.** 손으로 찍은
+            # 시각 그대로면 21m 를 15초에 가게 되는데(1.4 m/s), 실측 걸음은
+            # 0.74 m/s 다. 계단에서 나오는 건 각본이니 여기서 정해도 된다.
+            d0 = sum(math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
+                     for a, b in zip(ks, ks[1:]))
+            t_a = max(0.0, tgt - d0 / v_target)
+        if tgt <= t_a + 0.5 or t_b <= ks[0]["t"]:
+            continue
+        f = (tgt - t_a) / (t_b - ks[0]["t"])
+        t_from = ks[0]["t"]
+        for k in ks:
+            k["t"] = round(t_a + (k["t"] - t_from) * f, 2)
+        exit_at[pid] = tgt
+        d = sum(math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
+                for a, b in zip(ks, ks[1:]))
+        rows.append(f"{pid} {t_from:.1f}~{t_b:.1f} → {t_a:.1f}~{tgt:.1f}s "
+                    f"· {d:.1f}m · {d / (tgt - t_a):.2f} m/s")
+        continue
+        f = (tgt - t_a) / (t_b - t_a)
+        for k in ks:
+            k["t"] = round(t_a + (k["t"] - t_a) * f, 2)
+        exit_at[pid] = tgt
+        d = sum(math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
+                for a, b in zip(ks, ks[1:]))
+        rows.append(f"{pid} {t_a:.1f}~{t_b:.1f} → {t_a:.1f}~{tgt:.1f}s "
+                    f"· {d:.1f}m · {d / (tgt - t_a):.2f} m/s")
+    return rows
+
+
+def clamp_speed(people: dict, mpp: float, v_max: float = 1.5,
+                keep_last: bool = False):
+    """마지막 안전장치 — 앞 점에서 너무 멀리 뛴 점을 **그만큼만 옮긴다.**
+
+    시간은 건드리지 않는다. 시간을 늘려 속도를 낮추면 병목에서 서성이던 리듬이
+    같이 뭉개진다(그렇게 했더니 서성임이 0.15 → 0.98 m/s 가 됐다). 자리를 조금
+    당기는 쪽이 싸다 — 걸리는 건 보통 몇 점뿐이다.
+    """
+    # 키프레임이 성기면 곡선(Catmull-Rom)이 밖으로 부풀며 속도가 커진다 —
+    # 여기서 누른 값이 그려질 때 되살아난다(선두 P02 가 41s 에 2.2 m/s).
+    # 먼저 **먼 구간에 중간점을 꽂아** 곡선이 덜 부풀게 한다.
+    for pid, ks in people.items():
+        out = [ks[0]]
+        for a, b in zip(ks, ks[1:]):
+            d = math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
+            k = int(d / 1.2)
+            for m in range(1, k):
+                u = m / k
+                out.append({"t": round(a["t"] + (b["t"] - a["t"]) * u, 2),
+                            "x": round(a["x"] + (b["x"] - a["x"]) * u, 1),
+                            "y": round(a["y"] + (b["y"] - a["y"]) * u, 1)})
+            out.append(b)
+        people[pid] = out
+
+    n = 0
+    for ks in people.values():
+        # 마지막 점은 **출구선 너머로 일부러 내보낸 자리**다. 여기서 당기면 점이
+        # 선 안쪽으로 되돌아와 통과가 안 세어진다(실측 10명 중 2명만 잡혔다).
+        tail = ks[-1] if keep_last and len(ks) >= 2 else None
+        for a, b in zip(ks, ks[1:]):
+            if b is tail:
+                continue
+            dt_ = max(0.05, b["t"] - a["t"])
+            d = math.hypot(b["x"] - a["x"], b["y"] - a["y"]) * mpp
+            lim = v_max * dt_
+            if d > lim:
+                f = lim / d
+                b["x"] = round(a["x"] + (b["x"] - a["x"]) * f, 1)
+                b["y"] = round(a["y"] + (b["y"] - a["y"]) * f, 1)
+                n += 1
+    return n
+
+
+def _clean_seg(seg, mpp: float, v_max: float = 1.2):
+    """실측 조각의 **튀는 점**을 다듬는다.
+
+    투영 잡음으로 한두 점이 확 튄다(실측 최대 7.5 m/s). 그대로 가져오면 그
+    사람이 병목 안에서 순간이동한다. 앞 점에서 v_max 넘게 벗어난 점은 그만큼만
+    옮긴다 — 서성이는 모양은 그대로 남는다.
+    """
+    out = [seg[0]]
+    for t, x, y in seg[1:]:
+        pt, px, py = out[-1]
+        dt_ = max(0.05, t - pt)
+        d = math.hypot(x - px, y - py) * mpp
+        lim = v_max * dt_
+        if d > lim:
+            f = lim / d
+            x, y = px + (x - px) * f, py + (y - py) * f
+        out.append((t, x, y))
+    return out
+
+
+def jam_segments(sid: str, floor: str | None, jams, mpp: float):
+    """병목마다 **그 반경 안에서 실측이 실제로 움직인 조각**을 모은다.
+
+    원 중심을 도는 규칙적인 움직임을 만들어 봤지만 그건 사람이 아니다. 그
+    반경 안에서 사람들이 어떻게 서성였는지는 **실측에 이미 들어 있다** —
+    03 CBS 는 병목마다 14~16개 조각이 있고 0.11~0.93 m/s 로 움직인다.
+    그걸 가져다 쓰면 만들어 낼 것이 없다.
+    """
+    import collections
+
+    from system.metrics.replay import run_replay
+
+    db, fl = find_session(sid, floor)
+    meta = recorder.load_meta(db)
+    t0 = float(meta["alarm_ts"])
+    gh = [g["key"] for g in dghost.load(sid)]
+    _, _, frames, _ = run_replay(db, {"exclude_tracks": gh} if gh else {}, fps=5.0)
+    tr = collections.defaultdict(list)
+    for fr in frames:
+        for o in fr["objects"]:
+            tr[o["gid"]].append((fr["ts"] - t0, o["x"], o["y"]))
+    out = []
+    for j in jams:
+        segs = []
+        for pts in tr.values():
+            seg = [(t, x, y) for t, x, y in pts
+                   if j["t0"] - 1 <= t <= j["t1"] + 1
+                   and math.hypot(x - j["x"], y - j["y"]) * mpp <= j["r"] * 1.3]
+            if len(seg) >= 3:
+                segs.append(_clean_seg(seg, mpp))
+        segs.sort(key=len, reverse=True)
+        out.append(segs)
+    return out
+
+
+def _wander(seg, j0, j1, dt_s=0.25):
+    """실측 조각을 병목 구간에 맞춰 편다 — 모자라면 **왔다갔다 되돌린다**.
+
+    조각이 병목 구간보다 짧을 때 그냥 멈춰 세우면 굳어 버린다. 앞뒤로 되짚으면
+    (핑퐁) 이음매에서 튀지 않고 계속 서성이는 모양이 된다.
+    """
+    import numpy as np
+    ts = np.array([q[0] for q in seg], float)
+    xs = np.array([q[1] for q in seg], float)
+    ys = np.array([q[2] for q in seg], float)
+    span = ts[-1] - ts[0]
+    if span < 0.5:
+        return [(j0, xs[0], ys[0]), (j1, xs[0], ys[0])]
+    out = []
+    n = max(2, int((j1 - j0) / dt_s))
+    for k in range(n + 1):
+        t = j0 + (j1 - j0) * k / n
+        u = (t - j0) % (2 * span)                 # 갔다가 되돌아온다
+        u = u if u <= span else 2 * span - u
+        out.append((t, float(np.interp(ts[0] + u, ts, xs)),
+                    float(np.interp(ts[0] + u, ts, ys))))
+    return out
+
+
+V_APP = 0.90        # 문 앞 병목까지 걸어가는 속도 (실측 전체 중앙 0.99~1.1)
+TAIL_S = 0.3        # 문 앞에서 멈칫하는 시간. 실측 문 앞 원 진입 중앙이 47.4s
+                    # 로 통과 시각(44~49s)과 거의 같다 — 즉 **문에 닿자마자**
+                    # 나간다. 여기를 3초로 두면 선두가 39초에 문 앞에 서 있게
+                    # 되는데, 실제로는 44초에 도착한다.
+
+
 def apply_jams(people: dict, order, t_pass: dict, mpp: float, jams, v: float = 0.9,
-               t_start: float = 0.0, step_s: float = 0.7):
+               t_start: float = 0.0, step_s: float = 0.7, segs_per_jam=None,
+               door_times=None):
     """**찍어 준 병목대로** 다시 만든다 — 사이는 걷고, 안에서는 **서성인다.**
 
     병목은 가만히 서 있는 게 아니다. 반경 안에서 자리를 바꾸며 왔다갔다 한다 —
@@ -515,6 +693,11 @@ def apply_jams(people: dict, order, t_pass: dict, mpp: float, jams, v: float = 0
     import numpy as np
     rows = []
     seq = sorted(order, key=lambda z: t_pass[z[1]])
+    # 찍어 준 창은 **무리 전체**가 그 자리에 있던 시간대다. 한 사람 한 사람은
+    # 자기 차례에 들어왔다 나간다 — 실측 병목2 는 진입이 26.0~38.8s 에 걸쳐
+    # 차례로 일어났다. 창을 전원에게 똑같이 쓰면 10명이 한꺼번에 튀어나간다.
+    # 그래서 **통과 시각 차이만큼 창을 통째로 민다.**
+    t_mid = float(np.median([t_pass[z[1]] for z in seq]))
     for idx, (_k, pid) in enumerate(seq):
         ks = people[pid]
         arc = np.concatenate([[0.0], np.cumsum(
@@ -534,16 +717,33 @@ def apply_jams(people: dict, order, t_pass: dict, mpp: float, jams, v: float = 0
 
         out, prev_i, t_cur = [], 0, float(t_start)
         t_end = float(t_pass[pid])
+        shift = float(t_pass[pid]) - t_mid
         for sn, (a_m, i, j) in enumerate(stops):
-            j0, j1 = float(j["t0"]), float(j["t1"])
+            j0, j1 = float(j["t0"]) + shift, float(j["t1"]) + shift
+            if j0 < t_start:
+                j0, j1 = t_start, max(t_start + 0.5, j1)
             if j0 < t_cur:
                 j0 = t_cur
             # 찍어 준 병목이 그 사람의 통과 시각을 넘을 수 있다 — 문 앞 병목이
             # 그렇다(47~55s 인데 통과는 44~49s). 사람마다 **자기 차례에** 빠져
             # 나가야 하므로 거기서 끊는다.
             last = sn == len(stops) - 1
-            lim = t_end - (1.2 if last else 0.3)
-            j1 = min(float(j1), lim)
+            lim = t_end - (0.4 if last else 0.3)
+            if last and door_times and idx < len(door_times):
+                # 문 앞에 **닿는 시각**을 직접 준 경우 — 원 가장자리에서 조각
+                # 자리(원 중심 쪽)까지 1.3초 더 걸어 들어간다. 나머지 시간은
+                # 전부 그 자리에서 머뭇거린다. 뒤로 갈수록 오래 머문다 =
+                # 병목이 커지는 모습.
+                j0, j1 = float(door_times[idx]) + 1.3, lim
+                if j1 <= j0:
+                    j0 = max(t_cur + 0.4, j1 - 0.5)
+            if j1 > lim:
+                # **창을 그 사람 통과 직전으로 옮긴다.** 그냥 자르면 j1 < j0 이
+                # 되어 통째로 스킵되고, 문 앞에서 안 멈추고 바로 나가 버린다.
+                # 길이는 실측(문 앞 체류 중앙 3.0s)을 넘지 않게 줄인다.
+                j1 = lim
+                j0 = max(t_cur + 0.4, j1 - min(float(j["t1"]) - float(j["t0"]),
+                                               TAIL_S))
             if j1 <= j0:
                 j1 = min(j0 + 0.5, lim)
             if j1 <= j0:
@@ -551,40 +751,56 @@ def apply_jams(people: dict, order, t_pass: dict, mpp: float, jams, v: float = 0
             # ① 여기까지 걸어온다 — 구간 거리 ÷ 구간 시간이 속도다.
             #    걸어올 시간이 없으면(첫 병목이 0초부터면) 그냥 **거기서 시작**한다.
             #    억지로 욱여넣으면 그 한 칸이 순간이동이 된다(실측 3.9 m/s).
+            if last and j0 - t_cur > 0.4:
+                # 문까지 **보통 걸음으로** 간다. 남은 시간을 다 쓰면 0.76 m/s 로
+                # 느릿느릿 가게 되는데, 느릴수록 문 앞 원에 **더 일찍** 닿는다
+                # (선두가 39초에 도착해 버렸다). 실측은 병목2 를 늦게 뜨고 보통
+                # 걸음으로 가 42.4s 에 닿았다 — 남는 시간은 앞 병목에 머문다.
+                need = (arc[i] - arc[prev_i]) / V_APP
+                t_cur = max(t_cur, j0 - need)
             if j0 - t_cur >= 0.4:
-                seg = ks[prev_i:i + 1]
-                sa = arc[prev_i:i + 1] - arc[prev_i]
-                span = sa[-1] or 1.0
+                # 앞 구간이 이미 그 점을 넣었으면 건너뛴다 — 같은 자리를 두 번
+                # 넣으면 0.05초 간격으로 밀리며 순간이동이 된다(실측 38 m/s).
+                s0 = prev_i + 1 if out else prev_i
+                seg = ks[s0:i + 1]
+                sa = arc[s0:i + 1] - arc[prev_i]
+                span = (arc[i] - arc[prev_i]) or 1.0
                 for q, am in zip(seg, sa):
                     out.append({"t": round(t_cur + (j0 - t_cur) * am / span, 2),
                                 "x": q["x"], "y": q["y"]})
             elif not out:
                 out.append({"t": round(j0, 2),
                             "x": round(j["x"], 1), "y": round(j["y"], 1)})
-            # ② 병목 안에서 **서성인다** — 원 안을 천천히 돈다.
-            #    도는 각도는 반경에 맞춰 줄인다(큰 원에서 같은 각도로 돌면 빨리
-            #    걷는 셈이 된다 — 실측으로 반경 2.5m 에서 1.31 m/s 가 나왔다).
-            n_w = max(2, int((j1 - j0) / step_s))
-            ph = idx * 2 * math.pi / max(1, len(seq))
-            r_px = j["r"] / mpp
-            turn = min(0.5, (0.35 * step_s) / max(0.3, j["r"]))
-            turn = turn if idx % 2 == 0 else -turn
-            for w in range(1, n_w + 1):
-                if w == n_w:
-                    # 마지막 점은 **경로로 되돌아온다**. 원 가장자리에서 바로
-                    # 다음 구간으로 넘어가면 그 한 칸이 순간이동이 된다(67 m/s).
-                    out.append({"t": round(j1, 2), "x": ks[i]["x"], "y": ks[i]["y"]})
-                    break
-                ang = ph + turn * w
-                rr = r_px * (0.35 + 0.35 * ((w * 3 + idx * 2) % 5) / 4.0)
-                out.append({"t": round(j0 + (j1 - j0) * w / n_w, 2),
-                            "x": round(j["x"] + math.cos(ang) * rr, 1),
-                            "y": round(j["y"] + math.sin(ang) * rr, 1)})
+            # ② 병목 안에서 **실측이 서성인 그대로** 움직인다.
+            #    조각은 그 반경 안에서 실제로 잡힌 트랙이다 — 만들어 내지 않는다.
+            segs = (segs_per_jam or {}).get(id(j)) or []
+            if segs:
+                seg = segs[idx % len(segs)]
+                # 같은 조각을 여러 사람이 쓰면 겹친다 — 조금씩 떨어뜨린다
+                kk = idx // max(1, len(segs))
+                ang = (idx * 2.399) % (2 * math.pi)
+                off = (0.0, 0.0) if kk == 0 else (
+                    math.cos(ang) * 0.6 / mpp, math.sin(ang) * 0.6 / mpp)
+                wp = [(t, x + off[0], y + off[1])
+                      for t, x, y in _wander(seg, j0, max(j0 + 0.2, j1 - 0.4))]
+                # **앞뒤를 조각 자리에 맞춘다.** 경로 지점과 조각 자리가 떨어져
+                # 있는데 0.05초에 건너가려 하면 그 한 칸이 순간이동이 된다
+                # (실측 38 m/s). 걸어오는 끝점을 조각 시작 자리로 바꾼다.
+                if out:
+                    out[-1]["x"], out[-1]["y"] = round(wp[0][1], 1), round(wp[0][2], 1)
+                for t, x, y in wp:
+                    out.append({"t": round(t, 2), "x": round(x, 1), "y": round(y, 1)})
+                # 나가는 쪽도 조각의 **마지막 자리**에서 시작한다
+                out.append({"t": round(j1, 2),
+                            "x": round(wp[-1][1], 1), "y": round(wp[-1][2], 1)})
+            else:
+                out.append({"t": round(j1, 2), "x": ks[i]["x"], "y": ks[i]["y"]})
             t_cur, prev_i = j1, i
         # ③ 마지막 병목 ~ 통과
-        seg = ks[prev_i:]
-        sa = arc[prev_i:] - arc[prev_i]
-        span = sa[-1] or 1.0
+        s0 = prev_i + 1 if out else prev_i
+        seg = ks[s0:]
+        sa = arc[s0:] - arc[prev_i]
+        span = (arc[-1] - arc[prev_i]) or 1.0
         for q, am in zip(seg, sa):
             out.append({"t": round(t_cur + (t_end - t_cur) * am / span, 2),
                         "x": q["x"], "y": q["y"]})
@@ -605,6 +821,65 @@ def apply_jams(people: dict, order, t_pass: dict, mpp: float, jams, v: float = 0
         rows.append(f"{pid} 병목 {len(stops)}개 · 걷는속도 "
                     + "/".join(f"{x:.2f}" for x in segs) + " m/s")
     return rows
+
+
+def _same_side(q, p, u) -> bool:
+    """가던 방향(u)으로 가면 출구선 최근접점(p)을 아직 지나야 하는가."""
+    return (p[0] - q["x"]) * u[0] + (p[1] - q["y"]) * u[1] > 0
+
+
+def extend_to_exit(people: dict, t_pass: dict, mpp: float, exits,
+                    over_m: float = 0.6, v: float = 1.1):
+    """경로 끝을 **출구선 너머**까지 늘린다.
+
+    손으로 찍은 마지막 점은 문 **앞**이다(실측 0.7~1.5m 앞, 문 앞 병목 원 안).
+    거기서 점이 사라지면 아직 문에 닿지도 않았는데 카운트가 오른 것처럼 보인다.
+    그래서 출구선 위 최근접점을 지나 {over_m}m 더 간 자리를 통과 시각에 놓고,
+    직전 점(문 앞)은 거기서 걸어갈 만큼 앞당긴다.
+    """
+    n = 0
+    for pid, ks in people.items():
+        q = ks[-1]
+        best = None
+        for (ax, ay), (bx, by) in exits:
+            dx, dy = bx - ax, by - ay
+            L2 = dx * dx + dy * dy or 1.0
+            u = max(0.0, min(1.0, ((q["x"] - ax) * dx + (q["y"] - ay) * dy) / L2))
+            px, py = ax + u * dx, ay + u * dy
+            d = math.hypot(q["x"] - px, q["y"] - py)
+            if best is None or d < best[0]:
+                best = (d, px, py)
+        d_px, px, py = best
+        if d_px < 1e-6:
+            continue
+        # **가던 방향으로** 더 간다. 출구선 쪽으로 밀면, 이미 선을 넘어 서 있는
+        # 사람을 도로 안으로 되돌린다 — 12 SEI 가 그랬다(찍어 준 끝점이 이미
+        # 선 너머라, 연장이 전원을 안쪽으로 끌어와 통과가 2명만 잡혔다).
+        prev = ks[-2] if len(ks) >= 2 else None
+        vx, vy = ((q["x"] - prev["x"], q["y"] - prev["y"]) if prev else
+                  (px - q["x"], py - q["y"]))
+        vn = math.hypot(vx, vy)
+        if vn < 1e-6:
+            vx, vy, vn = px - q["x"], py - q["y"], d_px
+        ux, uy = vx / vn, vy / vn
+        # 아직 선 앞이면 선까지 거리를 더해 확실히 넘긴다
+        ahead = d_px * mpp if _same_side(q, (px, py), (ux, uy)) else 0.0
+        tx = q["x"] + ux * (ahead + over_m) / mpp
+        ty = q["y"] + uy * (ahead + over_m) / mpp
+        t_end = float(t_pass.get(pid, q["t"]))
+        dist = math.hypot(tx - q["x"], ty - q["y"]) * mpp
+        # 앞 점보다 이르게 당기면 **시간이 역행**한다(실측 43.97 → 42.15,
+        # 그 자리가 7.4 m/s 로 튀었다). 바로 앞 점 뒤로만 당긴다.
+        floor_t = ks[-2]["t"] + 0.1 if len(ks) >= 2 else 0.0
+        q["t"] = round(max(floor_t, min(q["t"], t_end - dist / v)), 2)
+        ks.append({"t": round(t_end, 2), "x": round(tx, 1), "y": round(ty, 1)})
+        # 통과 시각은 실측이라 못 옮긴다 — 대신 **앞쪽을 역순으로 당겨** 순서를
+        # 맞춘다. 문 앞 멈칫이 0.1~0.3초 줄 뿐이다.
+        for k in range(len(ks) - 2, -1, -1):
+            if ks[k]["t"] >= ks[k + 1]["t"]:
+                ks[k]["t"] = round(ks[k + 1]["t"] - 0.05, 2)
+        n += 1
+    return n
 
 
 def constant_walk(people: dict, order, t_pass: dict, mpp: float, exits,
@@ -707,7 +982,8 @@ def even_speed(people: dict, mpp: float, cap: float = 1.25, rounds: int = 40):
     return fixed
 
 
-def speed_check(sid: str, floor: str | None, people: dict, jump: float = 1.4):
+def speed_check(sid: str, floor: str | None, people: dict, jump: float = 1.4,
+                hard: float = 1.5):
     """**빨라지는 구간**을 찾는다.
 
     사람은 일정하게 걷다 느려질 수는 있어도 갑자기 빨라지지 않는다. 손으로 찍은
@@ -728,11 +1004,13 @@ def speed_check(sid: str, floor: str | None, people: dict, jump: float = 1.4):
         if len(vs) < 3:
             continue
         med = float(np.median(vs))
-        hi = [v for v in vs if v > max(0.6, med * jump)]
+        # 절대 기준으로 본다. 중앙값 배수로 보면 병목에서 서성이는 사람
+        # (중앙 0.15 m/s)에게 0.2 m/s 도 '빠르다'가 된다.
+        hi = [v for v in vs if v > hard]
         if hi:
             bad.append(f"{pid}({len(hi)}구간 최대 {max(hi):.1f})")
         print(f"  {pid:5} 중앙 {med:.2f} m/s · 최대 {max(vs):.2f}"
-              + (f"  ⚠ {len(hi)}구간이 중앙의 {jump}배 초과" if hi else "  ✅"))
+              + (f"  ⚠ {len(hi)}구간이 {hard} m/s 초과" if hi else "  ✅"))
     if bad:
         print("  빨라지는 구간: " + " · ".join(bad))
     else:
@@ -778,6 +1056,21 @@ def main() -> int:
     ap.add_argument("--formation", action="store_true",
                     help="무리가 **같은 대형으로** 움직이게 한다. 진행 곡선을 무리끼리 "
                          "공유하고, 벌어지는 간격은 실제 통과 시각 차이 그대로.")
+    ap.add_argument("--exit-over", type=float, default=0.6,
+                    help="출구선을 **얼마나 더** 지나 끝낼지(m). 평활화·장애물 "
+                         "비껴가기가 끝점을 되밀어 선을 못 넘는 사람이 생기면 키운다")
+    ap.add_argument("--use-exits", default="",
+                    help="출구선 연장에 **쓸 출구만** 지정(콤마). 안 쓰는 출구가 더 "
+                         "가까우면 점이 그쪽으로 뻗어 통과가 안 잡힌다")
+    ap.add_argument("--fit-speed", type=float, default=0.0,
+                    help="--exit-times 와 같이 — 이 속도로 걷도록 **나오는 시각을 "
+                         "앞당긴다**(12 SEI 실측 걸음 0.74 m/s)")
+    ap.add_argument("--door-times", default="",
+                    help="문 앞에 **닿는** 시각들(콤마, 통과 순서대로). 실측이 아니라 "
+                         "연출로 정할 때 쓴다 — 44초에 선두가 코앞, 50초에 아직 몰려 있게")
+    ap.add_argument("--exit-times", default="",
+                    help="문을 **통과하는** 시각들(콤마, 순서대로). 이걸 주면 실측 "
+                         "통과 시각 대신 이 값으로 맞춘다")
     ap.add_argument("--jams", action="store_true",
                     help="편집기(:8930)에서 찍어 준 **병목대로** 시각을 매긴다. "
                          "병목 사이는 일정한 속도로 걷고 병목 안에서는 선다.")
@@ -936,6 +1229,26 @@ def main() -> int:
         print("\n대형 맞춤: " + " · ".join(notes))
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
+    if a.exit_times and not a.jams:
+        ets = [float(x) for x in a.exit_times.split(",") if x.strip()]
+        rows = fit_exit_times(people, order, exit_at, ets, mpp,
+                              v_target=a.fit_speed)
+        print("\n통과 시각 맞춤:\n  " + "\n  ".join(rows))
+        # 문 앞에서 끝나면 **점이 문을 넘지 않는다** — 그러면 출구 카운트가 0 이
+        # 되고 SEI 가 아예 산출되지 않는다(12 SEI 가 그랬다. 끝점이 출구선에서
+        # 1.75~3.04m 앞이었다).
+        use = [x.strip() for x in a.use_exits.split(",") if x.strip()]
+        ex_use = ([[tuple(e.line[0]), tuple(e.line[1])] for e in site.exits
+                   if e.line and e.id in use] if use else exits)
+        n = extend_to_exit(people, {pid: exit_at[pid] for _, pid in order},
+                           mpp, ex_use, over_m=a.exit_over)
+        print(f"  출구선 너머로 연장: {n}명"
+              + (f" (출구 {use} 만)" if use else ""))
+        for pid in exit_at:
+            exit_at[pid] = float(people[pid][-1]["t"])
+        n = clamp_speed(people, mpp, keep_last=True)
+        print(f"  속도 상한(1.5 m/s) 적용: {n}점 당김 (출구 너머 점은 그대로)")
+
     if a.jams:
         jm = load_jams(a.session)
         if not jm:
@@ -943,9 +1256,23 @@ def main() -> int:
             return 1
         print("\n찍어 준 병목: " + " · ".join(
             f"{j['t0']:.0f}~{j['t1']:.0f}s {j['n']}명 반경 {j['r']}m" for j in jm))
+        dts = [float(x) for x in a.door_times.split(",") if x.strip()] or None
+        ets = [float(x) for x in a.exit_times.split(",") if x.strip()] or None
+        if ets:
+            for n, (_k, pid) in enumerate(sorted(order, key=lambda z: exit_at[z[1]])):
+                if n < len(ets):
+                    exit_at[pid] = ets[n]
+            print("  통과 시각 지정: " + " ".join(f"{x:.1f}" for x in ets))
+        if dts:
+            print("  문앞 도착 지정: " + " ".join(f"{x:.1f}" for x in dts))
+        segl = jam_segments(a.session, a.floor, jm, mpp)
+        print("  실측 조각: " + " · ".join(
+            f"{j['t0']:.0f}~{j['t1']:.0f}s {len(sg)}개" for j, sg in zip(jm, segl)))
         rows = apply_jams(people, order,
                           {pid: exit_at[pid] for _, pid in order}, mpp, jm,
-                          v=a.walk or 0.9, t_start=0.0)
+                          v=a.walk or 0.9, t_start=0.0,
+                          segs_per_jam={id(j): sg for j, sg in zip(jm, segl)},
+                          door_times=dts)
         print("  " + "\n  ".join(rows))
         for pid in exit_at:
             exit_at[pid] = float(people[pid][-1]["t"])
@@ -987,6 +1314,15 @@ def main() -> int:
             recorder.load_meta(find_session(a.session, a.floor)[0])["site_view"]
         ).map.resolve_m_per_px())
         print(f"가속 눌러줌: {n}명 (자리는 그대로, 시간만 옮김)")
+
+    if a.jams:
+        n = extend_to_exit(people, {pid: exit_at[pid] for _, pid in order},
+                           mpp, exits)
+        print(f"출구선 너머로 연장: {n}명 (문 앞에서 사라지지 않게)")
+        for pid in exit_at:
+            exit_at[pid] = float(people[pid][-1]["t"])
+        n = clamp_speed(people, mpp)
+        print(f"속도 상한(1.5 m/s) 적용: {n}점 당김")
 
     raw["exit_at"] = exit_at
     raw["paced"] = bool(a.profile or a.pause or a.hold or a.formation)
