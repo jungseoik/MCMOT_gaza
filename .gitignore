@@ -239,3 +239,6 @@ results/demo/*/*.mp4
 results/demo/_annotate/*.png
 # 편집기 배경용 카메라 합본 — tools/grid_mp4.py 로 다시 만든다
 results/demo/_annotate/grid_*.mp4
+
+# 시연용 화면 녹화(운영 뷰 screencast) — 영상은 레포에 넣지 않는다
+results/demo/screencast/

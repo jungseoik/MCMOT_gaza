@@ -1070,6 +1070,235 @@ def list_floors():
     return out
 
 
+# ── 도면 오버레이 — 한 번 풀어 캐시한다 ────────────────────────────────────
+# 연결성(초록=출구까지 갈 수 있음 · 주황=고립)은 거리장을 한 번 푸는 일이라
+# 매 프레임 계산할 이유가 없다. 층·출구·장애물이 바뀔 때만 다시 푼다.
+# 결과는 **PNG 한 장**으로 내려준다 — 클라이언트는 맵 위에 겹쳐 그리기만 한다.
+# 장애물 종류 — :8910 CAD(evac/web.py OBSTACLE_TAGS)·:8920 표시 편집기와 **같은 3종**.
+# 같은 것이 화면마다 다른 색으로 보이면 그때부터 오해가 시작된다.
+OBSTACLE_TAG_LABEL = {"chair": "의자·집기", "box": "박스·적치물", "nogo": "통행금지"}
+
+_CONN_CACHE: dict[str, tuple[str, bytes, str]] = {}   # floor -> (지문, png, 출처)
+
+
+def _conn_key(floor_id: str) -> str:
+    """캐시 지문 — 층 설정(출구·경로)과 도면 메타(장애물 shapes)가 바뀌면 달라진다."""
+    import hashlib
+    site = rt.site()
+    fl = next((f for f in site.floors if f.id == floor_id), None)
+    part = [str(getattr(site, "version", "")), floor_id]
+    if fl is not None:
+        v = fl.model_dump() if hasattr(fl, "model_dump") else {}
+        part.append(json.dumps({k: v.get(k) for k in ("exits", "routes", "map")},
+                               ensure_ascii=False, sort_keys=True, default=str))
+    gz = rt.store.site_dir(SITE_ID) / f"evac_grid_{floor_id}.npz"
+    if gz.is_file():
+        st = gz.stat()
+        part.append(f"grid:{st.st_mtime_ns}:{st.st_size}")
+    fjson = rt.store.site_dir(SITE_ID) / (
+        "floor.json" if floor_id == "default" else f"floor_{floor_id}.json")
+    if fjson.is_file():
+        try:
+            part.append(json.dumps(
+                (json.loads(fjson.read_text(encoding="utf-8")).get("shapes") or []),
+                ensure_ascii=False, sort_keys=True))
+        except (OSError, json.JSONDecodeError):
+            pass
+    return hashlib.md5("|".join(part).encode()).hexdigest()[:16]
+
+
+@app.get("/api/_debug/threads")
+def _debug_threads(top: int = 12):
+    """스레드가 **어디서 멈춰 있는지** 집계. 누수 진단용(임시)."""
+    import collections
+    import sys as _sys
+    import threading as _th
+    import traceback as _tb
+    frames = _sys._current_frames()
+    cnt = collections.Counter()
+    for t in _th.enumerate():
+        f = frames.get(t.ident)
+        if f is None:
+            continue
+        st = _tb.extract_stack(f)
+        key = " < ".join(f"{x.filename.split('/')[-1]}:{x.lineno} {x.name}"
+                         for x in reversed(st[-4:]))
+        cnt[key] += 1
+    return {"total": _th.active_count(), "top": cnt.most_common(top)}
+
+
+@app.get("/api/floor/connectivity")
+def floor_connectivity(floor: str = DEFAULT_FLOOR_ID):
+    """연결성 오버레이 PNG (맵 px 크기, 투명 배경).
+
+    초록 = 출구까지 도달 가능 · 주황 = 막혀서 고립. 장애물·벽을 반영한 거리장에서
+    바로 나온다. 같은 설정이면 캐시를 그대로 돌려준다.
+    """
+    import numpy as np
+    import cv2
+    from system.evac.route_solver import build_distfield
+    from system.evac import person_routes as pr
+
+    key = _conn_key(floor)
+    hit = _CONN_CACHE.get(floor)
+    if hit and hit[0] == key:
+        return Response(hit[1], media_type="image/png",
+                        headers={"Cache-Control": "no-cache", "X-Conn-Cache": "hit",
+                                 "X-Conn-Src": hit[2]})
+
+    site_dir = rt.store.site_dir(SITE_ID)
+    site = rt.site()
+    fl = next((f for f in site.floors if f.id == floor), None)
+    if fl is None or not getattr(fl, "map", None):
+        raise HTTPException(404, f"{floor}: 층/도면이 없습니다")
+    m_per_px = fl.map.resolve_m_per_px()
+    exits = [[tuple(e.line[0]), tuple(e.line[1])] for e in (fl.exits or []) if e.line]
+    if not m_per_px or not exits:
+        raise HTTPException(400, f"{floor}: 축척 또는 출구가 없어 연결성을 못 냅니다")
+    png = site_dir / ("map.png" if floor == "default" else f"map_{floor}.png")
+    if not png.is_file():
+        raise HTTPException(404, f"{floor}: 도면 이미지가 없습니다")
+
+    w_px = int(fl.map.w or 0) or 2000
+    h_px = int(fl.map.h or 0) or 2000
+
+    # ① CAD 편집기가 남긴 **벡터 기반 격자**가 있으면 그걸 쓴다.
+    #    map.png 에서 어두운 픽셀로 벽을 되짚으면 책상·변기·문 스윙·글자까지
+    #    벽이 되어 얼룩덜룩해진다(실측 도면의 32.6%가 벽). CAD 는 DWG 선분으로
+    #    격자를 만들었으므로 그 결과를 그대로 쓰는 게 정확하고 보기도 깔끔하다.
+    src = "cad-grid"
+    gz = site_dir / f"evac_grid_{floor}.npz"
+    ok = iso = None
+    if gz.is_file():
+        try:
+            z = np.load(gz, allow_pickle=True)
+            from scipy.ndimage import label as _cc
+            wall_g = np.asarray(z["grid"], bool)          # (cols, rows) y-up, True=벽
+            free_g = ~wall_g
+            # **CAD 와 같은 판정**: 출구 도달 여부가 아니라 보행공간이 몇 조각으로
+            # 끊겼는지를 본다(evac/core.connectivity). 가장 큰 덩어리가 초록,
+            # 거기서 떨어져 나온 조각이 주황이다. 저장된 dist 는 그때 지정한
+            # Exit 기준이라(도달 6.2%) 지금 출구 설정과 맞지 않는다 — 쓰지 않는다.
+            lab, _n = _cc(free_g)
+            sz = np.bincount(lab.ravel())
+            sz[0] = 0
+            main = int(sz.argmax()) if sz.size > 1 else 0
+            # 격자(y-up) → 이미지(y-down): 전치 후 상하반전 (CAD render 와 같은 규칙)
+            lab_i = np.flipud(lab.T)
+            ok, iso = (lab_i == main), (lab_i > 0) & (lab_i != main)
+        except (OSError, ValueError, KeyError) as e:
+            logger.warning("연결성: %s 를 못 읽어 도면 추정으로 넘어간다 — %s", gz.name, e)
+            ok = iso = None
+
+    # ② 없으면 기존대로 map.png 에서 되짚는다(1층·17F 등 CAD 격자 미보유 층)
+    if ok is None:
+        src = "png-estimate"
+        carve, blocks, hard = pr._edits_from_floor_json(site_dir, floor, m_per_px)
+        if not carve:
+            carve = [r.points for r in (fl.routes or []) if len(r.points) >= 2]
+        df = build_distfield(str(png), exits, m_per_px,
+                             carve_paths=carve or None, carve_w_m=2.0,
+                             clearance_m=0.15, extra_walls=blocks or None,
+                             hard_walls=[list(w) for w in hard] or None)
+        ok = (np.isfinite(df.dist) & (~df.wall)).T
+        iso = ((~df.wall) & (~np.isfinite(df.dist))).T
+
+    rows, cols = ok.shape
+    rgba = np.zeros((rows, cols, 4), np.uint8)
+    rgba[ok] = (90, 200, 60, 90)          # BGRA — 초록(연결), CAD 와 같은 투명도
+    rgba[iso] = (60, 170, 255, 110)       # 주황(고립)
+
+    # 격자는 **도면(bounds) 좌표계**다. 그런데 맵 이미지에서 도면이 꽉 차 있지
+    # 않을 수 있다 — 축·여백이 있는 그림으로 만든 맵이 그렇다(17F 는 도면이
+    # x 237~3298 · y 126~3015 에만 있다). 그 자리에만 앉혀야 여백이 안 칠해진다.
+    rect = None
+    fjson = site_dir / ("floor.json" if floor == "default" else f"floor_{floor}.json")
+    if fjson.is_file():
+        try:
+            rect = json.loads(fjson.read_text(encoding="utf-8")).get("ax_rect")
+        except (OSError, json.JSONDecodeError):
+            rect = None
+    if rect and len(rect) == 4 and tuple(rect) != (0, 0, 1, 1):
+        L, B, RW, RH = [float(v) for v in rect]
+        ix, iy = int(round(L * w_px)), int(round((1 - B - RH) * h_px))
+        iw, ih = max(1, int(round(RW * w_px))), max(1, int(round(RH * h_px)))
+        inner = cv2.resize(rgba, (iw, ih), interpolation=cv2.INTER_NEAREST)
+        big = np.zeros((h_px, w_px, 4), np.uint8)          # 바깥은 투명
+        x0, y0 = max(0, ix), max(0, iy)
+        x1, y1 = min(w_px, ix + iw), min(h_px, iy + ih)
+        big[y0:y1, x0:x1] = inner[y0 - iy:y1 - iy, x0 - ix:x1 - ix]
+        src += "+rect"
+    else:
+        big = cv2.resize(rgba, (w_px, h_px), interpolation=cv2.INTER_NEAREST)
+    okb, buf = cv2.imencode(".png", big)
+    if not okb:
+        raise HTTPException(500, "연결성 PNG 인코딩 실패")
+    data = buf.tobytes()
+    _CONN_CACHE[floor] = (key, data, src)
+    logger.info("연결성 오버레이 산출 %s (%s) · 연결 %d · 고립 %d 셀 · %.0fKB",
+                floor, src, int(ok.sum()), int(iso.sum()), len(data) / 1024)
+    return Response(data, media_type="image/png",
+                    headers={"Cache-Control": "no-cache", "X-Conn-Cache": "miss",
+                             "X-Conn-Src": src})
+
+
+@app.get("/api/floor/obstacles")
+def floor_obstacles(floor: str = DEFAULT_FLOOR_ID):
+    """장애물 다각형(맵 px) — 도면 메타 `shapes` 의 막기 도형.
+
+    `op:"block"` 만 준다. `src` 로 어디서 찍은 것인지 구분한다
+    (`obstacle:8920` = 발표용 장애물 편집기).
+    """
+    site = rt.site()
+    fl = next((f for f in site.floors if f.id == floor), None)
+    if fl is None or not getattr(fl, "map", None):
+        return {"floor_id": floor, "obstacles": []}
+    m_per_px = fl.map.resolve_m_per_px()
+    site_dir = rt.store.site_dir(SITE_ID)
+    fjson = site_dir / ("floor.json" if floor == "default" else f"floor_{floor}.json")
+    meta = {}
+    if fjson.is_file():
+        try:
+            meta = json.loads(fjson.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            meta = {}
+
+    # ① CAD 가 이미 맵 px + 종류로 저장해 둔 게 있으면 그대로 쓴다
+    #    (evac/web.py 가 floor.json 에 넣는 obstacles 배열 — ":8900 이 겹쳐 그리라고"
+    #     만들어 둔 것이다). 종류는 chair(의자·집기)/box(박스·적치물)/nogo(통행금지).
+    ready = meta.get("obstacles") or []
+    if ready:
+        return {"floor_id": floor, "source": "cad",
+                "obstacles": [{"points": [[o["pts_px"][i], o["pts_px"][i + 1]]
+                                          for i in range(0, len(o["pts_px"]) - 1, 2)],
+                               "tag": o.get("tag") or "nogo",
+                               "label": o.get("label") or ""}
+                              for o in ready if o.get("pts_px")]}
+
+    # ② 없으면 shapes 에서 뽑는다 — 종류(tag)를 같이 실어 준다.
+    #    세 화면(:8910 CAD · :8920 표시 편집기 · :8900 운영)이 **같은 3종·같은 색**을
+    #    써야 한다. 여기서 tag 를 빠뜨리면 운영만 단색으로 보인다.
+    shapes = meta.get("shapes") or []
+    out = []
+    minx, miny, maxx, maxy = (meta.get("bounds_mm") or [0, 0, 1, 1])
+    w_px, h_px = (meta.get("map_px") or [1, 1])
+
+    def _to_px(x, y):
+        return [(x - minx) / (maxx - minx) * w_px, (maxy - y) / (maxy - miny) * h_px]
+
+    for sh in shapes:
+        if sh.get("op") != "block":
+            continue
+        pts = sh.get("pts") or []
+        xy = [_to_px(pts[i], pts[i + 1]) for i in range(0, len(pts) - 1, 2)]
+        if sh.get("kind") == "rect" and len(xy) == 2:
+            xy = [xy[0], [xy[1][0], xy[0][1]], xy[1], [xy[0][0], xy[1][1]]]
+        if len(xy) >= 3:
+            out.append({"points": xy, "tag": sh.get("tag") or "nogo",
+                        "label": OBSTACLE_TAG_LABEL.get(sh.get("tag") or "nogo", "")})
+    return {"floor_id": floor, "source": "shapes", "obstacles": out}
+
+
 @app.post("/api/floors")
 async def add_floor(request: Request):
     """층 추가 — body {id?, name?, building?}. id 생략 시 서버 발급(floor2..).

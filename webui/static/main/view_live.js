@@ -12,10 +12,19 @@ Views.live = (() => {
   // 지도 레이어 표시 — 기본 전부 켬. 운영자가 "IDR 구역만" 같은 식으로 골라 볼 수 있게.
   // 저장은 브라우저(localStorage) — 서버 설정이 아니라 보는 사람의 취향이다.
   const LAYER_KEYS = ["zones", "routes", "bottlenecks", "exits", "origins"];
+  // 이름표는 **기본 끔** — 출입구 카운트 라벨이 길어 병목 이름과 겹친다
+  const LAYER_OFF = ["labels", "obstacles", "trails"];
   let layers = (() => {
-    try { const v = JSON.parse(localStorage.getItem("macs_live_layers") || "null"); if (v && typeof v === "object") return { ...Object.fromEntries(LAYER_KEYS.map((k) => [k, true])), ...v }; } catch (e) { /* 무시 */ }
-    return Object.fromEntries(LAYER_KEYS.map((k) => [k, true]));
+    const base = { ...Object.fromEntries(LAYER_KEYS.map((k) => [k, true])),
+                   ...Object.fromEntries(LAYER_OFF.map((k) => [k, false])) };
+    try { const v = JSON.parse(localStorage.getItem("macs_live_layers") || "null"); if (v && typeof v === "object") return { ...base, ...v }; } catch (e) { /* 무시 */ }
+    return base;
   })();
+  let showConn = false;                  // 연결성 오버레이 (초록=연결·주황=고립)
+  // 꼬리(지나온 자취) — 실시간이라 과거 위치를 여기 쌓아 둔다. 리플레이는
+  // 프레임을 전부 갖고 있어 버퍼가 필요 없지만 운영 뷰는 흘러가는 중이다.
+  const TRAIL_MAX = 140;                 // 점 개수 상한(≈20fps × 7초)
+  let trailBuf = {};                     // gid -> [[x,y], ...]
   let showGraph = false;                 // IDR 공간그래프 표시 토글
   let showHulls = false;                 // 카메라 매핑 커버리지 다각형 표시
   // 밀도 히트맵 — 표출 전용(지표 계산과 무관). 취향이라 localStorage 에 기억한다.
@@ -58,9 +67,28 @@ Views.live = (() => {
       currObjects = {};
       // 보간 키는 카메라 로컬 키 — gid 는 글로벌 ID 모드에서 승격(cam:id→gN)되며
       // 바뀔 수 있어, gid 로 키를 잡으면 그 순간 보간이 끊겨 점이 튀거나 깜빡인다.
+      // 꼬리는 **켰을 때만** 쌓는다. 꺼 둔 채로도 모으면 객체마다 배열이 자라고
+      // 매 SSE 프레임에 Set 생성·키 순회가 돈다 — 실시간 화면에서 그만큼이 그대로
+      // 프레임 시간에 얹힌다(off 인데 느려지는 이유였다).
+      const _trail = layers.trails === true;
+      const _seen = _trail ? new Set() : null;
       (newState.objects || []).forEach((o) => {
         currObjects[`${o.cam_id}:${o.id}`] = { x: o.x, y: o.y };
+        if (!_trail) return;
+        _seen.add(o.gid);
+        const t = (trailBuf[o.gid] = trailBuf[o.gid] || []);
+        const last = t[t.length - 1];
+        // 같은 자리는 안 쌓는다 — 서 있는 사람의 꼬리가 점 하나로 뭉치면
+        // 그릴 게 없는데 배열만 커진다
+        if (!last || Math.abs(last[0] - o.x) > 0.5 || Math.abs(last[1] - o.y) > 0.5) {
+          t.push([o.x, o.y]);
+          if (t.length > TRAIL_MAX) t.splice(0, t.length - TRAIL_MAX);
+        }
       });
+      // 사라진 객체의 꼬리는 지운다 — 안 그러면 유령 선이 화면에 남는다
+      if (_trail) {
+        Object.keys(trailBuf).forEach((k) => { if (!_seen.has(k)) delete trailBuf[k]; });
+      }
 
       state = newState;
       setConn(`LIVE · ${renderFps()}fps 보간`, "ok");
@@ -180,7 +208,12 @@ Views.live = (() => {
       const sid = state && state.sess && state.sess.session_id;
       mcSetUniformColor(uniColor ? mcSessionColor(sid || "live") : null);
     }
-    drawSiteElements(g, App.site, { state, showScale: false, layers });
+    // 오버레이는 사이트 요소 **밑에** 깐다 — 점·도형을 가리면 안 된다
+    const _fl = API._floor();          // 현재 층 — App.floorId 는 없는 이름이었다
+    if (showConn) mcDrawConnectivity(g, _fl);
+    if (layers.obstacles === true) mcDrawObstacles(g, _fl);
+    drawSiteElements(g, App.site, { state, showScale: false, layers,
+                                   labels: layers.labels === true });
     if (showGraph) drawGraph(g, App.site.graph, { faint: true });
     if (showHulls) drawCameraHulls(g);               // 카메라별 매핑 커버리지
     if (layers.origins !== false) drawAlarm(g);      // 🔔 경보 위치 마커
@@ -196,6 +229,12 @@ Views.live = (() => {
         return { x: pv ? pv.x + (o.x - pv.x) * alpha : o.x,
                  y: pv ? pv.y + (o.y - pv.y) * alpha : o.y };
       }), { mPerPx: Heatmap.mPerPxOf(App.site) });
+    }
+    if (layers.trails === true) {
+      mcDrawTrails(g, trailBuf, { colorOf: (gid) => {
+        const o = state.objects.find((z) => z.gid === gid);
+        return camColor(o ? o.cam_id : "", App.cameras);
+      } });
     }
     state.objects.forEach((o) => {
       const prev = prevObjects[`${o.cam_id}:${o.id}`];
@@ -415,16 +454,32 @@ Views.live = (() => {
       // bootstrap은 enter()에서 매 진입(층 전환 포함)마다 현재 층 기준으로 호출
     }
     // 레이어 토글 칩 — 기본 전부 on, 클릭으로 끄고 켠다 (브라우저에 기억)
-    document.querySelectorAll("#layerSeg .tag-btn[data-layer]").forEach((b) => {
+    // 칩이 두 묶음(#layerSeg 요소 · #overlaySeg 덧보기)으로 나뉘어 있다 —
+    // 한쪽만 보면 옮겨 간 칩(이름표·장애물)이 눌러도 아무 일도 안 일어난다.
+    document.querySelectorAll(
+      "#layerSeg .tag-btn[data-layer], #overlaySeg .tag-btn[data-layer]"
+    ).forEach((b) => {
       const k = b.dataset.layer;
       b.classList.toggle("on", layers[k] !== false);
       b.onclick = () => {
         layers[k] = !(layers[k] !== false);
         b.classList.toggle("on", layers[k]);
+        if (k === "trails" && !layers[k]) trailBuf = {};   // 끄면 버퍼도 비운다
         try { localStorage.setItem("macs_live_layers", JSON.stringify(layers)); } catch (e) { /* 무시 */ }
         if (mc) mc.render();
       };
     });
+    if ($("connToggle")) $("connToggle").onclick = () => {
+      showConn = !showConn;
+      $("connToggle").classList.toggle("on", showConn);
+      if (mc) mc.render();
+    };
+    // init() 은 enter() 마다 불린다(층 전환·탭 재진입). 그대로 두면 리스너가
+    // 쌓여 오버레이 한 번 로드에 render 가 N 번 돈다.
+    if (!window.__mcOvlLive) {
+      window.__mcOvlLive = true;
+      window.addEventListener("mc-ovl", () => { if (active && mc) mc.render(); });
+    }
     $("graphToggle").onclick = () => {
       showGraph = !showGraph;
       $("graphToggle").classList.toggle("on", showGraph);

@@ -91,13 +91,14 @@ def solve_from_dots(db, site, floor, dots, obstacles, m_per_px):
     site_dir = ROOT / "data/sites/default"
     exits = [[tuple(e.line[0]), tuple(e.line[1])] for e in site.exits if e.line]
     png = site_dir / ("map.png" if floor == "default" else f"map_{floor}.png")
-    carve, blocks = pr._edits_from_floor_json(site_dir, floor, m_per_px)
+    carve, blocks, hard = pr._edits_from_floor_json(site_dir, floor, m_per_px)
     if not carve:
         carve = [r.points for r in site.routes if len(r.points) >= 2]
     df = build_distfield(str(png), exits, m_per_px,
                          carve_paths=carve or None, carve_w_m=2.0,
                          clearance_m=0.15, extra_walls=blocks or None,
-                         hard_walls=[list(o["points"]) for o in obstacles] or None)
+                         hard_walls=([list(o["points"]) for o in obstacles]
+                                     + [list(w) for w in hard]) or None)
     out = []
     for i, p in enumerate(dots["people"]):
         x, y = p["xy"][0]

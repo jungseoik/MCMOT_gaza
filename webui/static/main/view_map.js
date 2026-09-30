@@ -397,7 +397,7 @@ Views.map = (() => {
   function overlay(g) {
     const mpp = gridOn ? mPerPx() : null;
     if (mpp) drawScaleGrid(g, mpp);               // 요소보다 아래(배경 쪽)
-    drawSiteElements(g, App.site, { showScale: true });
+    drawSiteElements(g, App.site, { showScale: true, labels: true });
     drawGraph(g, App.site.graph, { sel: tool === "graph" ? graphSel : null });
     drawDraft(g);
     if (mpp) drawScaleBar(g, mpp);                // 스케일바는 항상 맨 위

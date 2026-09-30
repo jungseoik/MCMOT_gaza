@@ -425,7 +425,7 @@ async def verify(payload: dict = None):
 
 
 # ───────────────────────────────────────────── 저장 & 적용
-def _render_map_png(obs, bounds, out_path, px_w=2000, shapes=None):
+def _render_map_png(obs, bounds, out_path, px_w=2000, shapes=None, ax_rect=None):
     """터치업 반영된 깨끗한 도면 PNG(축 없음, 흰 배경) — 2D맵 배경용.
 
     편집기에서 찍은 **장애물(block 도형)을 도면에 그대로 그린다.** 예전에는
@@ -447,7 +447,11 @@ def _render_map_png(obs, bounds, out_path, px_w=2000, shapes=None):
     dpi = 100
     figw = px_w / dpi
     fig = plt.figure(figsize=(figw, figw * Hm / Wm))
-    ax = fig.add_axes([0, 0, 1, 1])
+    # ax_rect: 도면을 이미지 **어느 자리**에 앉힐지 [left, bottom, w, h] (0~1).
+    # 기본은 꽉 채우기. 이미 운영 중인 층을 교체할 때는 지금 맵에서 도면이
+    # 차지하던 자리를 그대로 줘야 한다 — 축·여백이 있는 그림으로 만들어진 맵이면
+    # 도면이 안쪽에 앉아 있어서, 꽉 채워 렌더하면 좌표가 통째로 어긋난다.
+    ax = fig.add_axes(list(ax_rect) if ax_rect else [0, 0, 1, 1])
     ax.add_collection(LineCollection(
         [[(s[0], s[1]), (s[2], s[3])] for s in obs], colors="#222", linewidths=0.3))
 
@@ -528,7 +532,19 @@ async def apply(payload: dict = None):
 
     # 1) map.png (터치업 도면) — 층별 파일명
     map_path = os.path.join(site_dir, map_name)
-    w_px, h_px = _render_map_png(obs, bounds, map_path, shapes=_shapes())
+    # 렌더 폭 — 기본 2000px. **이미 운영 중인 층을 교체할 때는 지금 맵과 같은
+    # 폭**을 줘야 한다. 폭이 달라지면 맵 px 좌표계가 통째로 바뀌어 카메라 매핑·
+    # 피난경로·구역·병목이 전부 어긋난다(17F 는 3400px 로 올라가 있었다).
+    px_w = int(payload.get("px_w") or 2000)
+    if not (400 <= px_w <= 8000):
+        raise HTTPException(422, f"px_w 는 400~8000 — 받은 값 {px_w}")
+    ax_rect = payload.get("ax_rect")          # [left, bottom, w, h] 0~1
+    if ax_rect is not None:
+        ax_rect = [float(v) for v in ax_rect]
+        if len(ax_rect) != 4 or not all(0 <= v <= 1 for v in ax_rect):
+            raise HTTPException(422, "ax_rect 는 [left,bottom,w,h] 0~1 네 값")
+    w_px, h_px = _render_map_png(obs, bounds, map_path, px_w=px_w,
+                                 shapes=_shapes(), ax_rect=ax_rect)
     m_per_px = _to_m(bounds[2] - bounds[0]) / w_px   # 도면 실단위 반영
 
     # 2) 거리장 사전계산 (트래킹 좌표 → 실시간 피난거리용)
@@ -538,6 +554,21 @@ async def apply(payload: dict = None):
     route_n = int(payload.get("route_n", 5))
     an = core.analyze(obs, exits, bounds, mode="worstn", worst_n=route_n,
                       cell=FULL_CELL, shapes=_shapes() or None)
+    # 격자·거리장을 **층별 파일**로 남긴다. 예전에는 evac_distfield.npz 하나라
+    # 다른 층을 적용할 때마다 덮어써서 직전 층 것이 사라졌다 — :8900 의 연결성
+    # 오버레이가 이 격자를 쓰는데(없으면 map.png 에서 벽을 되짚느라 책상·문
+    # 스윙까지 벽이 되어 얼룩덜룩해진다), 층마다 남아 있어야 한다.
+    grid_name = f"evac_grid_{floor}.npz"
+    np.savez_compressed(os.path.join(site_dir, grid_name),
+                        dist=an.dist.astype(np.float32), grid=an.grid,
+                        bounds=np.array(bounds), cell=FULL_CELL,
+                        # **원본 벡터도 같이** — 격자 크기·여유폭을 나중에 바꾸려면
+                        # 선분이 있어야 다시 풀 수 있다. floor.json 에는 지운 handle
+                        # 만 있고 "무엇이 있었는지" 가 없어 DWG 부터 다시 올려야 했다.
+                        segs=np.asarray(obs, np.float64),
+                        exits_mm=np.asarray(exits, np.float64),
+                        clearance=float(core.CLEARANCE))
+    # 구버전 이름도 같이 남긴다 — 이걸 읽는 쪽이 있으면 안 깨지게(하위호환)
     np.savez_compressed(os.path.join(site_dir, "evac_distfield.npz"),
                         dist=an.dist.astype(np.float32), grid=an.grid,
                         bounds=np.array(bounds), cell=FULL_CELL)
@@ -554,6 +585,10 @@ async def apply(payload: dict = None):
     # 3) floor.json (비파괴 편집내역 + 좌표계) — 층별 파일명(floor_name)
     floor_meta = {"source": S["src_name"], "bounds_mm": bounds,
                   "m_per_px": m_per_px, "map_px": [w_px, h_px],
+                  # 도면이 이미지의 **어느 자리**에 앉았는지 [left,bottom,w,h] (0~1).
+                  # 꽉 채우면 [0,0,1,1]. :8900 이 연결성·거리장 오버레이를 겹쳐
+                  # 그릴 때 이 자리에 맞춰야 한다 — 안 그러면 여백까지 칠해진다.
+                  "ax_rect": list(ax_rect) if ax_rect else [0.0, 0.0, 1.0, 1.0],
                   "exits_mm": S["exits"], "openings_mm": S["openings"],
                   "opening_width_mm": OPENING_W,
                   "deleted_handles": S["deleted"],
@@ -618,7 +653,7 @@ async def apply(payload: dict = None):
                          "inside": _to_px(ix_mm, iy_mm),
                          "design_capacity": None})
 
-    saved_names = (map_name, floor_name, "evac_distfield.npz")
+    saved_names = (map_name, floor_name, grid_name, "evac_distfield.npz")
     # 4) 운영 서버(:8900) 반영 — 명시적 opt-in 일 때만. 해당 층(floor)에만 반영.
     applied = False
     elements_applied = False

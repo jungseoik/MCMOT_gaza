@@ -52,7 +52,7 @@ def distfield(site: SiteConfig, floor: str, m_per_px: float):
     from system.evac.route_solver import build_distfield
     png = SITE / ("map.png" if floor == "default" else f"map_{floor}.png")
     exits = [[tuple(e.line[0]), tuple(e.line[1])] for e in site.exits if e.line]
-    carve, blocks = _edits_from_floor_json(SITE, floor, m_per_px)
+    carve, blocks, hard = _edits_from_floor_json(SITE, floor, m_per_px)
     if not carve:
         carve = [r.points for r in site.routes if len(r.points) >= 2]
     return build_distfield(str(png), exits, m_per_px, carve_paths=carve or None,

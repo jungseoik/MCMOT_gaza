@@ -27,7 +27,7 @@ ROUTES_SUFFIX = ".routes.json"
 # 판단할 수 없다 — 장애물이 그대로여도 푸는 법이 달라지면 결과가 달라진다.
 # (실측: hard_walls 도입 전에 저장된 사이드카가 지문이 같다는 이유로 계속 쓰여
 #  발표 영상 인트로의 경로 9.1% 가 장애물 위를 지났다.)
-ALGO_VER = 2
+ALGO_VER = 3
 MAX_ROUTES = 200          # 안전 상한 — 트랙이 수백 개인 세션에서 경로가 폭발하지 않게
 
 
@@ -46,8 +46,11 @@ def _map_png(site: SiteConfig, floor_id: str, site_dir: Path) -> Path:
     return site_dir / name
 
 
+OBSTACLE_SRC = "obstacle:8920"      # tools/obstacles_to_floor.py 가 넣은 표시
+
+
 def _edits_from_floor_json(site_dir: Path, floor_id: str, m_per_px: float):
-    """CAD 편집기가 남긴 뚫기/막기 도형 → (뚫을 선들, 막을 다각형들) 맵 px.
+    """CAD 편집기가 남긴 뚫기/막기 도형 → (뚫을 선들, 막을 다각형들, 굳게 막을 것).
 
     floor_<층>.json 의 shapes(도면 mm)를 맵 px 로 옮긴다. 그 파일의 bounds_mm·
     map_px 가 변환의 정본이다(편집기 apply 가 같은 식으로 경로·출구를 옮겼다).
@@ -56,14 +59,14 @@ def _edits_from_floor_json(site_dir: Path, floor_id: str, m_per_px: float):
     name = "floor.json" if floor_id == "default" else f"floor_{floor_id}.json"
     p = Path(site_dir) / name
     if not p.is_file():
-        return [], []
+        return [], [], []
     try:
         meta = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return [], []
+        return [], [], []
     shapes = meta.get("shapes") or []
     if not shapes:
-        return [], []
+        return [], [], []
     minx, miny, maxx, maxy = meta["bounds_mm"]
     w_px, h_px = meta["map_px"]
 
@@ -71,7 +74,7 @@ def _edits_from_floor_json(site_dir: Path, floor_id: str, m_per_px: float):
         return [(x - minx) / (maxx - minx) * w_px,
                 (maxy - y) / (maxy - miny) * h_px]
 
-    carve, blocks = [], []
+    carve, blocks, hard = [], [], []
     for sh in shapes:
         pts = sh.get("pts") or []
         xy = [to_px(pts[i], pts[i + 1]) for i in range(0, len(pts) - 1, 2)]
@@ -84,8 +87,11 @@ def _edits_from_floor_json(site_dir: Path, floor_id: str, m_per_px: float):
             if sh.get("kind") == "rect":
                 xy = [xy[0], [xy[1][0], xy[0][1]], xy[1], [xy[0][0], xy[1][1]]]
             if len(xy) >= 3:
-                blocks.append(xy)
-    return carve, blocks
+                # **장애물 표시는 뚫기보다 세게 막는다.** 그냥 blocks 에 넣으면
+                # 피난경로 선이 그 위를 지날 때 carve 가 도로 열어 버린다
+                # (실측: 경로의 3.0~10.6% 가 장애물 위를 지났다).
+                (hard if sh.get("src") == OBSTACLE_SRC else blocks).append(xy)
+    return carve, blocks, hard
 
 
 def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
@@ -127,7 +133,7 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
     # 사람이 걸어간 자리의 32.2%가 '벽', 38.2%가 '출구 도달 불가' 였다.
     # ②로 뚫으면 도달 불가가 0.1%(578→1개)로 떨어진다 — 사람이 그린 경로는
     # 실제 문을 지나도록 그어져 있기 때문이다.
-    carve, blocks = _edits_from_floor_json(site_dir, floor_id, m_per_px)
+    carve, blocks, hard = _edits_from_floor_json(site_dir, floor_id, m_per_px)
     if not carve:
         carve = [r.points for r in site.routes if len(r.points) >= 2]
     # 장애물 표시는 **뚫기보다 세게** 막는다 — 피난경로 선이 의자 위를 지나가도
@@ -135,7 +141,8 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
     df = build_distfield(str(png), exits, m_per_px,
                          carve_paths=carve or None, carve_w_m=2.0,
                          clearance_m=0.15, extra_walls=blocks or None,
-                         hard_walls=[list(w) for w in (extra_walls or [])] or None)
+                         hard_walls=([list(w) for w in (extra_walls or [])]
+                                     + [list(w) for w in hard]) or None)
 
     # 트랙별 **첫 투영 위치** — 엔진과 같은 투영기(CameraProjector)를 쓴다.
     # 좌표계가 조금이라도 다르면 경로가 엉뚱한 데서 출발한다.
@@ -177,7 +184,8 @@ def generate(db_path, site_dir, *, max_routes: int = MAX_ROUTES,
         "floor_id": floor_id, "m_per_px": m_per_px,
         "routes": routes,
         "stats": {"seeds": len(first), "made": len(routes),
-                  "unreachable": unreachable, "extra_walls": len(extra_walls or [])},
+                  "unreachable": unreachable, "extra_walls": len(extra_walls or []),
+                  "hard_walls": len(hard)},
         "generated_from": Path(db_path).name,
     }
 

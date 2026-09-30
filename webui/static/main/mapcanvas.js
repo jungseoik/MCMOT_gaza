@@ -448,13 +448,144 @@ function mcNumbered(g, pts, color, colorFn) {
   });
 }
 
+
+/* ── 도면 오버레이 (연결성·장애물) ────────────────────────────────────────
+ * 둘 다 **한 번 받아 두고 그리기만** 한다. 연결성은 서버가 거리장을 풀어 PNG 로
+ * 주는데(층·출구·장애물이 바뀔 때만 다시 푼다), 매 프레임 다시 받을 이유가 없다.
+ * 층이 바뀌면 그 층 것을 새로 받는다. */
+const MC_OVL = { conn: {}, obs: {} };      // floor -> Image / 다각형 배열
+
+function mcConnImage(floor) {
+  const k = floor || "default";
+  let e = MC_OVL.conn[k];
+  if (e === undefined) {
+    e = MC_OVL.conn[k] = null;             // 받는 중 — 중복 요청 방지
+    const img = new Image();
+    img.onload = () => { MC_OVL.conn[k] = img; window.dispatchEvent(new Event("mc-ovl")); };
+    img.onerror = () => { MC_OVL.conn[k] = false; };   // 축척·출구 없음 등
+    img.src = `/api/floor/connectivity?floor=${encodeURIComponent(k)}`;
+  }
+  return e || null;
+}
+
+function mcObstacles(floor) {
+  const k = floor || "default";
+  let e = MC_OVL.obs[k];
+  if (e === undefined) {
+    e = MC_OVL.obs[k] = null;
+    fetch(`/api/floor/obstacles?floor=${encodeURIComponent(k)}`)
+      .then((r) => r.json())
+      .then((d) => { MC_OVL.obs[k] = d.obstacles || []; window.dispatchEvent(new Event("mc-ovl")); })
+      .catch(() => { MC_OVL.obs[k] = []; });
+  }
+  return e || null;
+}
+
+/** 연결성 PNG 를 맵 좌표에 겹쳐 그린다 (맵 px 크기 그대로). */
+function mcDrawConnectivity(g, floor) {
+  const img = mcConnImage(floor);
+  if (!img) return;
+  const { ctx } = g;
+  const p0 = PT(g, 0, 0), p1 = PT(g, img.naturalWidth, img.naturalHeight);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+  ctx.restore();
+}
+
+/* 장애물 종류 — :8910 CAD·:8920 표시 편집기와 **같은 3종·같은 색**.
+ * 같은 것이 화면마다 다른 색이면 그때부터 오해가 시작된다. */
+const MC_OBS_TAG = {
+  chair: { rgb: "180,83,9",  hatch: "/" },   // 의자·집기
+  box:   { rgb: "124,58,237", hatch: "x" },  // 박스·적치물
+  nogo:  { rgb: "220,38,38", hatch: "\\" }, // 통행금지
+};
+const _mcHatch = {};
+
+/** 종류별 해칭 패턴 — 색만 다르면 흑백 출력이나 색약에서 구분이 사라진다. */
+function mcHatchPat(ctx, tag) {
+  if (_mcHatch[tag]) return _mcHatch[tag];
+  const t = MC_OBS_TAG[tag] || MC_OBS_TAG.nogo;
+  const c = document.createElement("canvas");
+  c.width = c.height = 8;
+  const x = c.getContext("2d");
+  x.strokeStyle = `rgba(${t.rgb},.85)`;
+  x.lineWidth = 1.4;
+  x.beginPath();
+  if (t.hatch === "/") { x.moveTo(0, 8); x.lineTo(8, 0); }
+  else if (t.hatch === "x") { x.moveTo(0, 0); x.lineTo(8, 8); x.moveTo(8, 0); x.lineTo(0, 8); }
+  else { x.moveTo(0, 0); x.lineTo(8, 8); }
+  x.stroke();
+  return (_mcHatch[tag] = ctx.createPattern(c, "repeat"));
+}
+
+/** 장애물 다각형 — 종류별 색 + 해칭(CAD 와 같은 표기). */
+function mcDrawObstacles(g, floor) {
+  const list = mcObstacles(floor);
+  if (!list || !list.length) return;
+  const { ctx } = g;
+  ctx.save();
+  list.forEach((o) => {
+    const t = MC_OBS_TAG[o.tag] || MC_OBS_TAG.nogo;
+    mcPath(g, o.points, true);
+    ctx.fillStyle = `rgba(${t.rgb},.14)`;
+    ctx.fill();
+    ctx.fillStyle = mcHatchPat(ctx, o.tag || "nogo");
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${t.rgb},.9)`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+
+/** 지나온 자취(꼬리) — {gid: [[x,y], ...]} 를 뒤로 갈수록 옅게 긋는다.
+ *
+ * 점만 보면 "지금 어디"만 알 수 있고 **어디서 왔는지**가 안 보인다. 발표 영상
+ * (tools/demo_viz)에서 쓰던 표현을 운영·리플레이에도 똑같이 둔다. 색은 그 객체
+ * 색을 그대로 써서 점과 꼬리가 같은 사람임이 한눈에 보이게 한다. */
+function mcDrawTrails(g, byGid, opts = {}) {
+  const { ctx } = g;
+  const colorOf = opts.colorOf || (() => "#6cf");
+  const wide = opts.width || 2.2;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  Object.keys(byGid || {}).forEach((gid) => {
+    const pts = byGid[gid];
+    if (!pts || pts.length < 2) return;
+    const col = colorOf(gid);
+    // 한 번에 긋지 않고 토막마다 투명도를 달리한다 — 오래된 쪽이 흐려야
+    // 진행 방향이 읽힌다(그냥 한 선이면 어디가 앞인지 모른다).
+    for (let i = 1; i < pts.length; i++) {
+      const f = i / (pts.length - 1);          // 0=오래됨 … 1=지금
+      ctx.globalAlpha = 0.10 + 0.55 * f;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = wide * (0.45 + 0.55 * f);
+      const a = PT(g, pts[i - 1][0], pts[i - 1][1]);
+      const b = PT(g, pts[i][0], pts[i][1]);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    }
+  });
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 /** 사이트 요소(경로·구역·병목·출입구·축척) 렌더 — 3개 화면 공용.
- * opts: {faint, state(MapState: 상태 하이라이트/카운트), showScale} */
+ * opts: {faint, state(MapState: 상태 하이라이트/카운트), showScale, labels}
+ *
+ * labels: 도형 위의 **이름표**를 그릴지. 기본 false — 출입구 라벨이
+ * "출구1 · IN 0 / OUT 10 · rh_aihub2_cam9" 처럼 길어 옆 병목 이름과 겹치고,
+ * 그러면 정작 봐야 할 점·도형이 안 보인다. 필요한 사람만 켜서 본다
+ * (① 맵 설정은 편집 화면이라 기본 켬). 도형·색·하이라이트는 그대로다. */
 function drawSiteElements(g, site, opts = {}) {
   if (!site) return;
   const { ctx } = g;
   const a = opts.faint ? 0.35 : 1.0;
-  const lab = (txt, x, y, color) => {
+  const showLab = opts.labels === true;
+  const lab = (txt, x, y, color, always) => {
+    if (!showLab && !always) return;
     ctx.font = "bold 11px Pretendard, sans-serif";
     const w = ctx.measureText(txt).width + 10;
     ctx.fillStyle = "rgba(17,17,17,.75)";
@@ -586,6 +717,6 @@ function drawSiteElements(g, site, opts = {}) {
       ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, 7); ctx.fill();
     });
     const mx = (s1[0] + s2[0]) / 2, my = (s1[1] + s2[1]) / 2;
-    lab(`${sc.meters} m`, mx, my - 12, MC_COLORS.scale);
+    lab(`${sc.meters} m`, mx, my - 12, MC_COLORS.scale, true);
   }
 }

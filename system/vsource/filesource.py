@@ -68,9 +68,27 @@ class _Cam:
         # 출구 10fps 로 GT 정확 일치가 6/14 → 11/14 로 올랐다.
         self.emit_every = 1
 
+    @classmethod
+    def _open_cap(cls, path: str):
+        """디코더 스레드 수를 고정해 VideoCapture 를 연다.
+
+        **생성자 params 로 줘야 한다.** `cap.set(CAP_PROP_N_THREADS)` 도,
+        환경변수 `OPENCV_FFMPEG_CAPTURE_OPTIONS=threads;2` 도 FFmpeg 백엔드에는
+        안 먹었다(실측: 둘 다 +143 스레드, params 는 +3).
+        """
+        try:
+            cap = cv2.VideoCapture(path, cv2.CAP_FFMPEG,
+                                   [cv2.CAP_PROP_N_THREADS, cls.DECODE_THREADS])
+            if cap.isOpened():
+                return cap
+            cap.release()
+        except (cv2.error, AttributeError, TypeError):
+            pass
+        return cv2.VideoCapture(path)          # 구버전 OpenCV 대비
+
     def open(self) -> None:
         self.close()
-        cap = cv2.VideoCapture(self.file)
+        cap = self._open_cap(self.file)
         if not cap.isOpened():
             raise FileNotFoundError(self.file)
         self.cap = cap
@@ -81,11 +99,19 @@ class _Cam:
         self.duration = self.total / self.src_fps if self.src_fps else 0.0
         self.ended = False
 
+    # 디코더 스레드 상한 — **코어가 많은 서버에서 반드시 눌러야 한다.**
+    # FFmpeg 는 thread_count 가 auto 면 코어 수만큼 연다. 이 서버는 128코어라
+    # 파일 9대를 재생하면 1,153개가 한꺼번에 생기고(실측 265 → 1,418) 그 뒤로
+    # 컨텍스트 스위칭에 눌려 API 가 응답하지 않았다(대기큐 23 · 5분 타임아웃).
+    # 파일 디코드는 스레드를 늘려도 이득이 거의 없다 — 2개면 충분하다.
+    # 환경변수 OPENCV_FFMPEG_CAPTURE_OPTIONS 는 이 빌드에서 안 먹어 직접 건다.
+    DECODE_THREADS = int(os.environ.get("VSOURCE_DECODE_THREADS", "2"))
+
     BLACK_MEAN = 12.0          # 이 밝기 아래면 "검정 구간"으로 본다 (0~255)
 
     def frame_at(self, sec: float) -> np.ndarray | None:
         """임의 시각의 프레임 — 재생용 cap 을 건드리지 않는 별도 캡처."""
-        cap = cv2.VideoCapture(self.file)
+        cap = self._open_cap(self.file)
         try:
             if not cap.isOpened():
                 return None

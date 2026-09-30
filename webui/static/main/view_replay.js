@@ -635,7 +635,11 @@ Views.replay = (() => {
     if (typeof mcSetUniformColor === "function") {
       mcSetUniformColor(rpUni ? mcSessionColor(selId || "") : null);
     }
-    if (site) drawSiteElements(g, site, { state: dataState(), layers: rpLayers });
+    const _fl = curFloor() || API._floor();   // 도면 이미지와 **같은 층**
+    if (rpLayers.conn === true) mcDrawConnectivity(g, _fl);
+    if (rpLayers.obstacles === true) mcDrawObstacles(g, _fl);
+    if (site) drawSiteElements(g, site, { state: dataState(), layers: rpLayers,
+                                         labels: rpLayers.labels === true });
     drawEdit(g);                                   // 편집 추가/제외 표시
     drawAlarmOrigins(g);
     if (!data || !data.frames || !data.frames.length) return;
@@ -644,6 +648,21 @@ Views.replay = (() => {
     // 점보다 먼저 — 나중에 그리면 객체 점을 덮는다
     if (rpHeat && window.Heatmap) {
       Heatmap.draw(g, objs, { mPerPx: Heatmap.mPerPxOf(site) });
+    }
+    if (rpLayers.trails === true) {
+      // 프레임을 전부 갖고 있으니 커서 이전 구간을 그대로 훑으면 된다
+      const f = data.frames, t0 = f[0].ts, iNow = frameIndexAt(cursor);
+      const from = t0 + Math.max(0, cursor - RP_TRAIL_S);
+      const by = {};
+      for (let i = 0; i <= iNow && i < f.length; i++) {
+        if (f[i].ts < from) continue;
+        (f[i].objects || []).forEach((o) => {
+          (by[o.gid] = by[o.gid] || []).push([o.x, o.y]);
+        });
+      }
+      const camOf = {};
+      objs.forEach((o) => { camOf[o.gid] = o.cam_id; });
+      mcDrawTrails(g, by, { colorOf: (gid) => camColor(camOf[gid] || "", App.cameras) });
     }
     objs.forEach((o) => {
       const x = TX(o.x), y = TY(o.y), col = camColor(o.cam_id, App.cameras);
@@ -714,7 +733,9 @@ Views.replay = (() => {
                        catch (e) { return false; } })();
   let routeMode = "site";
   let routeStats = null;
-  const rpLayers = { routes: true, zones: true };
+  const rpLayers = { routes: true, zones: true, labels: false,
+                     obstacles: false, conn: false, trails: false };  // 덧보기 기본 끔
+  const RP_TRAIL_S = 7;        // 꼬리 길이(초) — 커서 기준 이만큼 뒤까지
   let eDraft = null;          // {pts:[[x,y],...]}
   let eHover = null;          // 부채꼴 미리보기 커서
   let eGeo = null;            // {routes:[...], bottlenecks:[...]} — 편집 중인 사본
@@ -1533,7 +1554,8 @@ Views.replay = (() => {
       };
     }
 
-    document.querySelectorAll("#rpLayerSeg [data-rlayer]").forEach((b) => {
+    document.querySelectorAll("#rpLayerSeg [data-rlayer], #rpOvlSeg [data-rlayer]").forEach((b) => {
+      b.classList.toggle("on", rpLayers[b.dataset.rlayer] === true);
       b.onclick = () => {
         const k = b.dataset.rlayer;
         rpLayers[k] = (rpLayers[k] === false);
@@ -1541,6 +1563,10 @@ Views.replay = (() => {
         if (mc) mc.render();
       };
     });
+    if (!window.__mcOvlRp) {          // init() 이 매 진입마다 불린다 — 1회만 건다
+      window.__mcOvlRp = true;
+      window.addEventListener("mc-ovl", () => { if (mc) mc.render(); });
+    }
 
     document.querySelectorAll("#rpRouteMode [data-rmode]").forEach((b) => {
       b.onclick = async () => {
