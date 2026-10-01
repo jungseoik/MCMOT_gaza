@@ -251,3 +251,6 @@ external/YOLOX/build/
 # CAD 원본(dxf·래스터) — 133MB. 도면은 편집기로 만든 map_*.png 가 정본이고,
 # 원본은 HF 나 외부 보관이 맞다.
 cad/cj_cad/
+
+# 참조하는 코드·문서가 없는 샘플 영상 6.2MB (assets/sample1.mp4 는 테스트가 쓴다)
+data/videos/case6.mp4
