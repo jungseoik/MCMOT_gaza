@@ -110,7 +110,10 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 순서를 바꿔도 로직에 영향이 없다.
 
 **연결성**은 `/api/floor/connectivity` — CAD 격자가 있으면 그것을, 없으면 `map.png`
-추정을 쓴다(응답 헤더 `X-Conn-Src`). 초록 = 출구까지 갈 수 있는 자리, 주황 = 고립된 자리.
+추정을 쓴다(응답 헤더 `X-Conn-Src`). **판정 기준이 둘이라 색의 뜻도 다르다** —
+`cad-grid` 는 보행공간의 **가장 큰 연결 덩어리**가 초록(출구 위치는 안 본다),
+`png-estimate` 는 **출구까지 거리장이 닿는 자리**가 초록이다. 주황은 양쪽 다
+"벽은 아닌데 초록에 못 끼는 자리". 현재 cad-grid = 17F·AI hub 3층(floor4·floor6).
 
 ## 리허설 패키지 (ADR 09 — 파일 모드)
 
