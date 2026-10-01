@@ -243,3 +243,11 @@ results/demo/_annotate/grid_*.mp4
 
 # 시연용 화면 녹화(운영 뷰 screencast) — 영상은 레포에 넣지 않는다
 results/demo/screencast/
+
+# 빌드 산출물 — install_yolox.sh 가 다시 만든다 (cpython-37 시절 .o/.so 13MB 가
+# 이력에 박혀 있었다). 추적만 끊는다 — 이미 들어간 이력은 그대로다.
+external/YOLOX/build/
+
+# CAD 원본(dxf·래스터) — 133MB. 도면은 편집기로 만든 map_*.png 가 정본이고,
+# 원본은 HF 나 외부 보관이 맞다.
+cad/cj_cad/
