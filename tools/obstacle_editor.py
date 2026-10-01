@@ -20,19 +20,26 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
+
+import sys as _sys
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in _sys.path:          # 레포 루트를 넣어야 system.* 를 찾는다
+    _sys.path.insert(0, str(ROOT))
 SITE = ROOT / "data/sites/default"
 ANN = ROOT / "results/demo/_annotate"
 ANN.mkdir(parents=True, exist_ok=True)
 
 # CAD 편집기(evac/web.py OBSTACLE_TAGS)와 **같은 3종·같은 색**을 쓴다.
 # 두 화면에서 같은 것이 다른 색으로 보이면 그때부터 오해가 시작된다.
+METRICS_BASE = os.environ.get("MACS_BASE", "http://127.0.0.1:8900")
+
 TAGS = {
     "chair": {"name": "의자·집기", "rgb": "180,83,9"},
     "box":   {"name": "박스·적치물", "rgb": "124,58,237"},
@@ -41,9 +48,11 @@ TAGS = {
 # 3층은 floor4(합동 훈련)·floor6(1차 리허설)이 같은 도면이라 **한 벌**만 찍으면 된다.
 FLOORS = [
     {"id": "floor4", "name": "AI hub 3층", "map": "map_floor4.png",
-     "paths": "floor4_paths.png", "alias": ["floor6"]},
+     "paths": "floor4_paths.png", "alias": ["floor6"],
+     "session": "sess-1789693478593"},          # 경로 오버레이용 대표 세션
     {"id": "floor5", "name": "AI hub 1층", "map": "map_floor5.png",
-     "paths": "floor5_paths.png", "alias": []},
+     "paths": "floor5_paths.png", "alias": [],
+     "session": "sess-1789693709646"},
 ]
 
 # 투영만으로는 못 정하는 기준점. 사람이 찍어 줘야 한다.
@@ -165,6 +174,53 @@ def img_paths(floor: str):
     if not p.is_file():
         raise HTTPException(404, "동선 오버레이가 아직 없습니다 — demo_viz 밑그림 생성 필요")
     return FileResponse(p)
+
+
+@app.get("/img/conn/{floor}")
+def img_conn(floor: str):
+    """연결성 오버레이 — **어디가 뚫려 있나**를 보고 막을 자리를 고르라고 깐다.
+
+    초록 = 출구까지 이어진 보행공간 · 주황 = 고립. 운영 서버(:8900)가 CAD 격자로
+    한 번 풀어 캐시해 둔 것을 그대로 가져온다(같은 판정을 두 번 구현하지 않는다).
+    """
+    import urllib.error
+    import urllib.request
+    url = f"{METRICS_BASE}/api/floor/connectivity?floor={floor}"
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r:
+            return Response(r.read(), media_type="image/png")
+    except (urllib.error.URLError, OSError) as e:
+        raise HTTPException(503, f"연결성을 못 받았습니다 — :8900 이 떠 있어야 합니다 ({e})")
+
+
+@app.get("/img/routes/{floor}")
+def img_routes(floor: str):
+    """재실자별 피난경로 오버레이 — 경로가 **어디로 빠지는지** 보여준다.
+
+    장애물을 막으면 이 선이 바뀐다. 막을 자리를 고를 때 근거가 된다.
+    """
+    import cv2
+    import numpy as np
+    from system.evac import person_routes as pr
+    from tools.session_viz import find_session
+    fl = _floor(floor)
+    sid = fl.get("session")
+    if not sid:
+        raise HTTPException(404, f"{floor}: 대표 세션이 없습니다")
+    db, _f = find_session(sid, floor)
+    rt = pr.load(db)
+    if rt is None:
+        raise HTTPException(404, "경로 사이드카가 없습니다 — demo_viz 를 한 번 돌리세요")
+    img = cv2.imread(str(SITE / fl["map"]))
+    ov = img.copy()
+    for r in rt["routes"]:
+        pts = np.array(r["points"], np.int32)
+        cv2.polylines(ov, [pts], False, (250, 165, 96), 3, cv2.LINE_AA)
+    cv2.addWeighted(ov, 0.75, img, 0.25, 0, img)
+    ok, buf = cv2.imencode(".png", img)
+    if not ok:
+        raise HTTPException(500, "경로 PNG 인코딩 실패")
+    return Response(buf.tobytes(), media_type="image/png")
 
 
 @app.get("/", response_class=HTMLResponse)

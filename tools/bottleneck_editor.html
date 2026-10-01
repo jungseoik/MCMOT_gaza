@@ -1,0 +1,215 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>병목 위치 편집기</title>
+<style>
+  :root{ --bg:#16161a; --bg2:#1e1e24; --line:#32323c; --t1:#e8e8f0; --t2:#9a9aa6; }
+  *{ box-sizing:border-box }
+  body{ margin:0; background:var(--bg); color:var(--t1);
+        font:14px/1.5 Pretendard,-apple-system,"Malgun Gothic",sans-serif; }
+  header{ display:flex; align-items:center; gap:12px; padding:10px 14px;
+          background:var(--bg2); border-bottom:1px solid var(--line); flex-wrap:wrap }
+  h1{ font-size:15px; margin:0; font-weight:700 }
+  .sp{ flex:1 }
+  select,button{ background:#2a2a33; color:var(--t1); border:1px solid var(--line);
+                 border-radius:7px; padding:6px 11px; font-size:13px; cursor:pointer }
+  button.on{ background:#2f6fd0; border-color:#3f7fe0 }
+  button.save{ background:#2a7d46; border-color:#39a05c; font-weight:700 }
+  #wrap{ display:flex; height:calc(100vh - 49px); min-height:0 }
+  #side{ width:280px; flex:0 0 280px; border-right:1px solid var(--line); background:var(--bg2);
+         overflow:auto; padding:10px }
+  #cv{ flex:1 1 auto; min-width:0; display:block; cursor:grab }
+  .row{ border:1px solid var(--line); border-radius:9px; padding:9px 10px;
+        margin-bottom:8px; background:#23232b }
+  .row.sel{ border-color:#3f7fe0; background:#26303f }
+  .row b{ font-size:14px } .row .m{ color:var(--t2); font-size:12px }
+  .row input[type=range]{ width:100%; margin:6px 0 0 }
+  .hint{ color:var(--t2); font-size:12px; padding:6px 2px; line-height:1.6 }
+  #msg{ font-size:12px; color:#7fd18f }
+</style>
+<header>
+  <h1>병목 위치 편집기</h1>
+  <select id="floor"></select>
+  <button id="reset">이 층 되돌리기</button>
+  <button id="save" class="save">저장</button>
+  <span id="msg"></span>
+  <span class="sp"></span>
+  <span class="hint">도형을 <b>끌어서</b> 옮깁니다 · 휠 = 확대/축소 · 빈 곳 드래그 = 이동</span>
+</header>
+<div id="wrap">
+  <div id="side"></div>
+  <canvas id="cv"></canvas>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+let META = null, MOVE = {}, SCALE = {}, SEL = null;
+let img = null, view = { s: 1, ox: 0, oy: 0 };
+let drag = null;
+
+const P = (x, y) => [x * view.s + view.ox, y * view.s + view.oy];
+const INV = (sx, sy) => [(sx - view.ox) / view.s, (sy - view.oy) / view.s];
+
+function moveOf(id) { return MOVE[id] || [0, 0]; }
+function scaleOf(id) {
+  if (SCALE[id] != null) return SCALE[id];
+  if (META.per_id && META.per_id[id] != null) return META.per_id[id];
+  return META.default_scale || 1;
+}
+
+/** 원래 다각형 → 지금 보일 다각형 (확대 + 이동)
+ *
+ * **부채꼴은 꼭짓점(center) 기준으로 키운다.** 렌더(tools/demo_bottleneck)가
+ * shape.radius 를 키워 폴리곤을 다시 만들기 때문이다 — 여기서 무게중심으로
+ * 키우면 편집기에서 맞춘 자리와 영상이 어긋난다. */
+function shown(b) {
+  const k = scaleOf(b.id), [dx, dy] = moveOf(b.id);
+  let cx, cy;
+  if (b.sector && b.center) {
+    [cx, cy] = b.center;
+  } else {
+    cx = b.polygon.reduce((s, p) => s + p[0], 0) / b.polygon.length;
+    cy = b.polygon.reduce((s, p) => s + p[1], 0) / b.polygon.length;
+  }
+  return b.polygon.map(([x, y]) => [cx + (x - cx) * k + dx, cy + (y - cy) * k + dy]);
+}
+
+function inPoly(pt, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) &&
+        pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi + 1e-9) + xi) c = !c;
+  }
+  return c;
+}
+
+function fitView() {
+  const cv = $("cv");
+  const s = Math.min(cv.width / META.map.w, cv.height / META.map.h) * 0.94;
+  view = { s, ox: (cv.width - META.map.w * s) / 2, oy: (cv.height - META.map.h * s) / 2 };
+}
+
+function draw() {
+  const cv = $("cv"), g = cv.getContext("2d");
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = "#101014"; g.fillRect(0, 0, cv.width, cv.height);
+  if (img) {
+    const a = P(0, 0), b = P(META.map.w, META.map.h);
+    g.drawImage(img, a[0], a[1], b[0] - a[0], b[1] - a[1]);
+  }
+  // 출구선
+  g.lineWidth = 4; g.strokeStyle = "#ff3ecb";
+  (META.exits || []).forEach((e) => {
+    const a = P(...e.line[0]), b = P(...e.line[1]);
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  });
+  // 병목
+  (META.bottlenecks || []).forEach((b) => {
+    const poly = shown(b).map(([x, y]) => P(x, y));
+    g.beginPath(); poly.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.closePath();
+    const on = b.id === SEL;
+    g.fillStyle = on ? "rgba(90,150,255,.30)" : "rgba(255,80,60,.18)";
+    g.fill();
+    g.lineWidth = on ? 3 : 2;
+    g.strokeStyle = on ? "#6aa6ff" : "#ff5a3c";
+    g.stroke();
+    const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+    const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+    g.fillStyle = on ? "#dce9ff" : "#ffd9d2";
+    g.font = "bold 13px Pretendard, sans-serif";
+    g.fillText(b.id, cx + 7, cy - 7);
+    g.beginPath(); g.arc(cx, cy, 3, 0, 7); g.fill();
+  });
+}
+
+function renderSide() {
+  const box = $("side");
+  box.innerHTML = (META.bottlenecks || []).map((b) => {
+    const [dx, dy] = moveOf(b.id), k = scaleOf(b.id);
+    const mpp = META.map.m_per_px || 0;
+    return `<div class="row ${b.id === SEL ? "sel" : ""}" data-id="${b.id}">
+      <b>${b.id}</b> <span class="m">${b.sector ? "부채꼴" : "다각형"}</span>
+      <div class="m">이동 ${dx.toFixed(0)}, ${dy.toFixed(0)} px
+        (${(Math.hypot(dx, dy) * mpp).toFixed(2)} m)</div>
+      <div class="m">크기 ×${k.toFixed(2)}</div>
+      <input type="range" min="0.5" max="3" step="0.05" value="${k}" data-k="${b.id}" />
+    </div>`;
+  }).join("") + `<div class="hint">· 도형을 끌면 그 병목만 옮겨집니다<br>
+    · 슬라이더 = 크기(반경 배수)<br>· 저장하면 demo 영상·v2 지표가 같이 반영됩니다</div>`;
+  box.querySelectorAll(".row").forEach((r) => {
+    r.onclick = (ev) => { if (ev.target.type !== "range") { SEL = r.dataset.id; renderSide(); draw(); } };
+  });
+  box.querySelectorAll("input[data-k]").forEach((s) => {
+    s.oninput = () => { SCALE[s.dataset.k] = parseFloat(s.value); renderSide(); draw(); };
+  });
+}
+
+async function load(floor) {
+  META = await (await fetch(`/api/meta?floor=${encodeURIComponent(floor)}`)).json();
+  MOVE = {}; SCALE = {};
+  Object.entries(META.edit.move || {}).forEach(([k, v]) => (MOVE[k] = [v[0], v[1]]));
+  Object.entries(META.edit.scale || {}).forEach(([k, v]) => (SCALE[k] = v));
+  $("floor").innerHTML = META.floors
+    .map((f) => `<option value="${f.id}" ${f.id === META.floor ? "selected" : ""}>${f.name}</option>`).join("");
+  img = new Image();
+  img.onload = () => { fitView(); draw(); };
+  img.src = `/map/${floor}?t=${Date.now()}`;
+  SEL = null; renderSide();
+}
+
+function resize() {
+  const cv = $("cv");
+  cv.width = cv.clientWidth; cv.height = cv.clientHeight;
+  if (META) { fitView(); draw(); }
+}
+window.addEventListener("resize", resize);
+
+$("cv").addEventListener("mousedown", (e) => {
+  const r = e.target.getBoundingClientRect();
+  const pt = INV(e.clientX - r.left, e.clientY - r.top);
+  const hit = (META.bottlenecks || []).slice().reverse()
+    .find((b) => inPoly(pt, shown(b)));
+  if (hit) { SEL = hit.id; drag = { id: hit.id, pt }; renderSide(); draw(); }
+  else drag = { pan: true, x: e.clientX, y: e.clientY };
+  $("cv").style.cursor = "grabbing";
+});
+window.addEventListener("mousemove", (e) => {
+  if (!drag) return;
+  if (drag.pan) {
+    view.ox += e.clientX - drag.x; view.oy += e.clientY - drag.y;
+    drag.x = e.clientX; drag.y = e.clientY; draw(); return;
+  }
+  const r = $("cv").getBoundingClientRect();
+  const pt = INV(e.clientX - r.left, e.clientY - r.top);
+  const cur = moveOf(drag.id);
+  MOVE[drag.id] = [cur[0] + (pt[0] - drag.pt[0]), cur[1] + (pt[1] - drag.pt[1])];
+  drag.pt = pt; renderSide(); draw();
+});
+window.addEventListener("mouseup", () => { drag = null; $("cv").style.cursor = "grab"; });
+$("cv").addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = e.target.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const before = INV(mx, my);
+  view.s *= e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const after = INV(mx, my);
+  view.ox += (after[0] - before[0]) * view.s;
+  view.oy += (after[1] - before[1]) * view.s;
+  draw();
+}, { passive: false });
+
+$("floor").onchange = (e) => load(e.target.value);
+$("reset").onclick = () => { MOVE = {}; SCALE = {}; renderSide(); draw(); };
+$("save").onclick = async () => {
+  const r = await fetch("/api/edit", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ floor: META.floor, move: MOVE, scale: SCALE }),
+  });
+  const d = await r.json();
+  $("msg").textContent = r.ok ? `저장됨 → ${d.saved}` : `실패: ${d.detail || r.status}`;
+  setTimeout(() => ($("msg").textContent = ""), 4000);
+};
+
+resize();
+load("floor4");
+</script>

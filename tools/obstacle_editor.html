@@ -13,7 +13,11 @@
        font:13px/1.55 -apple-system,BlinkMacSystemFont,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
        height:100vh;display:flex;overflow:hidden}
   aside{width:306px;flex:none;background:var(--panel);border-right:1px solid var(--line);
-        display:flex;flex-direction:column;overflow:hidden}
+        display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden}
+  /* 저장은 **항상 보여야 한다.** 예전엔 overflow:hidden 이라 패널이 화면보다
+     길면 아래가 통째로 잘려, 그려 놓고 저장을 못 누르는 일이 생겼다. */
+  #saveBar{position:sticky;bottom:0;margin-top:auto;background:var(--panel);
+           border-top:1px solid var(--line);box-shadow:0 -6px 14px rgba(0,0,0,.45);z-index:5}
   aside h1{font-size:14px;margin:0;padding:13px 14px 11px;border-bottom:1px solid var(--line);letter-spacing:-.2px}
   aside h1 small{display:block;color:var(--dim);font-weight:400;font-size:11px;margin-top:3px}
   .sec{padding:12px 14px;border-bottom:1px solid var(--line)}
@@ -67,7 +71,9 @@
     <b>배경</b>
     <div class="row">
       <button id="bgMap" class="on">도면만</button>
-      <button id="bgPaths">실제 동선 겹침</button>
+      <button id="bgPaths">실제 동선</button>
+      <button id="bgConn">연결성</button>
+      <button id="bgRoutes">피난경로</button>
     </div>
     <div class="hint">동선은 그 시나리오에서 사람이 실제로 지나간 자리다.
       <b>사람이 다닌 곳은 막지 않는다</b>는 기준으로 찍는다.</div>
@@ -102,7 +108,7 @@
 
   <div id="list"></div>
 
-  <div class="sec" style="border-bottom:none;border-top:1px solid var(--line)">
+  <div class="sec" id="saveBar" style="border-bottom:none">
     <div class="row">
       <button class="pri" id="save" style="flex:1" disabled>저장</button>
       <button id="reload">되돌리기</button>
@@ -259,7 +265,9 @@ function renderList(){
 }
 
 /* ---------- 데이터 ---------- */
-const bgUrl = () => (bg === 'map' ? '/img/map/' : '/img/paths/') + floor.id;
+const BGSRC = { map:'/img/map/', paths:'/img/paths/',
+                conn:'/img/conn/', routes:'/img/routes/' };
+const bgUrl = () => (BGSRC[bg] || BGSRC.map) + floor.id;
 
 async function selectFloor(fid){
   floor = FLOORS.find(f => f.id === fid);
@@ -423,8 +431,10 @@ function setTool(t){
 }
 function setBg(b){
   bg = b;
-  $('#bgMap').classList.toggle('on', b === 'map');
-  $('#bgPaths').classList.toggle('on', b === 'paths');
+  ['map','paths','conn','routes'].forEach((k) => {
+    const el = $('#bg' + k[0].toUpperCase() + k.slice(1));
+    if (el) el.classList.toggle('on', b === k);
+  });
   ensureBg(false);
 }
 
@@ -465,6 +475,8 @@ function setBg(b){
   };
   $('#bgMap').onclick = () => setBg('map');
   $('#bgPaths').onclick = () => setBg('paths');
+  $('#bgConn').onclick = () => setBg('conn');
+  $('#bgRoutes').onclick = () => setBg('routes');
   $('#tRect').onclick = () => setTool('rect');
   $('#tPoly').onclick = () => setTool('poly');
   $('#save').onclick = save;
