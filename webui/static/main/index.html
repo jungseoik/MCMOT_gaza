@@ -524,12 +524,6 @@
                 <div class="mbig t-num" id="seiVal">—</div>
                 <div class="mbars" id="seiBars"></div>
               </div>
-              <div class="mcard" id="cardCbs">
-                <div class="mhead"><b>CBS</b><span class="msub">병목 혼잡 누적</span><span class="gslot" id="gCbs"></span><span class="mela t-num"></span></div>
-                <div class="mbig t-num" id="cbsVal">0</div>
-                <canvas class="mspark" id="cbsSpark" title="총 CBS 추이"></canvas>
-                <div class="mbnlist" id="cbsBn"></div>
-              </div>
               <div class="mcard" id="cardEpfi">
                 <div class="mhead"><b>EPFI</b><span class="msub">경로 충실도</span><span class="gslot" id="gEpfi"></span><span class="mela t-num"></span></div>
                 <div class="mbig t-num" id="epfiVal">—</div>
@@ -541,6 +535,12 @@
                   <canvas id="devChart" class="devchart"></canvas>
                   <div class="mnote">y: 경로 이탈거리 d(t) [m] · 점선: d_allow · 채움 면적 = ∫d dt</div>
                 </div>
+              </div>
+              <div class="mcard" id="cardCbs">
+                <div class="mhead"><b>CBS</b><span class="msub">병목 혼잡 누적</span><span class="gslot" id="gCbs"></span><span class="mela t-num"></span></div>
+                <div class="mbig t-num" id="cbsVal">0</div>
+                <canvas class="mspark" id="cbsSpark" title="총 CBS 추이"></canvas>
+                <div class="mbnlist" id="cbsBn"></div>
               </div>
               <div class="mcard" id="cardIdr">
                 <div class="mhead"><b>IDR</b><span class="msub">구역 피난 반응</span><span class="gslot" id="gIdr"></span><span class="mela t-num" id="idrHeadEl"><span id="idrProg">0/0</span> 구역 반응</span></div>
