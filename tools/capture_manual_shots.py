@@ -15,6 +15,7 @@
 
 사전 조건:
   - :8900 (macs-system) · :8910 (evac-editor) 기동 상태
+  - 보조 편집기 :8920(장애물) · :8940(병목 위치) 기동 상태
   - 카메라가 최소 1대 매핑·활성 상태 (대응점 화면 캡처용)
   - playwright + chromium 설치
 """
@@ -237,6 +238,31 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
     s.shot("30_live", note="③ 운영 뷰 전체")
     s.shot("31_live_map", "#liveCv", "평면도 표시 영역")
     s.shot("33_metric_rt", "#liveSide", "실시간 지표 패널")
+    # 툴바 재편(v0.0.8) — 요소 / 덧보기 / 점 세 그룹. 예전엔 [표시] 한 줄이었다.
+    s.shot("32_live_toolbar", ".toolbar.sub.tgl", "요소·덧보기·점 토글 그룹")
+    try:
+        # 덧보기를 켠 화면 — 기본은 전부 꺼져 있어 그냥 찍으면 차이가 안 보인다
+        for key in ("labels", "obstacles", "trails"):
+            btn = pg.locator(f'#overlaySeg [data-layer="{key}"]').first
+            if not btn.evaluate("e => e.classList.contains('on')"):
+                btn.click(); pg.wait_for_timeout(400)
+        pg.locator("#connToggle").click(); pg.wait_for_timeout(2500)
+        s.shot("32b_live_overlays", "#liveCv", "덧보기 — 이름표·장애물·연결성·꼬리")
+        # 되돌린다(기본값이 꺼짐이라, 켠 채로 두면 다음 캡처가 달라진다)
+        pg.locator("#connToggle").click()
+        for key in ("labels", "obstacles", "trails"):
+            btn = pg.locator(f'#overlaySeg [data-layer="{key}"]').first
+            if btn.evaluate("e => e.classList.contains('on')"):
+                btn.click()
+        pg.wait_for_timeout(600)
+    except Exception as e:
+        print(f"  ✗ 32b_live_overlays: {type(e).__name__}")
+    try:
+        pg.locator("#uniColorToggle").click(); pg.wait_for_timeout(1200)
+        s.shot("32c_live_unicolor", "#liveCv", "단일색 — 점 색을 세션 하나로")
+        pg.locator("#uniColorToggle").click(); pg.wait_for_timeout(400)
+    except Exception as e:
+        print(f"  ✗ 32c_live_unicolor: {type(e).__name__}")
     # 건물 훈련 패널(세션 시작 전 — 층별 경보 발생원 현황·건물 전체 경보 버튼)
     s.shot("35_building_drill_panel", note="건물 훈련 패널(층별 경보 발생원 현황)")
 
@@ -254,6 +280,13 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
         except Exception:
             pass
         s.shot("34_metric_session", "#liveSide", "세션 중 4대 지표")
+        try:
+            pg.locator('[data-dens="card"]').click(); pg.wait_for_timeout(1200)
+            s.shot("34c_metric_card", "#liveSide",
+                   "지표 카드 2×2 — SEI→EPFI→CBS→IDR")
+            pg.locator('[data-dens="full"]').click(); pg.wait_for_timeout(600)
+        except Exception as e:
+            print(f"  ✗ 34c_metric_card: {type(e).__name__}")
     # CBS 선택 집계 (v0.0.5) — 병목 선택 칩·집계 줄
     try:
         s.shot("34b_cbs_select", "#cbsBn", note="CBS 병목 선택 집계")
@@ -352,10 +385,40 @@ def capture_main(pw, out: Path, do_session: bool) -> Shooter:
     return s
 
 
+OBST = "http://127.0.0.1:8920"
+BNED = "http://127.0.0.1:8940"
+
+
+def capture_tools(pw, out: Path) -> Shooter:
+    """발표·분석용 보조 편집기 — 장애물(:8920)·병목 위치(:8940).
+
+    운영 설정(:8900)과 **분리된 도구**다. 여기서 만든 값은 각자의 파일 하나에만
+    저장되고, 피난경로 산출과 발표용 시각화가 그 파일을 읽는다.
+    """
+    print("▶ 보조 편집기 (:8920 · :8940)")
+    b = pw.chromium.launch(headless=True)
+    pg = b.new_page(viewport={"width": 1760, "height": 1000}, device_scale_factor=2)
+    s = Shooter(pg, out)
+    for url, name, note, wait in (
+            (OBST, "60_obstacle_editor", "장애물 편집기 — 의자·적치물·통행금지", 3500),
+            (BNED, "61_bottleneck_editor", "병목 위치 편집기 — 끌어서 옮김", 3000)):
+        try:
+            pg.goto(url + "/")
+            pg.wait_for_load_state("domcontentloaded")
+            pg.wait_for_timeout(wait)
+            s.shot(name, note=note)
+        except Exception as e:
+            print(f"  ✗ {name}: {type(e).__name__}")
+            s.fail.append(name)
+    b.close()
+    return s
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="가이드 스크린샷 캡처")
     ap.add_argument("--out", required=True, type=Path, help="출력 img 디렉토리")
-    ap.add_argument("--only", choices=["8900", "8910"], help="한쪽만 캡처")
+    ap.add_argument("--only", choices=["8900", "8910", "tools"],
+                    help="한쪽만 캡처 (tools = :8920·:8940 보조 편집기)")
     ap.add_argument("--skip-session", action="store_true",
                     help="평가 세션 예시 캡처를 건너뜀(세션 파일 생성 없음)")
     a = ap.parse_args()
@@ -373,11 +436,13 @@ def main() -> int:
 
     total, fails = 0, []
     with sync_playwright() as pw:
-        if a.only != "8900":
+        if a.only not in ("8900", "tools"):
             s = capture_editor(pw, out); total += s.n; fails += s.fail
-        if a.only != "8910":
+        if a.only not in ("8910", "tools"):
             s = capture_main(pw, out, not a.skip_session)
             total += s.n; fails += s.fail
+        if a.only in (None, "tools"):
+            s = capture_tools(pw, out); total += s.n; fails += s.fail
 
     print(f"\n총 {total}장 캡처")
     if fails:

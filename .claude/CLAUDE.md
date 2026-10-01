@@ -23,6 +23,8 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 - **추론 엔진**: `src/` — `inference.py`(PyTorch), `inference_gpu.py`/`inference_trt.py`(TRT 최적화), `build_trt.py`. **검출기 투트랙**(YOLOX ↔ RF-DETR): `BoostTrackGPUInference(detector=...)`·CLI `--detector`, RF-DETR은 `src/rfdetr_trt.py`(라이브러리 불필요)+`tools/setup_rfdetr.sh`. 근거·사용법 `docs/reports/RF-DETR-TRT-변환-사용법.md`
 - **추론 프로파일(모델 교체)**: 검출기·ReID·트래커 조합을 레포 루트 **`model_zoo.py`** 한 곳에서 갈아끼운다 — `yolox_fastreid`(기본, 기존 동작) ↔ `yolo26_clipreid`(YOLO26-L v6.3 + CLIP-ReID). 세 호출 지점(단일영상·ffmpeg 백엔드·DS 컨테이너)이 프로파일 id 하나만 받는다. **:8900 [① 설정 → 추론 모델]에서 전환**(세션 중 불가). 엔진 빌드 `tools/build_profile_engines.sh [--ds]`, ONNX는 `tools/fetch_assets.sh --onnx`. 설계 `docs/architecture/07-추론-프로파일-교체구조.md` · 실측 `docs/reports/2026-08-20_신규-추론스택-YOLO26-CLIPReID-도입-실측.md`
 - **단일채널 웹 UI**: `webui/` — `server.py`, 속도/밀도/카운팅/뎁스 모듈, RTSP 라이브 (포트 8000)
+- **보조 편집기(발표·분석 전용, 운영 설정 무관)**: 장애물 표시 **:8920** `tools/obstacle_editor.py` (→ `results/demo/_annotate/obstacles_<층>.json`, 피난경로가 벽으로 취급) · 병목 위치 **:8940** `tools/bottleneck_editor.py` (→ `bn_edit_<층>.json`, demo 렌더·v2 지표가 읽음) · 동선 편집기 **:8930** `tools/path_editor.py`
+- **발표용 시각화**: `tools/demo_viz.py`(녹화 세션 → 지표가 보이는 영상) · `tools/floor_demo_viz.py`(층 라이브 — 2×2 그리드·SSE 보간·서브픽셀) · `tools/demo_loopfold.py`(루프 영상 여러 바퀴를 겹쳐 사람별 궤적 복원) · `tools/record_opsview.py`(운영 뷰 화면 녹화) · `tools/compose_grid.py`(녹화 + 카메라 그리드 싱크 합성). 기록 `results/demo/README.md` · `results/floor_viz/README.md` · `results/rehearsal_sessions/README.md`
 - **멀티카메라 시스템**: `system/` — 다채널 RTSP·TRT·4대 지표 세션·2D 맵 UI + **세션 리플레이·지표 재계산(v1.10)** · **건물 훈련(전 층 공유 세션·4대지표 롤업·전 층 리플레이, v1.11 — UI 표기 "건물 훈련", 내부 코드·API는 `drill`)** · **리허설 패키지(ADR 09 — `media/vsource/<site>/<set>/rehearsal.json` = 영상·시나리오·카메라·매핑 정본, 사이트 층 빙의, RTSP 없는 파일 모드 잠금 동기 추론; 영상은 HF `backseollgi/MCMOT/media/vsource/**`(레포 경로 미러), `tools/fetch_assets.sh --rehearsal`)** · 간이 로그인 게이트 (포트 8900). `system/README.md` 참조
 - **트래커**: `tracker/`, `boostracker/`, 외부 의존 `external/`
 
@@ -38,6 +40,7 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 | `docs/deliverables/` | **검증 결과보고서(대외 제출용)** — 판정이 확정된 최종 문서만. 폴더 1개 = 보고서 1건(`README.md`+`img/`+`data/`). 개발 과정의 실측·진단은 `docs/reports/` 에 둔다 |
 | `docs/reports/` | YOLO26·해상도·다채널 비교 실측 보고서 + 요구사항 점검 + 벤치 스크립트 |
 | `docs/guide/` | **사용 가이드 허브(3종)** — 단일영상-분석-MVP(:8000) · 멀티카메라-시스템 4대지표(:8900) · 도면-편집기(:8910). 각 하위폴더 README + img (스크린샷 기반) |
+| `docs/manual/` | **배포용 사용 매뉴얼(PDF·DOCX)** — 버전 폴더 = 스냅샷. 원고(`원고.md`)만 git, 산출물·img 는 HF. 최신 **v0.0.8**(2026-10-01, A4 67쪽). 개정은 `/manual-build` 스킬 |
 | `docs/optimization-report.md` | 추론 최적화 보고서 |
 | `docs/재현-새-GPU서버에서-현재상태-그대로.md` | **새 서버/노트북에서 현재 운영상태 그대로 재현** — clone + HF 토큰만으로 12채널·17F/16F/10F·AI hub 1·3층 도면·리허설 패키지·편집기까지. `tools/fetch_assets.sh [--rehearsal]` + `tools/seed_version.py restore v11 --apply` |
 | `docs/설치-맨서버-부트스트랩.md` | **순정 우분투(드라이버만) 0단계 시스템 준비** — conda·docker·nvidia-container-toolkit·ffmpeg·node/pm2·CAD 복붙 체크리스트 + 기능별 필수의존 표 + 재현 판정. 대용량은 `tools/fetch_assets.sh`(HF `backseollgi/MCMOT`) |

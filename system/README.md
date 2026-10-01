@@ -94,6 +94,24 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 
 근거·제약·롤백 절차: [docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md](../docs/architecture/04-DeepStream-zero-copy-인제스트-전환.md)
 
+## 운영 뷰 도구 막대 (요소 / 덧보기 / 점)
+
+| 묶음 | 담긴 것 | 기본 | 비고 |
+|---|---|---|---|
+| 요소 (`#layerSeg`, `data-layer`) | 구역·경로·병목·출입구·경보원 | 전부 켬 | 맵 설정에 들어 있는 것 |
+| 덧보기 (`#overlaySeg`) | 이름표·장애물·연결성·꼬리·공간그래프·커버리지·히트맵 | 전부 끔 | 필요할 때만 덧그린다 |
+| 점 | 단일색 (`#uniColorToggle`) | 끔 | 점 색을 세션 하나로 통일 |
+
+전부 **표시 전용**이며 지표 계산에는 영향이 없다. `localStorage` 에 기억된다.
+④ 리플레이에도 같은 두 묶음이 있다(`data-rlayer`).
+
+4대 지표 카드(2×2) 순서는 **SEI → EPFI → CBS → IDR** — 운영 뷰(`#sessGrid`)와
+리플레이(`#rpSide`)가 같다. DOM 순서가 곧 표시 순서이고, 카드 접근은 전부 id 기준이라
+순서를 바꿔도 로직에 영향이 없다.
+
+**연결성**은 `/api/floor/connectivity` — CAD 격자가 있으면 그것을, 없으면 `map.png`
+추정을 쓴다(응답 헤더 `X-Conn-Src`). 초록 = 출구까지 갈 수 있는 자리, 주황 = 고립된 자리.
+
 ## 리허설 패키지 (ADR 09 — 파일 모드)
 
 `media/vsource/<site>/<set>/rehearsal.json` 이 영상·시나리오·카메라·매핑의 정본. ⑤ 리허설 탭에서
