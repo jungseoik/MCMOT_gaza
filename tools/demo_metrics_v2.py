@@ -40,6 +40,7 @@ from system.metrics import recorder                                 # noqa: E402
 from system.metrics.engine import MetricsEngine                     # noqa: E402
 from system.metrics.replay import run_replay                        # noqa: E402
 from system.spatial import nearest_on_polyline                      # noqa: E402
+from tools import demo_bottleneck as dbn                            # noqa: E402
 from tools import demo_ghosts as dghost                             # noqa: E402
 from tools import demo_obstacles as dobs                            # noqa: E402
 from tools import demo_paths as dpaths                              # noqa: E402
@@ -130,6 +131,7 @@ def run_v2(sid: str, floor: str, tracks: str = "drawn", v_th: float = V_TH_V2,
     # 위치로 푼 경로(사이드카)를 쓰면 그린 동선과 출발점이 달라 준수도가 무너진다
     # (실측 12 SEI: EPFI 60.9 → 23.6. 계단 안에서 시작한 경로였다).
     obstacles = dobs.load(fl)
+    dbn.load(fl)        # 병목 편집본(:8940)
     # "그 출구가 없었다면" — 출구·병목을 빼고 **그 가정대로** 경로까지 다시 푼다.
     drop_e = set(drop_exits or ())
     drop_b = set(drop_bn or ())
@@ -168,6 +170,10 @@ def run_v2(sid: str, floor: str, tracks: str = "drawn", v_th: float = V_TH_V2,
     sv["routes"] = [{"id": r["id"], "name": r.get("name", ""),
                      "points": r["points"]} for r in routes["routes"]]
     sv["thresholds"] = {**sv.get("thresholds", {}), "v_th": float(v_th)}
+    # 병목(밀집구역)을 표출과 **같은 크기**로 키운다. 화면에는 키워 그리고
+    # 계산은 원래 크기로 두면 "저기 저렇게 모였는데 왜 0인가"가 된다.
+    for b in (sv.get("bottlenecks") or []):
+        dbn.scale_shape(b)
     # 출구는 **맵 통과선**으로만 센다. 화면 게이트(cam_line·cam_zone)가 걸려
     # 있으면 엔진이 "그 카메라가 이미 셌다"고 보고 맵 좌표 판정을 건너뛴다 —
     # 그런데 v2 엔진에는 그 카메라가 없으니 아무도 세지 않는다(출구 0명, SEI 없음).

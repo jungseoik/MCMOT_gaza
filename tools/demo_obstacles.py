@@ -57,10 +57,23 @@ def signature(obstacles: list[dict]) -> str:
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
-def _hatch(bgr, size=10):
+# 장애물은 **배경 정보**다. 사람 점·경로가 주인공인데 해치가 진하면 거기로
+# 눈이 먼저 간다. 색을 회색 쪽으로 빼고(채도↓) 얇게 긋는다.
+HATCH_ALPHA = 0.22          # 해치 선 진하기
+FILL_ALPHA = 0.05           # 면 바탕 진하기
+DESAT = 0.72                # 0=원색 … 1=회색
+
+
+def _soft(bgr):
+    """채도를 빼 배경으로 물러나게 한다."""
+    g = float(np.mean(bgr))
+    return tuple(float(c) * (1 - DESAT) + g * DESAT for c in bgr)
+
+
+def _hatch(bgr, size=16):
     """대각 해치 타일 — 색만으로는 도면 위에서 구별이 안 된다."""
     t = np.zeros((size, size, 3), np.uint8)
-    cv2.line(t, (-1, size), (size, -1), bgr, 2, cv2.LINE_AA)
+    cv2.line(t, (-1, size), (size, -1), _soft(bgr), 1, cv2.LINE_AA)
     return t
 
 
@@ -85,11 +98,13 @@ def draw(img, obstacles: list[dict], MP):
         pat = fill[y0:y1, x0:x1]
         # 해치 선이 있는 픽셀만 칠한다 — 도면이 비치게
         sel = (m > 0) & (pat.max(axis=2) > 40)
-        roi[sel] = pat[sel]
-        # 바탕을 살짝 눌러 영역이 보이게
+        roi[sel] = (roi[sel] * (1 - HATCH_ALPHA)
+                    + pat[sel] * HATCH_ALPHA).astype(np.uint8)
+        # 바탕을 살짝 눌러 영역이 보이게 (아주 옅게)
         light = (m > 0) & ~sel
-        roi[light] = (roi[light] * 0.78 + np.array(bgr) * 0.22).astype(np.uint8)
-        cv2.polylines(img, [poly], True, bgr, 2, cv2.LINE_AA)
+        roi[light] = (roi[light] * (1 - FILL_ALPHA)
+                      + np.array(_soft(bgr)) * FILL_ALPHA).astype(np.uint8)
+        cv2.polylines(img, [poly], True, _soft(bgr), 1, cv2.LINE_AA)
     return img
 
 

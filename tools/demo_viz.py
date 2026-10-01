@@ -35,6 +35,7 @@ import numpy as np                            # noqa: E402
 
 from system.metrics import recorder           # noqa: E402
 from system.metrics.replay import run_replay  # noqa: E402
+from tools import demo_bottleneck as dbn      # noqa: E402
 from tools import demo_ghosts as dghost       # noqa: E402
 
 # 그린 10명 **말고** 실측 그대로 얹을 트랙 (세션별)
@@ -48,7 +49,7 @@ from tools import demo_tracks as dtrk         # noqa: E402
 from tools import demo_obstacles as dobs      # noqa: E402
 from tools import demo_paths as dpaths        # noqa: E402
 from tools.session_viz import (                # noqa: E402
-    drill_label, find_session, fit, latest_at, put, resolve_clips,
+    drill_label, find_session, fit, latest_at, put, resolve_clips, text_w,
 )
 
 
@@ -186,6 +187,9 @@ def main() -> int:
     ap.add_argument("--drop-bn", default="", help="v2 — 없앤 셈 칠 병목 id(콤마)")
     ap.add_argument("--v-th", type=float, default=0.30,
                     help="v2 의 피난개시 속도 임계 (사이트 기본 0.5)")
+    ap.add_argument("--tag", default="",
+                    help="파일명 꼬리표. 같은 세션을 화면만 바꿔 다시 뽑을 때 판을 "
+                         "구분한다 — 예 `--tag v3` → IDR_01_v3.mp4")
     ap.add_argument("--title", default="")
     ap.add_argument("--th", default="",
                     help='임계값 오버라이드 JSON — 예 \'{"dt_hold":1.0}\'. '
@@ -211,6 +215,7 @@ def main() -> int:
     # 장애물 표시(:8920 편집기) — 그림에도 얹고, **경로 산출에서는 벽**으로 친다.
     # 지표 계산에는 넣지 않는다(사람이 그린 공통 경로 기준 산출은 그대로).
     obstacles = dobs.load(floor)
+    dbn.load(floor)        # 병목 편집본(:8940)
     osig = dobs.signature(obstacles)
     if obstacles:
         print(f"[demo] 장애물 표시 {len(obstacles)}개 — 도면에 표출 + 경로 산출에 반영")
@@ -305,7 +310,10 @@ def main() -> int:
     left0 = np.full((PANE_H, LEFT_W, 3), BG[0], np.uint8)
     left0[:] = base
     for bn in (site.get("bottlenecks") or []):          # CBS 병목
-        poly = np.array([MP(*p) for p in bn["polygon"]], np.int32)
+        # scale_shape 는 **크기와 이동을 같이** 적용한다(:8940 편집본).
+        # scaled() 만 쓰면 크기만 반영되고 옮긴 자리가 무시된다.
+        _bn = dbn.scale_shape(dict(bn, polygon=[list(p) for p in bn["polygon"]]))
+        poly = np.array([MP(*p) for p in _bn["polygon"]], np.int32)
         ov = left0.copy(); cv2.fillPoly(ov, [poly], (60, 90, 255))
         cv2.addWeighted(ov, 0.16, left0, 0.84, 0, left0)
         cv2.polylines(left0, [poly], True, (60, 90, 255), 2)
@@ -314,18 +322,62 @@ def main() -> int:
         if len(ln) >= 2:
             cv2.line(left0, MP(*ln[0]), MP(*ln[1]), (255, 190, 60), 6, cv2.LINE_AA)
     dobs.draw(left0, obstacles, MP)                      # 장애물 표시(해치)
-    leg = dobs.legend(obstacles)                         # 범례 — 색만으론 안 읽힌다
+    # 범례 — **화면에 나오는 것 전부**를 적는다. 색·도형만 보고 무엇인지 알 수
+    # 없으면 발표에서 매번 말로 설명해야 한다.
+    #   kind: dot(점) / line(선) / box(면) / hatch(해치)
+    _dot = session_color(a.session)
+    # 항목: (이름, 색, 모양). 설명문을 한 줄 더 붙여 봤는데 그 줄이 제일 길어서
+    # 범례 가로가 도면의 절반을 먹었다 — 이름만 남기고, 무엇을 재는지는 이름에 담는다.
+    # 자취·피난경로는 **범례에서 뺀다**. 선이 셋이나 되는데 셋 다 비슷한 파랑이라
+    # 오히려 헷갈렸고, 둘은 그림만 봐도 읽힌다(점 뒤를 따라오는 선 / 도입부에만
+    # 잠깐 깔리는 선). 범례는 모양만 보고는 모르는 것만 남긴다.
+    # 점 색은 판마다 다르다 — 히트 판은 흰색으로 그린다.
+    leg: list[tuple] = [("재실자", (255, 255, 255) if a.map == "heat" else _dot,
+                         "dot")]
+    if site.get("exits"):
+        leg.append(("출입구 통과선", (255, 190, 60), "line"))
+    if site.get("bottlenecks"):
+        leg.append(("밀집 측정 구역", (60, 90, 255), "sector"))
+    leg += [(nm, bgr, "hatch") for nm, bgr in dobs.legend(obstacles)]
     if leg:
-        # 도면이 흰 바탕이라 글자를 그냥 얹으면 안 읽힌다 — 어두운 판을 깐다
-        h = 10 + len(leg) * 24
-        x0, y0 = 12, PANE_H - 12 - h
+        # 도면이 흰 바탕이라 글자를 그냥 얹으면 안 읽힌다 — 어두운 판을 깐다.
+        # 위치는 **우측 상단** — 사람이 움직이는 곳(좌·하단)을 가리지 않는다.
+        FS = 18                           # 본문 글자 크기
+        rowh, padx, gw = 30, 13, 28
+        wmax = max(text_w(nm, FS, True) for nm, _c, _k in leg)
+        # +12 는 여유. text_w 는 글자 폭 합이라 한글 자간·괄호에서 조금 모자란다.
+        boxw = int(padx * 2 + gw + 10 + wmax + 12)
+        h = 12 + len(leg) * rowh
+        x0, y0 = LEFT_W - 14 - boxw, 14
         ov = left0.copy()
-        cv2.rectangle(ov, (x0, y0), (x0 + 168, y0 + h), (28, 28, 32), -1)
-        cv2.addWeighted(ov, 0.80, left0, 0.20, 0, left0)
-        for i, (nm, bgr) in enumerate(leg):
-            y = y0 + 6 + i * 24
-            cv2.rectangle(left0, (x0 + 10, y + 4), (x0 + 26, y + 18), bgr, -1)
-            put(left0, nm, (x0 + 34, y + 1), 16, (232, 232, 240), True)
+        cv2.rectangle(ov, (x0, y0), (x0 + boxw, y0 + h), (26, 26, 30), -1)
+        cv2.addWeighted(ov, 0.84, left0, 0.16, 0, left0)
+        cv2.rectangle(left0, (x0, y0), (x0 + boxw, y0 + h), (78, 78, 88), 1)
+        for i, (nm, bgr, kind) in enumerate(leg):
+            cy = y0 + 6 + i * rowh + rowh // 2
+            sx = x0 + padx
+            if kind == "dot":
+                cv2.circle(left0, (sx + gw // 2, cy), 6, bgr, -1, cv2.LINE_AA)
+            elif kind == "line":
+                cv2.line(left0, (sx, cy), (sx + gw, cy), bgr, 4, cv2.LINE_AA)
+            elif kind == "sector":
+                # **반원**으로 그린다 — 도면 위 밀집 구역이 부채꼴이라 모양으로
+                # 바로 이어진다(네모로 그리면 구역·존과 구분이 안 된다).
+                c = (sx + gw // 2, cy + 6)
+                ax = (gw // 2 + 1, gw // 2 + 1)
+                o2 = left0.copy()
+                cv2.ellipse(o2, c, ax, 0, 180, 360, bgr, -1, cv2.LINE_AA)
+                cv2.addWeighted(o2, 0.38, left0, 0.62, 0, left0)
+                cv2.ellipse(left0, c, ax, 0, 180, 360, bgr, 2, cv2.LINE_AA)
+                cv2.line(left0, (c[0] - ax[0], c[1]), (c[0] + ax[0], c[1]),
+                         bgr, 2, cv2.LINE_AA)
+            else:                                   # hatch
+                cv2.rectangle(left0, (sx, cy - 7), (sx + gw, cy + 7),
+                              dobs._soft(bgr), 1)
+                cv2.line(left0, (sx + 2, cy + 6), (sx + gw - 2, cy - 6),
+                         dobs._soft(bgr), 1, cv2.LINE_AA)
+            put(left0, nm, (sx + gw + 10, cy - FS + 4), FS, (232, 232, 240), True)
+        print(f"[demo] 범례 {boxw}x{h}px · {len(leg)}줄")
 
     # 히트맵 준비 — 반경은 **실거리**로 잡는다(화면 px 로 고정하면 도면 축척마다
     # 같은 밀집이 다른 그림이 된다).
@@ -334,14 +386,17 @@ def main() -> int:
         heat_r = max(6, int(HEAT_R_M / m_per_px * msc * HEAT_SCALE))
         blob = heat_blob(heat_r)
         lut_rgb, lut_a = heat_lut()
-        heat_legend(left0, 22, 38)      # 좌하단은 장애물 범례가 쓴다
+        # heat_legend 가 까는 판은 색띠까지만 덮어서, 아래 "낮음/높음" 글자가
+        # 흰 도면 위로 나가 안 읽힌다. 먼저 넉넉한 받침을 깔고 그 위에 그린다.
+        cv2.rectangle(left0, (14, 14), (14 + 150 + 16, 80), (28, 28, 32), -1)
+        heat_legend(left0, 22, 38)      # 좌상단 — 우상단은 도형 범례가 쓴다
         print(f"[demo] 히트맵 판 — 반경 {HEAT_R_M}m = {heat_r}px(누적버퍼)")
 
     DOT = session_color(a.session)
     outdir = ROOT / a.out
     outdir.mkdir(parents=True, exist_ok=True)
     stem = (f"{a.metric}_{label.split()[0]}"
-            + ("_v2" if a.metrics == "v2" else "")
+            + (f"_{a.tag}" if a.tag else ("_v2" if a.metrics == "v2" else ""))
             + ("_heat" if a.map == "heat" else ""))
     tmp, final = outdir / f"{stem}.tmp.mp4", outdir / f"{stem}.mp4"
     vw = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), out_fps, (OW, OH))
@@ -498,7 +553,11 @@ def main() -> int:
     _peak_seen = {"v": 0.0}
 
     def _cbs_note(tp) -> str:
-        """CBS 아래 작은 글씨 — 사람이 읽을 수 있는 근거."""
+        """CBS 아래 작은 글씨 — 사람이 읽을 수 있는 근거.
+
+        값 자체는 **원값**이다(0.0 이 좋음). 100 − CBS 로 뒤집어 보여 준 적이
+        있는데, 0 기준으로 읽는 지표를 100 기준으로 바꾸면 다른 자료와 어긋난다.
+        """
         bd = tp.get("bottleneck_density") or {}
         cur = max((v or 0.0 for v in bd.values()), default=0.0)
         _peak_seen["v"] = max(_peak_seen["v"], cur)
@@ -509,41 +568,59 @@ def main() -> int:
         return (f"1인당 {c * _area_avg / max(1, _n_people):.1f}초 지체 "
                 f"· 최대 {peak:.1f}명/m²")
 
+    # 지표 이름은 **한글이 먼저**다. 발표 자리에서 IDR·EPFI 를 아는 사람은 없다.
+    # 약어는 근거를 찾아볼 수 있게 작게 곁들인다.
+    KO = {"IDR": "반응 신속도", "SEI": "출구 활용도",
+          "CBS": "대피 혼잡도", "EPFI": "경로 준수도"}
+
     def bar_panel(t, tp, obs, exits_now):
         bar = np.full((BAR_H, OW, 3), 22, np.uint8)
         el = max(0.0, t - t0)
         m, s = int(el // 60), int(el % 60)
-        put(bar, "경보 후 경과", (26, 12), 17, (150, 150, 150))
-        put(bar, f"{m}:{s:02d}", (22, 34), 62, (255, 255, 255), True)
+        put(bar, "경보 후 경과 시간", (26, 10), 22, (175, 175, 180))
+        put(bar, f"{m}:{s:02d}", (22, 40), 72, (255, 255, 255), True)
+        put(bar, "분:초", (26 + int(text_w(f"{m}:{s:02d}", 72, True)) + 10, 82),
+            18, (145, 145, 150))
         iv, idone, ifirst = idr_at(t)
         x = int(OW * 0.15)
+        _ex_n = sum(exits_now.values()) if exits_now else 0
         for name, val, sub in (
-                ("SEI", f1(tp.get("sei")), "출구 활용"),
-                ("EPFI", f1(tp.get("epfi_avg")), "경로 충실"),
-                ("CBS", (f"{100 - (tp.get('cbs_total') or 0.0):.1f}"
-                         if tp.get("cbs_total") is not None else "—"),
-                 _cbs_note(tp)),
+                ("SEI", f1(tp.get("sei")),
+                 (f"출구 {len(exits_now)}곳 · 통과 {_ex_n}명" if exits_now else "—")),
+                ("EPFI", f1(tp.get("epfi_avg")), f"재실 {len(obs)}명 기준"),
+                ("CBS", f1(tp.get("cbs_total"), 2), _cbs_note(tp)),
                 ("IDR", f1(iv, 2),
                  (f"개시 {ifirst:.0f}s · {idone}/{n_zones} 구역" if iv is not None
                   else f"미개시 · 0/{n_zones} 구역"))):
             main = (name == a.metric)
-            col = ACCENT[name] if main else (140, 140, 140)
-            put(bar, name, (x, 14), 20 if main else 16, col, True)
-            put(bar, val, (x, 38), 52 if main else 34, col if main else (225, 225, 225), True)
+            # **넷 다 같은 크기·같은 색 규칙**으로 그린다. 주지표만 크고 나머지는
+            # 회색이면 "무슨 글자인지" 가 안 읽힌다 — 주지표는 테두리로만 구분한다.
+            col = ACCENT[name]
+            ko = KO.get(name, name)
+            put(bar, ko, (x, 10), 28, col, True)
+            nw = int(text_w(ko, 28, True))
+            put(bar, name, (x + nw + 8, 18), 17, (150, 150, 155))
+            put(bar, val, (x, 44), 58, (245, 245, 248), True)
             if name == "IDR" and iv is not None:
-                put(bar, "m/s", (x + (118 if main else 84), 66 if main else 58),
-                    16, (150, 150, 150))
-            put(bar, sub, (x, 100 if main else 80), 15, (120, 120, 120))
-            if main:                                  # 값 줄만 감싼다(바 전체가 아니라)
-                cv2.rectangle(bar, (x - 12, 8), (x + int(OW * 0.125), 96), col, 2)
-            x += int(OW * 0.145)
+                put(bar, "m/s", (x + int(text_w(val, 58, True)) + 8, 76),
+                    18, (155, 155, 160))
+            put(bar, sub, (x, 110), 16, (145, 145, 150))
+            if main:                       # 값·설명까지 감싼다(숫자가 잘리지 않게)
+                cv2.rectangle(bar, (x - 13, 2), (x + int(OW * 0.138), 134), col, 2)
+            x += int(OW * 0.158)
         # 카운팅 — 따로
-        cx = int(OW * 0.74)
+        cx = int(OW * 0.785)
         cv2.line(bar, (cx - 24, 12), (cx - 24, BAR_H - 14), (70, 70, 70), 1)
-        put(bar, "카운팅", (cx, 12), 17, (150, 150, 150))
-        put(bar, f"재실 {len(obs)}명", (cx, 34), 30, (235, 235, 235), True)
-        ex_txt = " · ".join(f"{k} {v}" for k, v in sorted(exits_now.items())) or "—"
-        put(bar, f"출구 통과  {ex_txt}", (cx, 72), 24, (255, 190, 60), True)
+        put(bar, "카운팅", (cx, 10), 20, (170, 170, 175))
+        # 재실 / 출구 통과 **두 줄**로. 예전엔 출구가 작아 눈에 안 들어왔다.
+        put(bar, "재실", (cx, 44), 22, (170, 170, 175))
+        put(bar, f"{len(obs)}명", (cx + 52, 36), 38, (245, 245, 248), True)
+        _ex_tot = sum(exits_now.values()) if exits_now else 0
+        put(bar, "출구 통과", (cx, 92), 22, (170, 170, 175))
+        put(bar, f"{_ex_tot}명", (cx + 96, 84), 38, (255, 190, 60), True)
+        if exits_now and len(exits_now) > 1:
+            det = " · ".join(f"{k} {v}" for k, v in sorted(exits_now.items()))
+            put(bar, det, (cx + 186, 96), 17, (150, 150, 155))
         if th:   # 기본값과 다른 임계로 잰 값이라는 걸 숨기지 않는다
             put(bar, "임계값 " + " · ".join(f"{k}={v}" for k, v in th.items()),
                 (26, BAR_H - 30), 17, (130, 130, 130))

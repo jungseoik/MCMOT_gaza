@@ -86,6 +86,15 @@ def put(img, text, org, px=16, col=(235, 235, 235), bold=False):
     img[:] = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
 
+def text_w(text: str, px: int = 16, bold: bool = False) -> float:
+    """그려질 글자 폭(px) — 이름 옆에 약어를 붙일 때 겹치지 않게."""
+    f = _font(px, bold)
+    try:
+        return float(f.getlength(text))
+    except AttributeError:              # 아주 옛 PIL
+        return float(f.getsize(text)[0])
+
+
 def fit(img, w, h):
     s = min(w / img.shape[1], h / img.shape[0])
     r = cv2.resize(img, (max(1, int(img.shape[1] * s)), max(1, int(img.shape[0] * s))))
