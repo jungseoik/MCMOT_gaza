@@ -129,6 +129,18 @@ if [ "$DO_CAD" -eq 1 ]; then
     echo "  [실패] cad/ai_hub_cad — 비공개 MCMOT 접근 토큰(HF_TOKEN) 필요" >&2; RC=1
   fi
   rm -rf "$CADD"
+  # CJ제일제당센터 지상1층 추출물(A-101→1F 벡터·렌더). 130MB 변환본은 재생성 가능이라 제외.
+  CJD="$(mktemp -d)"
+  if "$HF_BIN" download backseollgi/MCMOT --repo-type model \
+       --include "cad/cj_cad/**" --local-dir "$CJD" >/dev/null 2>&1 \
+     && [ -d "$CJD/cad/cj_cad" ]; then
+    mkdir -p cad/cj_cad
+    cp -r "$CJD/cad/cj_cad/." cad/cj_cad/
+    echo "  ↓ cad/cj_cad/** → cad/cj_cad/  ($(du -sh cad/cj_cad 2>/dev/null | cut -f1))"
+  else
+    echo "  [실패] cad/cj_cad — 비공개 MCMOT 접근 토큰(HF_TOKEN) 필요" >&2; RC=1
+  fi
+  rm -rf "$CJD"
 fi
 
 if [ "$DO_FIELD" -eq 1 ]; then
