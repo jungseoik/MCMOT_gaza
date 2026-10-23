@@ -2002,12 +2002,12 @@
       "building": "cj",
       "map": {
         "image": "map_floor3.png",
-        "w": 2346,
-        "h": 1672,
+        "w": 2400,
+        "h": 2030,
         "scale": null,
-        "m_per_px": 0.039995,
-        "source": null,
-        "unit": null
+        "m_per_px": 0.034834,
+        "source": "CJ제일제당센터_1F.dxf (A-101 지상1층 추출)",
+        "unit": "m"
       },
       "routes": [],
       "zones": [],
