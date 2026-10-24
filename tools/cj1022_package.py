@@ -365,7 +365,9 @@ def write_readme(out_dir: Path, src: Path, outputs: list[Output]) -> Path:
     L.append(f"1. **인트로 {INTRO_SEC:.0f}초** — 도면·피난경로 소개(시계 0:00 이전).")
     L.append("2. **본편** — 하단 시계 0:00 = 경보(훈련 시작, 실제 14:59:55). 지표는 시간에 따라 쌓인다.")
     L.append(f"3. **종료 정지 {HOLD_SEC:.0f}초** — 컷 시각의 마지막 화면을 멈추고 라벨(예: \"16층 피난층 종료 · 08:10\")을 띄운다.")
-    L.append("4. **리포트**(있을 때만) — 우리 UI 의 결과 리포트 화면 클립(`tools/report_card.py`).\n")
+    L.append("4. **리포트**(있을 때만) — 우리 UI 의 결과 리포트 화면 클립(`tools/report_card.py`) → "
+             "**피난훈련 평가 보고서** 슬라이드(`tools/cj1022_eval_report.py` — 종합 평가 · 피난 타임라인 · "
+             "출구별 분석(출구별 분담·출구 앞 CBS) · 건물 종합(여러 층일 때)).\n")
 
     L.append("### 용어\n")
     L.append("- **피난층 종료**: 그 층에서 마지막 인원이 비상구로 빠져나간 시각(사람이 영상으로 판정, "
