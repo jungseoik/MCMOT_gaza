@@ -1,5 +1,5 @@
 {
-  "session_id": "sess-1792775471082",
+  "session_id": "sess-1792820130375",
   "floor": "floor9",
   "label": "CJ1022 전체 3개 층 · 선 카운트 · 복도경로",
   "metric": "ALL",
@@ -9,7 +9,7 @@
   "zone_metrics": [
     {
       "zone_id": "z-idr",
-      "evacuation_start_at": 1792775989.082261,
+      "evacuation_start_at": 1792820648.3746328,
       "response_delay_sec": 518.0,
       "graph_distance": 31.389562266249687,
       "idr": 0.060597610552605576,

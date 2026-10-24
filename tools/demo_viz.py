@@ -353,7 +353,12 @@ def main() -> int:
     for bn in (site.get("bottlenecks") or []):          # CBS 병목
         # scale_shape 는 **크기와 이동을 같이** 적용한다(:8940 편집본).
         # scaled() 만 쓰면 크기만 반영되고 옮긴 자리가 무시된다.
-        _bn = dbn.scale_shape(dict(bn, polygon=[list(p) for p in bn["polygon"]]))
+        # **그림 = 지표가 재는 영역.** 확대·이동(:8940 편집본, 기본 반경 1.5배·b1/b4 2배)은
+        # v2 지표가 그 영역으로 다시 재기 때문에 쓰는 것이다. v1(원 관측)은 site.json 의
+        # 원래 병목으로 재므로 그대로 그린다 — 키워 그리면 웹 화면·지표와 영역이 어긋난다
+        # (2026-10-24 CJ 영상: 반경 1.5~2배로 그려져 실제보다 2.25~4배 넓게 보였다).
+        _bn = (dbn.scale_shape(dict(bn, polygon=[list(p) for p in bn["polygon"]]))
+               if a.metrics == "v2" else dict(bn))
         poly = np.array([MP(*p) for p in _bn["polygon"]], np.int32)
         ov = left0.copy(); cv2.fillPoly(ov, [poly], (60, 90, 255))
         cv2.addWeighted(ov, 0.16, left0, 0.84, 0, left0)
