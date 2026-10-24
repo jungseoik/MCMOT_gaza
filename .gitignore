@@ -256,3 +256,8 @@ cad/cj_cad/*
 
 # 참조하는 코드·문서가 없는 샘플 영상 6.2MB (assets/sample1.mp4 는 테스트가 쓴다)
 data/videos/case6.mp4
+
+# CJ 실훈련 원본 다운로드(HF PIA-SPACE/C-lab-AIHub-2026-10-22) — 패키지가 하드링크로 쓴다
+media/vsource/_raw/
+# 리허설 매니페스트 손 편집 전 백업
+media/vsource/**/rehearsal.json.bak*

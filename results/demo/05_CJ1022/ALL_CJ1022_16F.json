@@ -1,0 +1,51 @@
+{
+  "session_id": "sess-1792779535311",
+  "floor": "floor8",
+  "label": "CJ1022 16층 단독 · 선 카운트 · 복도경로",
+  "metric": "ALL",
+  "epfi_avg": 85.69656461760026,
+  "sei": 82.47863247863248,
+  "cbs_total": 8.166286349215696,
+  "zone_metrics": [
+    {
+      "zone_id": "z-idr",
+      "evacuation_start_at": 1792779545.3107796,
+      "response_delay_sec": 10.0,
+      "graph_distance": 31.056549142659772,
+      "idr": 3.1056549142659775,
+      "idr_per_origin": [
+        3.034402021334045,
+        2.9233531208614045,
+        3.359209600602482
+      ],
+      "participant_ratio": 0.75,
+      "status": "started"
+    }
+  ],
+  "exit_metrics": [
+    {
+      "exit_id": "e1",
+      "actual_count": 38,
+      "design_capacity": 6,
+      "actual_share": 0.3247863247863248,
+      "design_share": 0.5,
+      "width_m": 0.99,
+      "width_manual": false,
+      "q_design": 6.0
+    },
+    {
+      "exit_id": "e2",
+      "actual_count": 79,
+      "design_capacity": 6,
+      "actual_share": 0.6752136752136753,
+      "design_share": 0.5,
+      "width_m": 1.062,
+      "width_manual": false,
+      "q_design": 6.0
+    }
+  ],
+  "person_routes": {
+    "unreachable": 0,
+    "site_routes": 6
+  }
+}

@@ -1,0 +1,30 @@
+{
+ "package": "cj/drill-1022",
+ "note": "CJ제일제당센터 실훈련(2026-10-22) — 층별 '피난층 종료' 시각까지 비상구별 통과 인원 **근사 정답**. 사람이 가볍게 센 값이라 완벽한 정답은 아니다 — 모델이 정답에 가까워졌는지 보는 지표로만 쓴다(MAE). 시각은 클립 기준(00:00 = 훈련 시작 = 실제 14:59:55).",
+ "recorded_by": "사람 육안 근사 계수 (2026-10-23 전달)",
+ "approximate": true,
+ "floors": [
+  {
+   "floor": "floor8", "name": "16층", "scenario": "scenario_16F_only",
+   "floor_end_sec": 490, "floor_end_clip": "08:10", "floor_end_wall": "15:08:05",
+   "floor_end_note": "피난조끼 입은 사람들이 엘리베이터로 내려가며 피난층 종료 — 이들은 비상구를 거치지 않는다",
+   "final_end_sec": 550, "final_end_note": "16층 인원이 1층 밖으로 나감 (클립 끝 09:10 = 15:09:05). 1층 기준 종료는 별도",
+   "by_exit": {
+    "e1": {"cam": "cam10", "count": 37, "counted_by": "혜리"},
+    "e2": {"cam": "cam22", "count": 61, "counted_by": "도형"}
+   },
+   "total": 98
+  },
+  {
+   "floor": "floor7", "name": "17층", "scenario": "scenario_17F_only",
+   "floor_end_sec": 210, "floor_end_clip": "03:30", "floor_end_wall": "15:03:25",
+   "floor_end_note": "형광조끼 입은 사람 2명이 비상구로 내려가며 피난층 인원 최종",
+   "final_end_sec": 765, "final_end_note": "17층 인원이 1층 밖으로 나감 (클립 끝 12:45 = 15:12:40). 1층 기준 종료는 별도",
+   "by_exit": {
+    "e1": {"cam": "cam2", "count": 68, "counted_by": "jordan"},
+    "e2": {"cam": "cam5", "count": 19, "counted_by": "지훈"}
+   },
+   "total": 87
+  }
+ ]
+}
