@@ -111,6 +111,11 @@ class SessionRecorder:
             );
             """
         )
+        # 임베딩 색인은 **처음부터** 둔다. flush 마다 트랙별 DELETE 가 도는데 색인이
+        # close() 때에야 생기면 매번 테이블 전체를 훑는다 — 트랙이 쌓일수록 느려져
+        # 26대 실훈련 녹화가 실시간의 0.13배로 떨어졌다(2026-10-23 실측).
+        self._con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_embs_track ON track_embs(cam_id, local_id)")
         meta = {**meta, "schema_version": SCHEMA_VERSION}
         self._con.executemany(
             "INSERT INTO meta(key, value) VALUES(?, ?)",
@@ -123,6 +128,7 @@ class SessionRecorder:
         # 트랙 1,200개 × 32개 × (1.5KB + 2.3KB) ≈ 146MB — 큰 훈련에서는 무겁다.
         # 리허설·단일 층 규모(트랙 100여 개)에서는 4MB 수준이라 문제없다.
         self._embs: dict[tuple, list] = {}
+        self._dirty: set[tuple] = set()      # 지난 flush 이후 바뀐 트랙 — 이것만 다시 쓴다
         self._closed = False
 
     def record(self, cam_id: str, ts: float, tracks,
@@ -180,6 +186,7 @@ class SessionRecorder:
         key = (cam_id, local_id)
         slot = self._embs.setdefault(key, [])
         slot.append((ts, v, _jpeg(crop)))
+        self._dirty.add(key)
         if len(slot) <= EMB_PER_TRACK:
             return
         # 이웃 간 시간 간격이 가장 작은 지점을 하나 제거 → 균등 유지
@@ -188,13 +195,16 @@ class SessionRecorder:
         slot.pop(drop)
 
     def _flush(self) -> None:
-        if self._embs:
+        if self._dirty:
+            # **바뀐 트랙만** 최신 상태로 교체 — 중복 없이 마지막 선택본만 남는다.
+            # 예전엔 지금까지 본 모든 트랙을 매번 지우고 다시 써서, 세션이 길어질수록
+            # flush 한 번의 비용이 트랙 수에 비례해 커졌다(분석 시간의 40%).
+            keys = list(self._dirty)
             rows = [(cam, lid, ts, int(v.size), v.tobytes(), th)
-                    for (cam, lid), slot in self._embs.items() for ts, v, th in slot]
-            # 트랙별 최신 상태로 통째 교체 — 중복 없이 마지막 선택본만 남는다
+                    for (cam, lid) in keys for ts, v, th in self._embs[(cam, lid)]]
             self._con.executemany(
-                "DELETE FROM track_embs WHERE cam_id=? AND local_id=?",
-                list(self._embs.keys()))
+                "DELETE FROM track_embs WHERE cam_id=? AND local_id=?", keys)
+            self._dirty.clear()
             self._con.executemany(
                 "INSERT INTO track_embs(cam_id, local_id, ts, dim, emb, thumb)"
                 " VALUES(?,?,?,?,?,?)", rows)
@@ -219,7 +229,7 @@ class SessionRecorder:
                  ("track_row_count", json.dumps(n_tracks))])
             self._con.execute("CREATE INDEX idx_tracks_seq ON tracks(call_seq)")
             self._con.execute(
-                "CREATE INDEX idx_embs_track ON track_embs(cam_id, local_id)")
+                "CREATE INDEX IF NOT EXISTS idx_embs_track ON track_embs(cam_id, local_id)")
             n_embs = self._con.execute("SELECT COUNT(*) FROM track_embs").fetchone()[0]
             self._con.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",

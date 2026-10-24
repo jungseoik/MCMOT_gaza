@@ -126,7 +126,7 @@ INGEST_BACKEND=deepstream GPU_DEVICES=1 pm2 restart macs-system --update-env
 |---|---|---|
 | `MAP_STREAM_HZ` | `5` | 맵 SSE 송출 주기 — analyze_fps 와 같게 (더 높으면 같은 스냅샷 반복, 낮으면 끊김) |
 | `VSOURCE_FILE_DECODE_WORKERS` | `16` | 파일 모드 디코드 스레드. 디코드가 GIL 을 잡아 detect 를 2.3배 느리게 했다(실측 8워커 14.9ms → 16워커 9.7ms) |
-| `VSOURCE_FILE_NODROP` | `1` | **파일 재생 전용** — 벽시계 대기·프레임 건너뛰기를 끄고 큐가 찰 때까지 기다린다. analyze_fps 를 한 장도 안 버리고 보장(실측 처리율 21% → 100%). `ts` 는 언제나 영상 시간이라 측정값은 재생 속도와 무관. 라이브 RTSP 는 미적용 |
+| `VSOURCE_FILE_NODROP` | 코드 `1` · **pm2 실행(`tools/run_system_server.sh`) `0`** | **파일 재생 전용.** `1` = 벽시계 대기·프레임 건너뛰기를 끄고 큐가 찰 때까지 기다린다 — analyze_fps 를 한 장도 안 버린다(**세션 녹화·지표 산출은 반드시 1**). `0` = 실시간(1배속) 재생 — 운영 뷰 시연용. 추론이 밀리면 프레임을 버린다(실측 17대 12% 손실). 실행 스크립트가 2026-09-30 부터 `0` 을 기본으로 덮어쓴다. 녹화할 때는 `VSOURCE_FILE_NODROP=1 pm2 restart macs-system --update-env`. `ts` 는 언제나 영상 시간이라 0 이어도 측정값의 시간축은 맞지만 빠진 프레임만큼 관측이 준다. 라이브 RTSP 는 미적용 |
 | `VSOURCE_FILE_QUEUE` | `256` | 파일 모드 분석 큐 크기(기존 64) |
 | `VSOURCE_AUTO_END_DRAIN_MAX` | `120` | 영상 종료 후 분석 큐가 빌 때까지 기다리는 상한(초). 고정 대기만 하면 꼬리가 잘린다(실측 녹화 4~13초 누락) |
 | `YOLO26_GPU_PREPROC` | `1` | letterbox 전처리를 GPU 로. 검출 결과 동일(좌표 최대차 0.00px) · detect 14.06→4.14ms. `0`=CPU |

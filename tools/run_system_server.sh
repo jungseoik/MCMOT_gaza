@@ -26,6 +26,8 @@ export OPENCV_FOR_THREADS_NUM="${OPENCV_FOR_THREADS_NUM:-4}"
 # 추론이 감당하는 만큼 달리는데, 실측 2.1배속이라 운영 뷰의 "경보 후 경과"가
 # 그만큼 빨리 흐른다(벽시계 16.6s 에 35.2s). 시연·훈련은 실제 시간과 맞아야 한다.
 # 되돌리려면 VSOURCE_FILE_NODROP=1.
+# ⚠ **세션 녹화(지표 산출)는 1 로** 띄울 것 — 0 은 추론이 밀리면 프레임을 버린다
+#   (2026-10-23 실측: 17대 리허설 12% 손실, 같은 영상인데 녹화마다 출구 카운트가 ±5 흔들림).
 export VSOURCE_FILE_NODROP="${VSOURCE_FILE_NODROP:-0}"
 
 CMD="conda run --no-capture-output -n boosttrack \
