@@ -162,7 +162,7 @@ Views.live = (() => {
       }
       if (!hull) hull = convexHull(m.map_pts);
       if (hull.length < 3) return;
-      const col = camColor(cam.cam_id, App.cameras);
+      const col = camIdColor(cam.cam_id, App.cameras);
       ctx.save();
       // 채우기 — 옅은 배경
       ctx.beginPath();
@@ -360,7 +360,7 @@ Views.live = (() => {
       div.className = "camrow";
       div.title = "클릭: 스냅샷 보기";
       div.innerHTML = `
-        <div class="r1"><span class="dotc" style="background:${camColor(cs.cam_id, App.cameras)}"></span>
+        <div class="r1"><span class="dotc" style="background:${camIdColor(cs.cam_id, App.cameras)}"></span>
           <span class="nm">${cfg.name || cs.cam_id}</span><span class="badge ${cls}">${txt}</span></div>
         <div class="r2"><span>${cs.cam_id}</span>
           <span class="t-num">${cs.fps_in.toFixed(1)} fps</span>

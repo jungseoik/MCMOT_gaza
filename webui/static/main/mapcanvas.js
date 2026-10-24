@@ -397,8 +397,17 @@ function mcSessionColor(key) {
   return `hsl(${Math.abs(h) % 360},72%,62%)`;
 }
 
+/** 점(사람) 색 — [단일색]이 켜져 있으면 그 색, 아니면 카메라별 색. */
 function camColor(camId, cams) {
   if (MC_UNIFORM) return MC_UNIFORM;
+  return camIdColor(camId, cams);
+}
+
+/** **카메라를 구분하는** 색 — 단일색 설정과 무관하게 항상 카메라별.
+ * 카메라 목록·매핑 커버리지처럼 "어느 카메라인가"를 보여주는 자리에 쓴다.
+ * camColor 를 쓰면 운영 뷰·리플레이에서 켠 단일색(전역)이 새어 들어와
+ * ② 카메라 등록·매핑의 카메라가 전부 한 색으로 칠해진다. */
+function camIdColor(camId, cams) {
   let idx = (cams || []).findIndex((c) => c.cam_id === camId);
   if (idx < 0) {
     idx = 0;

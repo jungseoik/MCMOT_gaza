@@ -193,7 +193,7 @@ Views.cams = (() => {
       // 삭제·활성·conf 편집이 서버에서 409 로 막힌다. 편집 UI를 아예 안 보인다.
       const rh = isRhCam(c.cam_id);
       div.innerHTML = `
-        <div class="r1"><span class="dotc" style="background:${camColor(c.cam_id, App.cameras)}"></span>
+        <div class="r1"><span class="dotc" style="background:${camIdColor(c.cam_id, App.cameras)}"></span>
           <span class="nm" title="${c.name || c.cam_id}">${c.name || c.cam_id}</span>
           ${rhBadge(c)}
           ${c.mapping ? badge("ok", "매핑 ✓") : badge("warn", "매핑 필요")}
@@ -944,7 +944,7 @@ Views.cams = (() => {
     ctx.save();
     others.forEach((c) => {
       const isSel = c.cam_id === sel;
-      const col = camColor(c.cam_id, App.cameras);
+      const col = camIdColor(c.cam_id, App.cameras);
       const pts = c.mapping.map_pts;
       // 커버영역 = 대응점의 컨벡스 헐 (실제 투영 게이트와 같은 규칙)
       const hull = convexHull(pts);

@@ -1959,6 +1959,13 @@ def _effective_site_view(meta: dict, ov: dict | None) -> dict:
     for k in ("routes", "bottlenecks"):
         if geo.get(k) is not None:
             sv[k] = geo[k]
+    # 임계값도 같다 — 화면의 임계값 칸은 이 thresholds 로 채워진다. 편집본에
+    # dt_hold 2.0 을 저장해 두면 지표는 2.0 으로 계산되는데 칸에는 스냅샷의 3.0 이
+    # 보여, 사용자는 "기본값이 3초"로 읽는다.
+    th = (ov or {}).get("thresholds") or {}
+    if th:
+        sv["thresholds"] = {**(sv.get("thresholds") or {}),
+                            **{k: v for k, v in th.items() if v is not None}}
     return sv
 
 

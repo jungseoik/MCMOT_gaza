@@ -676,7 +676,7 @@ Views.replay = (() => {
       ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 7); ctx.fill();
       ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 7); ctx.stroke();
-      if (g.s > 0.7) {
+      if (rpLayers.ids === true) {                 // [덧보기 → ID] 켤 때만 (기본 끔)
         ctx.font = "10px Pretendard, sans-serif"; ctx.fillStyle = "rgba(0,0,0,.7)";
         ctx.fillText(o.gid, x + 7, y + 4);
       }
@@ -734,7 +734,8 @@ Views.replay = (() => {
   let routeMode = "site";
   let routeStats = null;
   const rpLayers = { routes: true, zones: true, labels: false,
-                     obstacles: false, conn: false, trails: false };  // 덧보기 기본 끔
+                     obstacles: false, conn: false, trails: false,
+                     ids: false };  // 덧보기 기본 끔 — ID 는 사람이 많으면 겹쳐 지저분하다
   const RP_TRAIL_S = 7;        // 꼬리 길이(초) — 커서 기준 이만큼 뒤까지
   let eDraft = null;          // {pts:[[x,y],...]}
   let eHover = null;          // 부채꼴 미리보기 커서
