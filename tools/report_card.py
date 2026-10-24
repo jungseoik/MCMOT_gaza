@@ -373,6 +373,10 @@ def main() -> int:
     ap.add_argument("--jy-wait", type=float, default=90.0,
                     help="--with-persons 일 때 재구성 로딩 대기 상한(초)")
     ap.add_argument("--title", default="", help="제목 라벨 직접 지정(기본: 세션 라벨)")
+    ap.add_argument("--inject-html", default="",
+                    help="리포트 모드: 리포트 창 본문 맨 위에 끼워 넣을 HTML 파일(같은 클래스·스타일). "
+                         "예: tools/cj1022_eval_report.py 가 만든 피난훈련 평가 보고서 섹션")
+    ap.add_argument("--modal-title", default="", help="리포트 모드: 창 제목(#resTitle) 바꾸기")
     ap.add_argument("--keep-png", default="", help="디버그: 각 구간 첫·끝 프레임 PNG 저장 폴더")
     a = ap.parse_args()
     if not a.sid and not a.label:
@@ -470,7 +474,26 @@ def main() -> int:
                     body, stop_sel = "#rpBodyMetrics", stop
                 else:
                     cap.open_report(a.jy_wait)
-                    sub = "건물 롤업" + (f" ({k + 1}/{n})" if n > 1 else "")
+                    if a.inject_html or a.modal_title:
+                        # 리포트 창에 평가 섹션을 **같은 마크업으로** 얹는다 — 창은 UI 그대로.
+                        cap.pg.evaluate("""([html, ttl]) => {
+                            if (html) document.getElementById('resBody')
+                                .insertAdjacentHTML('afterbegin', html);
+                            if (ttl) document.getElementById('resTitle').textContent = ttl;
+                            // 개요 행 값 바꾸기 — 끼운 섹션의 data-rows {라벨: 값}
+                            const ev = document.getElementById('cjEval');
+                            const rows = ev && ev.dataset.rows ? JSON.parse(ev.dataset.rows) : {};
+                            document.querySelectorAll('#resBody .resrow').forEach((r) => {
+                              if (ev && ev.contains(r)) return;
+                              const k = (r.querySelector('span') || {}).textContent;
+                              if (k && rows[k] != null) r.querySelector('b').textContent = rows[k];
+                            });
+                            document.getElementById('resBody').scrollTop = 0; }""",
+                            [Path(a.inject_html).read_text(encoding="utf-8") if a.inject_html else "",
+                             a.modal_title])
+                        time.sleep(0.6)
+                    sub = ("피난훈련 평가 보고서" if a.inject_html else "건물 롤업") \
+                        + (f" ({k + 1}/{n})" if n > 1 else "")
                     print(f"  구간 {k + 1}/{n}: 리포트 모달")
                     body, stop_sel = "#resBody", None
                 cap.set_title(
