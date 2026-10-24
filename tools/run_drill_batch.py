@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:8900"
+BASE = os.environ.get("MACS_BASE", "http://127.0.0.1:8900")   # 두 번째 서버(:8901)로 병렬 녹화할 때 바꾼다
 
 # 세션 라벨 = "<번호> <각본>". ④ 리플레이 목록에서 각본이 바로 구분돼야 하므로
 # 번호만으로는 부족하고, 원래 각본 설명을 한 줄로 압축해 쓴다.
@@ -65,8 +66,27 @@ SETS = {
             "scenario_08": "exit-1 10명",
             "scenario_09": "측정 불가 (cam09 미촬영)",
         }),
+    # CJ제일제당센터 실훈련 2026-10-22 (건물 cjpoc: floor7=17층·floor8=16층·floor9=1층).
+    # 각본이 아니라 실제 훈련 통녹화라 길다(550·765s) — 대기 한도를 늘린다.
+    # 경보 원점은 층 설정의 alarm_origins 그대로.
+    "cj-1022": dict(
+        pkg="pkg:cj-drill-1022",
+        origins={"floor7": [[752.4, 924.7], [1044.9, 1046.8], [1303.8, 1377.2]],
+                 "floor8": [[752.4, 924.7], [1044.9, 1046.8], [1303.8, 1377.2]],
+                 "floor9": [[930.0, 740.0]]},
+        prefix="CJ1022 ",
+        scens=["scenario_16F_only", "scenario_17F_only"],
+        labels={"scenario_16F_only": "CJ1022 16층 단독",
+                "scenario_17F_only": "CJ1022 17층 단독",
+                "scenario_16F_1F": "CJ1022 16층+1층",
+                "scenario_17F_1F": "CJ1022 17층+1층",
+                "scenario_1F_only": "CJ1022 1층 단독",
+                "scenario_all": "CJ1022 전체 3개 층"},
+        timeout=3000,
+        names={}),
 }
 SET = SETS["drill-1f3f"]          # --set 으로 교체
+TAG = ""                          # --tag 로 라벨 꼬리표
 
 
 def req(path, body=None, method=None, timeout=180):
@@ -120,7 +140,10 @@ def force_stop():
 
 def run_one(scen: str, dry: bool) -> str | None:
     sid = f"{SET['pkg']}:{scen}"
-    label = f"{SET['prefix']}{scen[-2:]} {SET['names'].get(scen, scen)}"
+    label = (SET.get("labels") or {}).get(scen) \
+        or f"{SET['prefix']}{scen[-2:]} {SET['names'].get(scen, scen)}"
+    if TAG:
+        label = f"{label} {TAG}"
     if dry:
         print(f"  [dry] {sid}  →  {label}")
         return None
@@ -144,7 +167,7 @@ def run_one(scen: str, dry: bool) -> str | None:
         body["t_alarm"] = float(t_alarm)      # 클립 0프레임 = 경보 (v1 녹화와 동일)
     d = req("/api/drill/start", body)
     sess = d.get("session_id") or d.get("id")
-    ok = wait_idle(floors)
+    ok = wait_idle(floors, timeout=SET.get("timeout", 400))
     if not ok:
         force_stop()                        # 타임아웃이면 강제로 닫고 다음으로
     print(f"  {'ok  ' if ok else 'TIMEOUT'} {scen}  {label}  → {sess}", flush=True)
@@ -158,11 +181,13 @@ def main() -> int:
                     help="녹화할 세트 — drill-1f3f(1층+3층 합동 14건) | aihub-3f(3층 단독 9건)")
     ap.add_argument("--only", help="쉼표로 시나리오 지정 (예: scenario_01,scenario_02)")
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--tag", default="", help="세션 라벨 뒤에 붙일 꼬리표 (예: '· 선 카운트')")
     a = ap.parse_args()
-    global SET
+    global SET, TAG
     SET = SETS[a.set]
+    TAG = a.tag.strip()
     scens = ([s.strip() for s in a.only.split(",")] if a.only
-             else [f"scenario_{i:02d}" for i in range(1, SET["n"] + 1)])
+             else SET.get("scens") or [f"scenario_{i:02d}" for i in range(1, SET["n"] + 1)])
     print(f"[batch] {a.set} · {len(scens)}건 · {SET['pkg']} · 층 {sorted(SET['origins'])}")
     done = []
     for i, s in enumerate(scens, 1):

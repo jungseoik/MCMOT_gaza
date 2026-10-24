@@ -173,8 +173,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="발표용 시각화 — 지표가 보이는 영상")
     ap.add_argument("--session", required=True)
     ap.add_argument("--floor")
-    ap.add_argument("--metric", default="EPFI", choices=sorted(ACCENT),
-                    help="이 영상이 주인공으로 삼을 지표")
+    ap.add_argument("--metric", default="EPFI", choices=sorted(ACCENT) + ["ALL"],
+                    help="이 영상이 주인공으로 삼을 지표 — ALL 은 4대 지표를 똑같이 "
+                         "(테두리 강조 없음 · 인트로는 층 피난경로). 실훈련처럼 각본이 "
+                         "지표 하나를 겨누지 않는 녹화에 쓴다")
     ap.add_argument("--out", default="results/demo")
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--fps", type=float, default=0)
@@ -190,7 +192,8 @@ def main() -> int:
     ap.add_argument("--tag", default="",
                     help="파일명 꼬리표. 같은 세션을 화면만 바꿔 다시 뽑을 때 판을 "
                          "구분한다 — 예 `--tag v3` → IDR_01_v3.mp4")
-    ap.add_argument("--title", default="")
+    ap.add_argument("--title", default="",
+                    help="인트로 머리글(기본 AIHub). 각본 이름이 아니라 **어디서 찍었나**")
     ap.add_argument("--th", default="",
                     help='임계값 오버라이드 JSON — 예 \'{"dt_hold":1.0}\'. '
                          "배포 기본값에서 개시가 안 서는 각본을 보여줄 때 쓴다. "
@@ -202,14 +205,16 @@ def main() -> int:
                          "ideal(이어 붙인 N명) / drawn(**사람이 :8930 편집기에서 "
                          "직접 그린 동선** — 리플레이 타임라인 위에 찍은 것이라 "
                          "그리드와 싱크가 맞는다).")
+    ap.add_argument("--package", default=None,
+                    help="그리드 영상을 찾을 리허설 패키지 id (예 cj-drill-1022). 라벨에 "
+                         "시나리오 번호가 없는 녹화에 쓴다 — session_viz 와 같은 인자")
+    ap.add_argument("--scenario", default=None,
+                    help="그 패키지의 시나리오 id (예 scenario_16F_only)")
     a = ap.parse_args()
 
     db, floor = find_session(a.session, a.floor)
     meta = recorder.load_meta(db)
     label = drill_label(a.session) or a.session
-    # 인트로 제목은 각본 설명 꼬리를 뗀다 — "01 IDR 권장경로 · 우측 우회 2명"의
-    # 뒷부분은 실측 트랙 이야기지 이 영상이 보여주려는 것이 아니다.
-    intro_title = label.split(" · ")[0]
     print(f"[demo] {a.session} · {floor} · {label} · 주지표 {a.metric}")
 
     # 장애물 표시(:8920 편집기) — 그림에도 얹고, **경로 산출에서는 벽**으로 친다.
@@ -220,19 +225,48 @@ def main() -> int:
     if obstacles:
         print(f"[demo] 장애물 표시 {len(obstacles)}개 — 도면에 표출 + 경로 산출에 반영")
 
+    # 없앤 셈 칠 출구·병목 — **화면과 지표가 같은 가정 위에** 있어야 한다.
+    _de = [x for x in a.drop_exits.split(",") if x.strip()]
+    _db2 = [x for x in a.drop_bn.split(",") if x.strip()]
+
     # 개인 경로(있으면) — 인트로에 쓴다
     from system.evac import person_routes as pr
-    proutes = pr.load(db)
-    if (proutes is None or proutes.get("_obstacles_sig") != osig
-            or proutes.get("algo_ver") != pr.ALGO_VER):
-        why = ("없음" if proutes is None else
-               "장애물 표시가 바뀜" if proutes.get("_obstacles_sig") != osig
-               else f"산출 방식이 바뀜(v{proutes.get('algo_ver')}→v{pr.ALGO_VER})")
-        print(f"[demo] 재실자별 경로 산출 중… ({why})")
+    if a.metric == "ALL":
+        # 4대 지표 통합판 — 인트로는 **층 피난경로**(사람이 그린 공통 경로)를 깐다.
+        # 실훈련은 트랙 조각이 수백 개라 재실자별 경로는 선이 엉켜 읽히지 않고
+        # 산출도 오래 걸린다. 지표(EPFI·IDR 정렬도)도 이 공통 경로 기준이다.
+        _sr = [r for r in (meta["site_view"].get("routes") or []) if len(r.get("points") or []) >= 2]
+        proutes = {"routes": _sr, "stats": {"unreachable": 0, "site_routes": len(_sr)}}
+    elif _de or _db2:
+        # "그 출구가 없었다면" 을 **그림에도** 적용한다. 안 하면 인트로에는 없앤
+        # 출구로 가는 경로가 깔리는데 아래 SEI 는 100 을 띄운다 — 실측 12 SEI:
+        # 73개 중 60개가 없앤 exit-0 행이었다. 사이드카(양쪽 출구 판)는 다른
+        # 영상이 쓰므로 **캐시를 읽지도 쓰지도 않는다.**
+        from system.config.schema import SiteConfig as _SC
+        _sv0 = dict(meta["site_view"])
+        if _de:
+            _sv0["exits"] = [e for e in (_sv0.get("exits") or [])
+                             if e["id"] not in set(_de)]
+        if _db2:
+            _sv0["bottlenecks"] = [b for b in (_sv0.get("bottlenecks") or [])
+                                   if b["id"] not in set(_db2)]
+        print(f"[demo] 재실자별 경로 산출 중… (없앤 셈: 출구 {_de or '—'} · "
+              f"병목 {_db2 or '—'})")
         proutes = pr.generate(db, ROOT / "data/sites/default",
-                              extra_walls=[o["points"] for o in obstacles] or None)
-        proutes["_obstacles_sig"] = osig
-        pr.save(db, proutes)
+                              extra_walls=[o["points"] for o in obstacles] or None,
+                              site_override=_SC.model_validate(_sv0))
+    else:
+        proutes = pr.load(db)
+        if (proutes is None or proutes.get("_obstacles_sig") != osig
+                or proutes.get("algo_ver") != pr.ALGO_VER):
+            why = ("없음" if proutes is None else
+                   "장애물 표시가 바뀜" if proutes.get("_obstacles_sig") != osig
+                   else f"산출 방식이 바뀜(v{proutes.get('algo_ver')}→v{pr.ALGO_VER})")
+            print(f"[demo] 재실자별 경로 산출 중… ({why})")
+            proutes = pr.generate(db, ROOT / "data/sites/default",
+                                  extra_walls=[o["points"] for o in obstacles] or None)
+            proutes["_obstacles_sig"] = osig
+            pr.save(db, proutes)
     print(f"[demo] 개인 경로 {len(proutes['routes'])}개 · 산출 불가 "
           f"{proutes['stats']['unreachable']}명")
 
@@ -258,8 +292,6 @@ def main() -> int:
         # **화면에 보이는 그 점으로** 다시 낸 수치. 원 관측은 트랙이 끊기고
         # 카메라 사각이 있어, 보는 것과 세는 것이 어긋난다.
         from tools.demo_metrics_v2 import run_v2
-        _de = [x for x in a.drop_exits.split(",") if x.strip()]
-        _db2 = [x for x in a.drop_bn.split(",") if x.strip()]
         _d1, _d2, _dots, _site2, _tl2 = run_v2(
             a.session, a.floor, a.tracks if a.tracks != "raw" else "drawn",
             v_th=a.v_th, verbose=False, drop_exits=_de, drop_bn=_db2)
@@ -269,10 +301,19 @@ def main() -> int:
         tl = [t.model_dump() if hasattr(t, "model_dump") else t for t in _tl2]
         print(f"[demo] **v2 지표** — 그린 점 {_dots['n']}명 기준 · "
               f"개인 경로 {len(_site2.routes)}개 · v_th {a.v_th}")
-    site = meta["site_view"]
+    site = dict(meta["site_view"])
+    if _de or _db2:
+        # 도면에 그리는 출입구선·병목도 같이 뺀다. 없다고 친 출구의 통과선이
+        # 그려져 있으면 "저기로도 나갈 수 있었네" 로 읽힌다.
+        if _de:
+            site["exits"] = [e for e in (site.get("exits") or [])
+                             if e["id"] not in set(_de)]
+        if _db2:
+            site["bottlenecks"] = [b for b in (site.get("bottlenecks") or [])
+                                   if b["id"] not in set(_db2)]
 
     cam_ids = sorted({c["cam_id"] for c in meta.get("cameras", [])})
-    clips, desc = resolve_clips(cam_ids, label, None, None)
+    clips, desc = resolve_clips(cam_ids, label, a.package, a.scenario)
     print(f"[demo] {desc}")
     caps, src_fps = {}, {}
     for cid, fp in clips.items():
@@ -642,14 +683,27 @@ def main() -> int:
             frame = np.full((OH, OW, 3), 20, np.uint8)
             frame[:PANE_H, :LEFT_W] = left
             right = np.full((PANE_H, RIGHT_W, 3), 18, np.uint8)
-            put(right, a.title or intro_title, (40, int(PANE_H * 0.36)), 44,
-                (255, 255, 255), True)
-            put(right, "재실자별 피난경로",
-                (40, int(PANE_H * 0.36) + 70), 28, DOT, True)
-            put(right, a.metric, (40, int(PANE_H * 0.36) + 170), 34,
-                ACCENT[a.metric], True)
-            put(right, METRIC_DESC[a.metric], (40, int(PANE_H * 0.36) + 216), 24,
-                (200, 200, 200))
+            # 인트로는 **지표 한 가지**만 말한다. 각본 이름("문 앞 밀집 2회",
+            # "1층 출구 나가기")은 그 영상이 어떻게 찍혔는지지 무엇을 보여주려는
+            # 지가 아니다 — 발표에서는 지표가 먼저 읽혀야 한다.
+            y0_ = int(PANE_H * 0.30)
+            put(right, a.title or "AIHub", (40, y0_), 26, (150, 150, 158), True)
+            if a.metric == "ALL":           # 4대 지표 통합 — 넷을 같은 크기로 나열
+                put(right, "4대 지표", (40, y0_ + 44), 60, (255, 255, 255), True)
+                for i, nm in enumerate(("IDR", "SEI", "CBS", "EPFI")):
+                    yy = y0_ + 132 + i * 50
+                    put(right, nm, (40, yy), 34, ACCENT[nm], True)
+                    put(right, KO[nm], (40 + 120, yy + 2), 32, (235, 235, 240), True)
+                cv2.line(right, (42, y0_ + 340), (42 + 150, y0_ + 340),
+                         (200, 200, 205), 3, cv2.LINE_AA)
+                put(right, "피난경로", (40, y0_ + 358), 26, DOT, True)
+            else:
+                put(right, a.metric, (40, y0_ + 44), 66, ACCENT[a.metric], True)
+                put(right, KO.get(a.metric, a.metric), (40, y0_ + 124), 54,
+                    (255, 255, 255), True)
+                cv2.line(right, (42, y0_ + 206), (42 + 150, y0_ + 206),
+                         ACCENT[a.metric], 3, cv2.LINE_AA)
+                put(right, "재실자별 피난경로", (40, y0_ + 226), 26, DOT, True)
             frame[:PANE_H, LEFT_W:] = right
             frame[PANE_H:] = bar_panel(t0, {}, [], {})
             vw.write(frame)
