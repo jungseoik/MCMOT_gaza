@@ -7,6 +7,8 @@
 영상(출력)마다 만든다. `tools/report_card.py --inject-html` 이 창 맨 위에 끼워 캡처한다.
 
 숫자는 손으로 적지 않는다 — 세션 저장본(타임라인)과 answers.json 에서 읽는다.
+보고서에는 **훈련 사실·결과만** 싣는다 — 측정 방식·카메라·검증(근사 정답 비교) 같은 내부 정보는
+넣지 않는다(그건 docs/출구-카운트-채점결과.md 소관).
 
     python tools/cj1022_eval_report.py            # → results/demo/05_CJ1022/_리포트/eval_<id>.html
 """
@@ -38,12 +40,9 @@ EXIT_NAME = {
     "floor9": {"exit-0": "출구1 · 서쪽 출입문", "exit-1": "출구2 · 북쪽 출입문", "exit-2": "출구3 · 남동쪽 출입문"},
 }
 FLOOR_NOTE = {
-    "floor8": "마지막 피난조끼 인원은 엘리베이터로 하강 — 비상구 카운트에 들어가지 않는다",
+    "floor8": "마지막 피난조끼 인원은 엘리베이터로 하강",
     "floor7": "형광조끼 2명이 비상구로 내려가며 17층 인원 최종",
-    "floor9": "1층 출구는 16·17층 인원 외 다른 층·안내요원 왕래가 섞인다 — 근사 정답 없음",
 }
-F9_CAVEAT = ("출구2(북쪽)는 담당 카메라 cam4 가 3:52~6:56 만 유효해 실제보다 적게 잡힌다 · "
-             "출구3(남동쪽)은 '사용 불가' 판정 카메라 cam16 한 대가 센다")
 
 
 def mmss(s: float) -> str:
@@ -93,19 +92,18 @@ def floor_block(fl: str, sid: str, session_end: float) -> tuple[str, dict]:
         c, _, idr = counts_at(fl, sid, end)
         tot = sum(c.values()); gtot = sum(v["count"] for v in g["by_exit"].values())
         rows = (row("훈련 시작", f"00:00 ({wall(0)}) · 사이렌 00:05 ({wall(SIREN)})")
-                + row("대피 개시 (측정, IDR)", f"{mmss(idr)} 경과" if idr is not None else "—")
+                + row("대피 개시", f"{mmss(idr)} 경과" if idr is not None else "—")
                 + row("피난층 종료 (층 비움)", f"<b>{mmss(end)}</b> ({wall(end)})")
                 + row("최종 종료 (1층 밖 탈출)", f"{mmss(fin)} ({wall(fin)})")
-                + row("피난층 종료까지 비상구 탈출", f"<b>{tot}명</b> · 근사 정답 {gtot}명")
+                + row("피난층 종료까지 비상구 탈출", f"<b>{tot}명</b>")
                 + row("비고", FLOOR_NOTE[fl]))
         trs = ""
         for eid, gv in g["by_exit"].items():
             v = c.get(eid, 0); share = v / tot * 100 if tot else 0
             trs += (f"<tr><td>{EXIT_NAME[fl][eid]}</td><td class='t-num'>{v}명</td>"
-                    f"<td class='t-num'>{share:.0f}%</td><td class='t-num'>{gv['count']}명</td>"
-                    f"<td class='t-num'>{v - gv['count']:+d}</td></tr>")
-        tbl = (f"<table class='drill-tbl'><thead><tr><th>비상구</th><th>측정</th><th>분담</th>"
-               f"<th>근사 정답</th><th>차이</th></tr></thead><tbody>{trs}</tbody></table>")
+                    f"<td class='t-num'>{share:.0f}%</td></tr>")
+        tbl = (f"<table class='drill-tbl'><thead><tr><th>비상구</th><th>탈출 인원</th><th>분담</th>"
+               f"</tr></thead><tbody>{trs}</tbody></table>")
         top = max(c, key=c.get) if c else None
         stat.update(end=end, fin=fin, tot=tot, gtot=gtot,
                     skew=(EXIT_NAME[fl][top].split(" (")[0], c[top] / tot * 100) if tot else None,
@@ -114,14 +112,13 @@ def floor_block(fl: str, sid: str, session_end: float) -> tuple[str, dict]:
     else:                                          # 1층 — 정답 없음, 세션 끝까지
         c, _, idr = counts_at(fl, sid, session_end)
         tot = sum(c.values())
-        rows = (row("측정 구간", f"00:00 ~ {mmss(session_end)} ({wall(0)} ~ {wall(session_end)})")
-                + row("출구 통과 합계", f"<b>{tot}명</b> (근사 정답 없음)")
-                + row("비고", FLOOR_NOTE[fl]))
+        rows = (row("구간", f"00:00 ~ {mmss(session_end)} ({wall(0)} ~ {wall(session_end)})")
+                + row("출구 통과 합계", f"<b>{tot}명</b>"))
         trs = "".join(f"<tr><td>{EXIT_NAME[fl][e]}</td><td class='t-num'>{c.get(e, 0)}명</td>"
                       f"<td class='t-num'>{(c.get(e, 0) / tot * 100 if tot else 0):.0f}%</td></tr>"
                       for e in EXIT_NAME[fl])
-        tbl = (f"<table class='drill-tbl'><thead><tr><th>출구</th><th>측정</th><th>분담</th></tr></thead>"
-               f"<tbody>{trs}</tbody></table><div class='mnote' style='margin-top:6px'>{F9_CAVEAT}</div>")
+        tbl = (f"<table class='drill-tbl'><thead><tr><th>출구</th><th>통과 인원</th><th>분담</th></tr></thead>"
+               f"<tbody>{trs}</tbody></table>")
         stat.update(tot=tot, end=session_end)
         head = f"1층 — 출구 통과 {tot}명 ({mmss(session_end)}까지)"
     html = (f'<div class="repsec-h">{head}</div><div class="reprows">{rows}</div>'
@@ -147,23 +144,13 @@ def build(oid: str) -> str:
     if len(up) == 2:
         a, b = sorted(up, key=lambda s: s["end"])
         good.append(f"{a['floor']}이 {b['floor']}보다 {b['end'] / a['end']:.1f}배 빨리 층을 비움")
-    errs = [e for s in up for e in s.get("err", [])]
-    meas = (f"출구 카운트 정확도 — 근사 정답 대비 비상구 평균 오차 {sum(errs) / len(errs):.1f}명"
-            if errs else "")
-    if errs:
-        good.append(meas)
-    if any(s["floor"] == "1층" for s in stats):
-        warn.append("1층은 근사 정답이 없어 출구 카운트를 검증하지 못함 · 출구2·3 카메라 제약 있음")
     vcls = "g-good" if not warn else "g-mid"
     verdict = (f'<div class="repverdict {vcls}"><div class="repverdict-head">훈련 평가 — {subtitle}</div>'
                + (f'<div class="repverdict-line good">{" · ".join(good)}</div>' if good else "")
                + (f'<div class="repverdict-line warn">{" · ".join(warn)}</div>' if warn else "")
                + "</div>")
-    summ = ('<div class="repsum">CJ제일제당센터 피난대피훈련 · 2026-10-22 · 00:00 = 훈련 시작(14:59:55) · '
-            '사이렌 00:05 · 출구 카운트 = 선 통과 + 판정 여유 ±1 m + 카메라 간 융합 2 s · 임계값 dt_hold 2.0</div>')
-    method = ('<div class="mnote" style="margin:10px 0 4px">시각·비상구 근사 정답은 사람이 영상을 보고 확인한 값 '
-              '(answers.json) · 측정값은 녹화 세션 '
-              f'<span class="t-num">{sid}</span> · 아래는 시스템이 자동 생성한 건물 훈련 결과 리포트</div>')
+    summ = ('<div class="repsum">CJ제일제당센터 피난대피훈련 · 2026-10-22 · '
+            '훈련 시작 14:59:55 · 사이렌 15:00:00</div>')
     # 시스템 리포트 '개요'의 시각 두 줄은 리허설을 **녹화한** 벽시계라(10/24 새벽) 실제 훈련
     # 시각과 다르다 — 실훈련 기준 값으로 바꿔 끼우게 data-rows 로 넘긴다(report_card 가 적용).
     starts = []
@@ -174,7 +161,7 @@ def build(oid: str) -> str:
                             "층별 개시시각": " · ".join(starts)}, ensure_ascii=False)
     return (f"<div id=\"cjEval\" data-rows='{rows_json}' style=\"margin-bottom:18px\">"
             '<div class="repsec-h" style="font-size:15px;color:var(--text-1)">피난훈련 평가 보고서</div>'
-            + summ + verdict + "".join(blocks) + method
+            + summ + verdict + "".join(blocks)
             + '<div style="border-bottom:1px solid var(--stroke-3);margin-top:14px"></div></div>')
 
 
