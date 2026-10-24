@@ -167,6 +167,15 @@ class ExitLine(BaseModel):
     cam_zone_overlap: float | None = Field(default=None, ge=0.0, le=1.0)
                                                   # (5fps 실측: 3이면 발끝 잘린 궤적을
                                                   #  놓친다 — 접촉이 2프레임뿐)
+    # --- 맵 통과선 보정 (2026-10-24, CJ 실훈련) — 둘 다 비면 기존 동작과 완전히 같다 ---
+    # 카메라 두 대가 문을 함께 보면, 글로벌 ID 가 꺼진 상태에선 같은 사람이 카메라마다
+    # 한 번씩 세어진다. 게다가 문 카메라가 아닌 카메라는 헐 밖 외삽 때문에 문 위치를
+    # 0.5~1 m 어긋나게 투영해 선분 끝을 비켜 간다. 그래서 **판정 여유로 옆 카메라 통과를
+    # 빠짐없이 받고, 융합으로 같은 사람을 하나로 접는다** — 두 장치는 함께 켠다.
+    line_pad_m: float | None = Field(default=None, ge=0)   # 선분 양끝 너머 이만큼까지 통과로 인정(m).
+                                        # 선을 길게 다시 그리지 않는 이유: 선 길이가 SEI 의 W_eff 다
+    fuse_sec: float | None = Field(default=None, ge=0)     # 다른 카메라가 이 시간(s) 안에 센 OUT 은
+                                        # 같은 사람으로 보고 1:1 로 접는다(가장 가까운 시각과 짝)
 
     def auto_width_m(self, m_per_px: float | None) -> float | None:
         """도면 축척 기준 유효폭 — 통과선 길이(px) × m_per_px."""

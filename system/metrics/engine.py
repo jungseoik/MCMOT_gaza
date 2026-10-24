@@ -83,6 +83,9 @@ class _ExitCounter:
     out_count: int = 0
     counted_in: set = field(default_factory=set)   # 이미 in 집계된 gid
     counted_out: set = field(default_factory=set)  # 이미 out 집계된 gid
+    # 카메라 간 융합(ExitLine.fuse_sec) — 최근 OUT [ts, cam, 흡수한 카메라 set]
+    fuse_sec: float = 0.0
+    recent: list = field(default_factory=list)
 
     # 키 2단 (v1.13): line_key = 카메라 로컬 키 — 선분 부호 기억은 트랙 수명과
     # 일치해야 하므로 항상 f"{cam}:{local}". count_key = debounce·집계 키 —
@@ -99,7 +102,7 @@ class _ExitCounter:
         return None
 
     def observe(self, line_key: str, count_key: str,
-                pt: tuple[float, float]) -> str | None:
+                pt: tuple[float, float], ts: float | None = None) -> str | None:
         ev = self.line.observe(line_key, pt)
         if ev == "in" and count_key not in self.counted_in:
             self.counted_in.add(count_key)
@@ -107,9 +110,31 @@ class _ExitCounter:
             return "in"
         if ev == "out" and count_key not in self.counted_out:
             self.counted_out.add(count_key)
+            if self._fused(line_key, count_key, ts):
+                return None                      # 다른 카메라가 이미 센 같은 사람
             self.out_count += 1
             return "out"
         return None
+
+    def _fused(self, line_key: str, count_key: str, ts: float | None) -> bool:
+        """카메라 간 융합 — 이번 OUT 이 다른 카메라가 fuse_sec 안에 센 사람과 같은가.
+
+        도착 순서대로 1:1 로 짝짓는다: 아직 이 카메라 것을 흡수하지 않은 다른 카메라
+        OUT 중 가장 가까운 시각의 것에 흡수된다. 같은 카메라끼리는 합치지 않는다(줄지어
+        지나가는 다른 사람). 글로벌 ID 모드(count_key ≠ line_key)는 이미 사람 단위라 안 쓴다.
+        """
+        if self.fuse_sec <= 0 or ts is None or count_key != line_key:
+            return False
+        cam = line_key.split(":")[0]
+        rq = self.recent
+        while rq and ts - rq[0][0] > self.fuse_sec:
+            rq.pop(0)
+        cand = [r for r in rq if r[1] != cam and cam not in r[2]]
+        if cand:
+            min(cand, key=lambda r: abs(ts - r[0]))[2].add(cam)
+            return True
+        rq.append([ts, cam, set()])
+        return False
 
 
 class MetricsEngine:
@@ -214,12 +239,14 @@ class MetricsEngine:
                 else:
                     geo_line = ex.cam_line if in_cam else ex.line
                     geo_inside = ex.cam_inside if in_cam else ex.inside
-                    key = (tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam)
+                    pad = self._seg_pad(ex, in_cam)
+                    key = (tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam, pad)
                     # 화면 px 는 맵 px 보다 스케일이 작을 수 있어 데드밴드를 줄인다
                     line = DirectionalLine(
                         geo_line, geo_inside,
-                        margin_px=(margin_px * 0.5 if in_cam else margin_px))
-                st = _ExitCounter(line=line, cfg_key=key)
+                        margin_px=(margin_px * 0.5 if in_cam else margin_px),
+                        seg_pad=pad)
+                st = _ExitCounter(line=line, cfg_key=key, fuse_sec=float(ex.fuse_sec or 0.0))
                 if in_cam:
                     self._cam_exits.setdefault(ex.count_cam, []).append(ex.id)
                 prev = old.get(ex.id)
@@ -230,6 +257,18 @@ class MetricsEngine:
                     if prev.cfg_key == key:      # 선 기하 동일 → 부호상태 유지
                         st.line = prev.line
                 self._exits[ex.id] = st
+
+    def _seg_pad(self, ex, in_cam: bool) -> float:
+        """맵 통과선 선분 여유(선분 길이 비율). line_pad_m 이 있으면 그만큼 양끝을 늘려 본다.
+
+        선 자체를 길게 그리면 W_eff(SEI 용량)가 바뀌므로 판정 여유로만 늘린다.
+        화면 통과선(cam_line)은 화면 px 라 대상이 아니다."""
+        base = 0.06
+        if in_cam or not ex.line_pad_m or not self._m_per_px:
+            return base
+        (x1, y1), (x2, y2) = ex.line
+        L_m = math.hypot(x2 - x1, y2 - y1) * self._m_per_px
+        return base + (float(ex.line_pad_m) / L_m if L_m > 0 else 0.0)
 
     def _cam_exit_ids(self) -> set:
         """화면 통과선으로 카운트하는 출입구 id 집합 (맵 관측에서 제외)."""
@@ -308,7 +347,7 @@ class MetricsEngine:
                         # 문 앞은 발끝이 잘려 튄다 — bbox 도 함께 넘겨 겹침으로 판정
                         ev = _ec.observe_zone(okey, gid_eff, tr.foot_uv, tr.bbox_xyxy)
                     else:
-                        ev = _ec.observe(okey, gid_eff, tr.foot_uv)
+                        ev = _ec.observe(okey, gid_eff, tr.foot_uv, ts)
                     if ev == "out" and sess is not None:
                         self._exit_events.setdefault(gid_eff, (_eid, float(ts)))
                 p = proj.project(tr.foot_uv)
@@ -358,7 +397,7 @@ class MetricsEngine:
                 for eid, ec in self._exits.items():   # 방향성 crossing 관측
                     if eid in cam_owned:              # 화면 통과선이 이미 셌다
                         continue
-                    ev = ec.observe(okey, gid_eff, (p.x, p.y))
+                    ev = ec.observe(okey, gid_eff, (p.x, p.y), ts)
                     if ev == "out" and sess is not None:
                         self._exit_events.setdefault(gid_eff, (eid, float(ts)))
                 if sess is not None:             # EPFI 관측 누적 (글로벌이면 사람 단위 병합)
@@ -489,7 +528,7 @@ class MetricsEngine:
         for eid, ec in self._exits.items():
             if eid in cam_owned or not hasattr(ec.line, "A"):
                 continue                          # 화면 게이트는 이미 투영 전에 관측했다
-            ev = ec.observe(line_key, count_key, (p.x, p.y))
+            ev = ec.observe(line_key, count_key, (p.x, p.y), ts)
             if ev == "out" and self._session is not None:
                 self._exit_events.setdefault(count_key, (eid, float(ts)))
 
@@ -548,11 +587,14 @@ class MetricsEngine:
             else:
                 geo_line = ex.cam_line if in_cam else ex.line
                 geo_inside = ex.cam_inside if in_cam else ex.inside
+                pad = self._seg_pad(ex, in_cam)
                 gate = DirectionalLine(
                     geo_line, geo_inside,
-                    margin_px=(margin_px * 0.5 if in_cam else margin_px))
-                key = (tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam)
-            self._exits[ex.id] = _ExitCounter(line=gate, cfg_key=key)
+                    margin_px=(margin_px * 0.5 if in_cam else margin_px),
+                    seg_pad=pad)
+                key = (tuple(map(tuple, geo_line)), tuple(geo_inside), in_cam, pad)
+            self._exits[ex.id] = _ExitCounter(line=gate, cfg_key=key,
+                                              fuse_sec=float(ex.fuse_sec or 0.0))
             if in_cam:
                 self._cam_exits.setdefault(ex.count_cam, []).append(ex.id)
 
