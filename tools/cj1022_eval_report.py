@@ -4,10 +4,14 @@
 예전에는 리포트 창 맨 위에 섹션 하나를 끼워 스크롤했지만, 층·출구·건물 관점이 섞이면 한 창에서
 읽히지 않는다. 그래서 보고서를 **장(슬라이드) 단위**로 나눠 한 장씩 멈춰 보여 준다.
 
-    1. 종합 평가     — 범위·핵심 숫자·판정(잘된 점/개선 지점)·이상적 피난의 기준
-    2. 피난 타임라인 — 층별 대피 개시 → 출구별 통과 시간대 → 피난층 종료 → 최종 종료
-    3. 출구별 분석   — 층마다: 출구 분담(실제 vs 설계) · 출구 앞 병목 혼잡(CBS) · 유량 · 해석
-    4. 건물 종합     — (여러 층일 때) 4대 지표 층별 + 건물 통합 · 결론 · 개선 제안
+    1. 종합 평가     — 핵심 시각·인원 + 4대 지표 점수·등급(층별, 여러 층이면 건물 통합) + 등급 기준표
+    2. 평가 의견     — 판정(잘된 점/개선 지점)·평가 기준
+    3. 피난 타임라인 — 층별 대피 개시 → 출구별 통과 시간대 → 피난층 종료 → 최종 종료
+    4. 비상구별 분석 — 층마다: 출구 분담(실제 vs 설계) · 출구 앞 병목 혼잡(CBS) · 유량 · 해석
+    5. 건물 종합     — (여러 층일 때) 개시·인원·종료 시각 + 건물 종합 의견·개선 제안
+
+문장은 공공기관 보고 어투(~하였습니다)로 쓴다. 근거 없는 합성 점수로 층 순위를 매기지 않는다.
+IDR 등급은 UI(grade.js idrScore)와 같은 '개시 구역 비율' 기준이고, 개시 시각을 함께 적는다.
 
 평가의 관점: 이상적인 피난은 **출구가 설계대로 고르게 쓰이고(SEI→100) 출구 앞 병목 혼잡이
 없는(CBS→0)** 것이다. 그래서 CBS 를 층 합계로만 보지 않고 **출구별로**(출구 앞 병목 구역을
@@ -67,7 +71,7 @@ EXIT_NAME = {
     "floor9": {"exit-0": "출구1 · 서쪽", "exit-1": "출구2 · 북쪽", "exit-2": "출구3 · 남동쪽"},
 }
 GROUND = "floor9"
-SLIDE_SEC = {"summary": 9.0, "timeline": 9.0, "floor": 11.0, "building": 11.0}
+SLIDE_SEC = {"summary": 12.0, "opinion": 11.0, "timeline": 9.0, "floor": 12.0, "building": 12.0}
 FADE = 0.45
 
 # 등급 — webui/static/main/grade.js 와 같은 경계(운영 뷰·리플레이·리포트와 같은 기준)
@@ -214,12 +218,46 @@ def build_data(oid: str) -> dict:
 
 
 # ───────────────────────────────────────────────────────── 2) 해석 문장
-def floor_reading(d: dict) -> tuple[list[str], list[str]]:
-    """층 하나의 출구 관점 해석 → (관찰, 개선 제안)."""
-    ex = [e for e in d["exits"] if e["count"]]
+# 보고서 문장은 공공기관 보고 어투(~하였습니다)로 쓴다. 출구 이름은 문장 안에서
+# '왼쪽 계단(e1)' 꼴로 부르고, 조사는 괄호 앞 낱말(계단·출구)의 받침으로 고른다.
+SENT_NAME = {
+    "floor7": {"e1": "왼쪽 계단(e1)", "e2": "오른쪽 계단(e2)"},
+    "floor8": {"e1": "왼쪽 계단(e1)", "e2": "오른쪽 계단(e2)"},
+    "floor9": {"exit-0": "서쪽 출구(출구1)", "exit-1": "북쪽 출구(출구2)", "exit-2": "남동쪽 출구(출구3)"},
+}
+METRIC_INFO = [   # (키, 이름, 한 줄 뜻)
+    ("idr", "IDR 대피 개시", "경보 후 각 구역이 피난을 개시하였는지를 개시 구역 비율로 나타냅니다."),
+    ("sei", "SEI 비상구 활용 효율", "비상구가 설계 기준대로 고르게 이용되었는지 나타내며, 100에 가까울수록 양호합니다."),
+    ("cbs", "CBS 병목 혼잡 누적", "비상구 앞 구역에서 임계밀도를 초과한 혼잡의 시간 누적값으로, 0에 가까울수록 양호합니다."),
+    ("epfi", "EPFI 경로 충실도", "재실자가 권장 피난경로를 얼마나 따라 이동하였는지 나타내며, 100에 가까울수록 양호합니다."),
+]
+
+
+def josa(word: str, pair: str) -> str:
+    """pair = '을/를' 처럼 (받침 있음/없음). 괄호가 있으면 괄호 앞 글자로 판단."""
+    base = word.split("(")[0].rstrip()
+    ch = base[-1] if base else ""
+    has = "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 != 0
+    a, b = pair.split("/")
+    if pair == "으로/로" and has and (ord(ch) - 0xAC00) % 28 == 8:   # ㄹ 받침 → 로
+        return word + "로"
+    return word + (a if has else b)
+
+
+def sn(d: dict, e: dict) -> str:
+    return SENT_NAME[d["floor"]].get(e["id"], e["name"])
+
+
+def idr_score(d: dict) -> float:
+    """UI(grade.js idrScore)와 같은 기준 — 개시 구역 비율(구역 1개 = 개시 100 / 미개시 0)."""
+    return 100.0 if d.get("idr_delay") is not None else 0.0
+
+
+def floor_reading(d: dict, prefix: str = "") -> tuple[list[str], list[str]]:
+    """층 하나의 비상구별 해석 → (관찰, 개선 제안)."""
     obs, rec = [], []
-    if not ex:
-        return ["출구 통과 인원이 없다."], []
+    if not any(e["count"] for e in d["exits"]):
+        return ["비상구 통과 인원이 확인되지 않았습니다."], []
     tot = sum(e["count"] for e in d["exits"])
     over = max(d["exits"], key=lambda e: e["share"] - e["design_share"])
     under = min(d["exits"], key=lambda e: e["share"] - e["design_share"])
@@ -227,33 +265,35 @@ def floor_reading(d: dict) -> tuple[list[str], list[str]]:
     worst = max(d["exits"], key=lambda e: e["cbs"] or 0)
     g_sei = grade(d["sei"])[1]
     if dev < 10:
-        obs.append(f"출구 분담이 설계와 거의 같다 — SEI {d['sei']:.0f}({g_sei}). 출구가 고르게 쓰였다.")
+        obs.append(f"비상구별 이용 분담이 설계 기준과 유사하여 비상구가 고르게 이용되었습니다"
+                   f"(SEI {d['sei']:.0f}, {g_sei}).")
     else:
-        obs.append(f"<b>{over['name']}</b>에 {over['share'] * 100:.0f}%가 몰렸다(설계 {over['design_share'] * 100:.0f}%, "
-                   f"+{dev:.0f}%p) — SEI {d['sei']:.0f}({g_sei}). "
-                   f"<b>{under['name']}</b>의 분담은 {under['share'] * 100:.0f}%에 그쳤다.")
+        obs.append(f"피난 인원의 {over['share'] * 100:.0f}%가 {josa(sn(d, over), '을/를')} 이용하여 "
+                   f"설계 분담({over['design_share'] * 100:.0f}%)보다 {dev:.0f}%p 높았으며, "
+                   f"{josa(sn(d, under), '은/는')} {under['share'] * 100:.0f}%를 처리하였습니다(SEI {d['sei']:.0f}, {g_sei}).")
     if (worst["cbs"] or 0) > CBS_CUTS[0]:
         gw = grade(worst["cbs"], "cbs")[1]
+        tail = f"(CBS {worst['cbs']:.1f}, {gw}, 임계밀도 초과 {worst['over_sec']:.0f}초)"
         if worst is over and dev >= 10:
-            obs.append(f"혼잡도 쏠린 그 출구에서 났다 — {worst['name']} 앞 CBS {worst['cbs']:.1f}({gw}), "
-                       f"임계밀도 초과 {worst['over_sec']:.0f}초. <b>쏠림이 병목 혼잡으로 이어졌다.</b>")
-            rec.append(f"{d['name']}: {under['name']} 방향으로 유도(안내 방송·유도원)하면 "
-                       f"{worst['name']} 앞 혼잡을 덜 수 있다.")
+            obs.append(f"혼잡 또한 이용이 편중된 {sn(d, worst)} 앞에서 발생하였습니다{tail}. "
+                       "특정 비상구로의 편중이 혼잡으로 이어진 것으로 판단됩니다.")
+            rec.append(f"(개선) {prefix}안내방송 및 유도원 배치를 통해 {sn(d, under)} 이용을 유도하면 "
+                       f"{sn(d, worst)} 앞 혼잡을 줄일 수 있을 것으로 판단됩니다.")
         else:
-            span = (worst["p90"] - worst["p10"]) if worst["p10"] is not None else None
-            obs.append(f"분담은 {'고르지만' if dev < 10 else '쏠린 출구와 다른'} <b>{worst['name']}</b> 앞이 막혔다 — "
-                       f"CBS {worst['cbs']:.1f}({gw}), 임계밀도 초과 {worst['over_sec']:.0f}초"
-                       + (f". 이용 인원 80%가 {kdur(span)} 안에 몰려 통과(최대 {worst['peak_min']}명/분)" if span else "")
-                       + " — <b>시간 집중이 원인</b>.")
-            rec.append(f"{d['name']}: {worst['name']} 진입 시점 분산(시차 피난·유도원 배치)할 것.")
+            few = worst["share"] < worst["design_share"]
+            obs.append(f"혼잡은 {'이용 인원이 상대적으로 적은 ' if few else ''}{sn(d, worst)} 앞에서 발생하였습니다{tail}.")
+            if worst["p10"] is not None:
+                obs.append(f"이는 {sn(d, worst)} 이용 인원의 80%가 {kdur(worst['p90'] - worst['p10'])} 동안 "
+                           f"집중적으로 통과(최대 분당 {worst['peak_min']}명)하였기 때문으로 판단됩니다.")
+            rec.append(f"(개선) {prefix}시차 피난 또는 유도원 배치를 통해 {sn(d, worst)} 진입 시점을 분산할 필요가 있습니다.")
     else:
-        obs.append("출구 앞 병목에서 임계밀도를 넘는 혼잡이 거의 없었다.")
+        obs.append("비상구 앞에서 임계밀도를 초과하는 혼잡은 거의 발생하지 않았습니다.")
     clean = [e for e in d["exits"] if (e["cbs"] or 0) <= CBS_CUTS[0] and e["count"]]
     if clean and (worst["cbs"] or 0) > CBS_CUTS[1]:
         c = clean[0]
-        obs.append(f"{c['name']}에서는 {c['count']}명이 지나가는 동안 혼잡이 없었다 — 여유 용량이 남았다.")
+        obs.append(f"{josa(sn(d, c), '은/는')} {c['count']}명이 통과하는 동안 혼잡이 발생하지 않아 수용 여력이 있었습니다.")
     if d["role"] == "upper":
-        obs.append(f"{tot}명이 비상구로 층을 빠져나갔다.")
+        obs.append(f"피난층 종료 시점까지 총 {tot}명이 비상구를 통해 피난하였습니다.")
     return obs, rec
 
 
@@ -262,17 +302,17 @@ CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:100%;height:100%;background:var(--bg-base);color:var(--text-1);
   font-family:Pretendard,'Noto Sans KR',sans-serif;-webkit-font-smoothing:antialiased}
-.page{position:absolute;inset:0;padding:26px 34px 22px;display:flex;flex-direction:column;gap:14px}
+.page{position:absolute;inset:0;padding:24px 34px 20px;display:flex;flex-direction:column;gap:13px}
 .top{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--stroke-2);padding-bottom:10px}
 .top .k{color:var(--pia-cyan);font-weight:800;font-size:15px;letter-spacing:.04em}
 .top h1{font-size:25px;font-weight:800}
 .top .sub{color:var(--text-3);font-size:14px;margin-left:auto;white-space:nowrap}
 .num{font-variant-numeric:tabular-nums}
 .cards{display:flex;gap:12px}
-.card{flex:1;background:var(--bg-2);border:1px solid var(--stroke-2);border-radius:10px;padding:12px 14px}
+.card{flex:1;background:var(--bg-2);border:1px solid var(--stroke-2);border-radius:10px;padding:10px 14px}
 .card .l{color:var(--text-3);font-size:13px}
-.card .v{font-size:27px;font-weight:800;margin-top:4px}
-.card .s{color:var(--text-3);font-size:12.5px;margin-top:3px}
+.card .v{font-size:25px;font-weight:800;margin-top:3px}
+.card .s{color:var(--text-3);font-size:12.5px;margin-top:2px}
 .verdict{border-radius:10px;padding:14px 18px;background:var(--bg-1);border:1px solid var(--stroke-2);border-left-width:5px}
 .verdict.g-good{border-left-color:#3FB950}.verdict.g-mid{border-left-color:#F5A623}.verdict.g-bad{border-left-color:var(--danger)}
 .verdict h2{font-size:19px;font-weight:700;margin-bottom:8px}
@@ -281,7 +321,8 @@ html,body{width:100%;height:100%;background:var(--bg-base);color:var(--text-1);
 .verdict li.good:before{content:"✓";color:#3FB950}.verdict li.warn:before{content:"!";color:#F5A623;left:5px}
 .ideal{font-size:14px;color:var(--text-2);background:var(--bg-1);border:1px dashed var(--stroke-3);border-radius:10px;padding:11px 16px;line-height:1.6}
 .ideal b{color:var(--pia-cyan)}
-.pill{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:6px;vertical-align:2px}
+.pill{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:6px;vertical-align:2px;white-space:nowrap}
+.pill i{font-style:normal;opacity:.7;margin-left:3px;font-weight:600}
 .r1{background:#1f6f3a;color:#c8f7d3}.r2{background:#2a5d2f;color:#d6f5d0}.r3{background:#6b5310;color:#ffe9a8}
 .r4{background:#7a2e14;color:#ffd0bd}.r5{background:#7d1b1b;color:#ffc9c9}.r0{background:var(--bg-4);color:var(--text-3)}
 table{border-collapse:collapse;width:100%;font-size:14.5px}
@@ -289,6 +330,17 @@ th{color:var(--text-3);font-weight:600;font-size:12.5px;text-align:right;padding
 td{padding:7px 8px;border-bottom:1px solid var(--stroke-1);text-align:right;font-variant-numeric:tabular-nums}
 th:first-child,td:first-child{text-align:left}
 td.n{font-weight:700;color:var(--text-1)}
+.mt td{padding:8px 8px}
+.mt td:first-child b{font-size:15px}
+.mt td:first-child div{color:var(--text-3);font-size:12px;font-weight:400;margin-top:2px;max-width:470px}
+.mt td .v{font-size:19px;font-weight:800}
+.mt td .w{display:block;color:var(--text-3);font-size:11.5px;font-weight:400}
+.lg{font-size:12.5px}
+.lg th,.lg td{text-align:center;padding:4px 6px;font-size:12.5px}
+.lg td:first-child,.lg th:first-child{text-align:left;color:var(--text-3)}
+.lgnote{font-size:11.5px;color:var(--text-3);margin-top:4px}
+.mrow{display:flex;flex-direction:column;gap:10px}
+@media (min-width:1500px){.mrow{flex-direction:row;align-items:flex-start;gap:22px}.mrow>div:first-child{flex:3}.mrow>div:last-child{flex:2}}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px;flex:1;min-height:0}
 .col{display:flex;flex-direction:column;gap:12px;min-width:0}
 .sh{font-size:17px;font-weight:800}.sh .m{font-weight:400;color:var(--text-3);font-size:13.5px;margin-left:8px}
@@ -303,7 +355,7 @@ td.n{font-weight:700;color:var(--text-1)}
 .read{background:var(--bg-1);border:1px solid var(--stroke-2);border-radius:10px;padding:12px 16px}
 .read li{list-style:none;font-size:14.5px;line-height:1.55;color:var(--text-2);padding-left:16px;position:relative;margin-bottom:3px}
 .read li:before{content:"•";position:absolute;left:2px;color:var(--pia-cyan)}
-.read li.rec:before{content:"→";color:#F5A623;left:0}
+.read li.rec{color:#ffd9a0}.read li.rec:before{color:#F5A623}
 .read b{color:var(--text-1)}
 .tl{position:relative;flex:1;min-height:0}
 .foot{color:var(--text-3);font-size:12px;margin-top:auto}
@@ -312,7 +364,7 @@ td.n{font-weight:700;color:var(--text-1)}
 
 def pill(v, kind="score"):
     r, lab = grade(v, kind)
-    return f'<span class="pill r{r}">{lab}</span>'
+    return f'<span class="pill r{r}">{lab}' + (f'<i>{r}/5</i>' if r else "") + '</span>'
 
 
 def page(kicker: str, title: str, sub: str, body: str, foot: str = "") -> str:
@@ -322,65 +374,118 @@ def page(kicker: str, title: str, sub: str, body: str, foot: str = "") -> str:
             f'{body}' + (f'<div class="foot">{foot}</div>' if foot else "") + '</div></body></html>')
 
 
+def scope_short(D: dict) -> str:
+    return D["scope"].split(" · ")[0]
+
+
+def metric_table(D: dict) -> str:
+    """4대지표 점수·등급 표 — 층별 (+ 여러 층이면 건물 통합). 등급은 grade.js 와 같은 경계."""
+    fl, B = D["floors"], D["building"]
+    multi = len(fl) > 1
+    cols = "".join(f"<th>{d['name']}</th>" for d in fl) + ("<th>건물 통합</th>" if multi else "")
+
+    def cell(key, d):
+        if key == "idr":
+            s = idr_score(d)
+            w = (f"개시 {mmss(d['idr_delay'])}" if d.get("idr_delay") is not None else "미개시")
+            return f'<span class="v">{int(s / 100)}/1</span>{pill(s)}<span class="w">{w} (경보 후)</span>'
+        v = d[key]
+        if v is None:
+            return "—"
+        return f'<span class="v">{v:.1f}</span>{pill(v, "cbs")}' if key == "cbs" else f'<span class="v">{v:.0f}</span>{pill(v)}'
+
+    def bcell(key):
+        if key == "idr":
+            st = sum(1 for d in fl if d.get("idr_delay") is not None)
+            return f'<span class="v">{st}/{len(fl)}</span>{pill(st / len(fl) * 100)}<span class="w">개시 구역 비율</span>'
+        v = B[key]
+        return f'<span class="v">{v:.1f}</span>{pill(v, "cbs")}' if key == "cbs" else f'<span class="v">{v:.0f}</span>{pill(v)}'
+    trs = "".join(f'<tr><td><b>{nm}</b><div>{desc}</div></td>' + "".join(f"<td>{cell(k, d)}</td>" for d in fl)
+                  + (f"<td>{bcell(k)}</td>" if multi else "") + "</tr>" for k, nm, desc in METRIC_INFO)
+    return f'<table class="mt"><thead><tr><th>4대 지표</th>{cols}</tr></thead><tbody>{trs}</tbody></table>'
+
+
+def grade_legend() -> str:
+    pills = lambda labs: "".join(f'<td><span class="pill r{i + 1}" style="margin:0">{l}</span></td>' for i, l in enumerate(labs))
+    return ('<div><table class="lg"><thead><tr><th>등급 기준</th>'
+            + "".join(f"<th>{i}단계</th>" for i in range(1, 6)) + '</tr></thead><tbody>'
+            f'<tr><td>SEI·EPFI·IDR</td>{pills(SCORE_LABELS)}</tr>'
+            '<tr><td>점수 구간</td><td>90 이상</td><td>75~90</td><td>60~75</td><td>40~60</td><td>40 미만</td></tr>'
+            '<tr><td>의미</td><td>기준 충분히 충족</td><td>대체로 충족</td><td>일부 개선 필요</td><td>개선 필요</td><td>전반적 개선 필요</td></tr>'
+            f'<tr><td>CBS</td>{pills(CBS_LABELS)}</tr>'
+            '<tr><td>누적 구간</td><td>0.5 이하</td><td>0.5~3</td><td>3~10</td><td>10~30</td><td>30 초과</td></tr>'
+            '<tr><td>의미</td><td>혼잡 거의 없음</td><td>일시적 경미한 혼잡</td><td>단시간 혼잡</td><td>지속적 혼잡</td><td>장시간 심한 정체</td></tr>'
+            '</tbody></table><div class="lgnote">※ 등급 구간은 참고 기준이며, 고객 확정 시 조정될 수 있습니다. '
+            'IDR은 개시 구역 비율로 등급을 매기며, 개시 시각을 함께 표기합니다.</div></div>')
+
+
 def slide_summary(D: dict) -> str:
     fl = D["floors"]
     ups = [d for d in fl if d["role"] == "upper"]
     ground = next((d for d in fl if d["role"] == "ground"), None)
-    multi = len(fl) > 1
-    # 핵심 숫자 카드
     cards = []
     if D["final_scope"] is None:
         u = ups[0]
-        cards.append(("피난층 종료(층 비움)", mmss(u["floor_end"]), f"{wall(u['floor_end'])} · 경보 후 {kdur(u['floor_end'])}"))
+        cards.append(("피난층 종료", mmss(u["floor_end"]), f"{wall(u['floor_end'])} · 해당 층 최종 인원의 비상구 통과 시각"))
     else:
-        cards.append(("최종 종료(1층 밖 탈출)", mmss(D["final_scope"]),
+        cards.append(("최종 종료(1층 외부 탈출)", mmss(D["final_scope"]),
                       " · ".join(f"{u['name']} {mmss(u['final_end'])}" for u in ups)))
-        cards.append(("피난층 종료(층 비움)", " · ".join(f"{u['name']} {mmss(u['floor_end'])}" for u in ups), "그 층 마지막 인원이 비상구 통과"))
-    starts = [(u["name"], u["idr_delay"]) for u in ups if u["idr_delay"] is not None]
-    if starts:
-        first = min(starts, key=lambda s: s[1])
-        cards.append(("대피 개시", f"{int(first[1])}초", " · ".join(f"{n} {int(s)}초" for n, s in starts) + " (경보 후)"))
-    cards.append(("비상구 탈출", f"{sum(sum(e['count'] for e in u['exits']) for u in ups)}명",
-                  " · ".join(f"{u['name']} {sum(e['count'] for e in u['exits'])}" for u in ups) + " (피난층 종료까지)"))
+        cards.append(("피난층 종료", " · ".join(f"{u['name']} {mmss(u['floor_end'])}" for u in ups),
+                      "해당 층 최종 인원의 비상구 통과 시각"))
+    cards.append(("비상구 피난 인원", f"{sum(sum(e['count'] for e in u['exits']) for u in ups)}명",
+                  " · ".join(f"{u['name']} {sum(e['count'] for e in u['exits'])}명" for u in ups) + " (피난층 종료 시점까지)"))
     if ground:
-        cards.append(("1층 출구 통과", f"{sum(e['count'] for e in ground['exits'])}명", "1층 재실자·다른 층 인원 포함"))
-    card_html = "".join(f'<div class="card"><div class="l">{l}</div><div class="v num">{v}</div><div class="s">{s}</div></div>'
-                        for l, v, s in cards)
-    # 판정
-    good, warn = [], []
-    for n, s in starts:
-        (good if s <= 30 else warn).append(
-            f"{n}: 경보 후 <b>{int(s)}초</b>에 대피 개시" + ("" if s <= 30 else " — 초기 반응이 늦다"))
-    for d in fl:
-        r = grade(d["sei"])[0]
-        over = max(d["exits"], key=lambda e: e["share"] - e["design_share"])
-        if r <= 2:
-            good.append(f"{d['name']}: 출구가 고르게 쓰임 (SEI {d['sei']:.0f})")
-        else:
-            warn.append(f"{d['name']}: {over['name']}에 {over['share'] * 100:.0f}% 쏠림 (SEI {d['sei']:.0f}, 설계 {over['design_share'] * 100:.0f}%)")
-        worst = max(d["exits"], key=lambda e: e["cbs"] or 0)
-        rc = grade(worst["cbs"] or 0, "cbs")[0]
-        if rc <= 2:
-            good.append(f"{d['name']}: 출구 앞 병목 혼잡 낮음 (최대 CBS {worst['cbs'] or 0:.1f})")
-        else:
-            warn.append(f"{d['name']}: {worst['name']} 앞 병목 혼잡 (CBS {worst['cbs']:.1f}, 임계 초과 {worst['over_sec']:.0f}초)")
-    for u in ups:
-        good.append(f"{u['name']}: {kdur(u['floor_end'])}에 층 비움 완료"
-                    + (f" · {kdur(u['final_end'])}에 1층 밖 탈출" if D["final_scope"] else ""))
-    head = ("전반적으로 <b>우수</b>합니다.", "g-good") if not warn else \
-        (("전반적으로 <b>양호</b>하나, 개선 지점이 있습니다.", "g-mid") if len(warn) <= len(good)
-         else ("<b>개선이 필요</b>합니다.", "g-bad"))
-    li = "".join(f'<li class="good">{t}</li>' for t in good) + "".join(f'<li class="warn">{t}</li>' for t in warn)
-    verdict = f'<div class="verdict {head[1]}"><h2>이번 훈련({D["scope"].split(" · ")[0]})은 {head[0]}</h2><ul>{li}</ul></div>'
-    ideal = ('<div class="ideal">평가 기준 — 이상적인 피난은 <b>① 경보 직후 빠르게 움직이기 시작하고(IDR)</b> '
-             '<b>② 출구가 설계대로 고르게 쓰이고(SEI → 100)</b> <b>③ 출구 앞 병목에 사람이 쌓이지 않고(CBS → 0)</b> '
-             '<b>④ 권장 경로를 따라 이동하는(EPFI → 100)</b> 것이다. 출구가 고르게 쓰일수록 한 출구 앞에 사람이 몰리지 않아 '
-             '병목 혼잡이 줄어든다 — 그래서 이 보고서는 SEI 와 CBS 를 <b>출구별로</b> 함께 본다.</div>')
-    return page("피난훈련 평가 보고서", "종합 평가",
-                f"CJ제일제당센터 · 2026-10-22 · {D['scope']}",
-                f'<div class="cards">{card_html}</div>{verdict}{ideal}',
-                f"경보(훈련 시작) 14:59:55 = 00:00 · 사이렌 00:05 · 시각은 경보 후 경과(분:초)")
+        cards.append(("1층 출구 통과", f"{sum(e['count'] for e in ground['exits'])}명", "1층 재실자 및 타 층 피난 인원 포함"))
+    card_html = "".join(f'<div class="card"><div class="l">{l}</div><div class="v num"'
+                        + (' style="font-size:19px;padding-top:4px"' if len(v) > 12 else "")
+                        + f'>{v}</div><div class="s">{s}</div></div>' for l, v, s in cards)
+    body = (f'<div class="cards">{card_html}</div>'
+            f'<div class="mrow"><div>{metric_table(D)}</div>{grade_legend()}</div>')
+    return page("피난훈련 평가 보고서", "종합 평가", f"CJ제일제당센터 · 2026-10-22 · {D['scope']}", body,
+                "경보(훈련 시작) 14:59:55 = 00:00 · 사이렌 00:05 · 시각은 경보 후 경과 시간(분:초)")
 
+
+def slide_opinion(D: dict) -> str:
+    fl = D["floors"]
+    ups = [d for d in fl if d["role"] == "upper"]
+    good, warn = [], []
+    for u in ups:
+        if u["idr_delay"] is not None:
+            good.append(f"{josa(u['name'], '은/는')} 경보 후 {int(u['idr_delay'])}초에 대피를 개시하였습니다.")
+        else:
+            warn.append(f"{u['name']}에서는 대피 개시가 확인되지 않았습니다.")
+    for d in fl:
+        over = max(d["exits"], key=lambda e: e["share"] - e["design_share"])
+        if grade(d["sei"])[0] <= 2:
+            good.append(f"{josa(d['name'], '은/는')} 비상구가 비교적 고르게 이용되었습니다(SEI {d['sei']:.0f}).")
+        else:
+            warn.append(f"{josa(d['name'], '은/는')} 피난 인원의 {over['share'] * 100:.0f}%가 {josa(sn(d, over), '을/를')} 이용하여 "
+                        f"설계 분담({over['design_share'] * 100:.0f}%)보다 편중되었습니다(SEI {d['sei']:.0f}).")
+        worst = max(d["exits"], key=lambda e: e["cbs"] or 0)
+        if grade(worst["cbs"] or 0, "cbs")[0] <= 2:
+            good.append(f"{josa(d['name'], '은/는')} 비상구 앞 혼잡이 낮았습니다(최대 CBS {worst['cbs'] or 0:.1f}).")
+        else:
+            warn.append(f"{d['name']} {sn(d, worst)} 앞에서 혼잡이 발생하였습니다"
+                        f"(CBS {worst['cbs']:.1f}, 임계밀도 초과 {worst['over_sec']:.0f}초).")
+        if d["epfi"] is not None:
+            if grade(d["epfi"])[0] <= 2:
+                good.append(f"{josa(d['name'], '은/는')} 권장 피난경로를 대체로 준수하였습니다(EPFI {d['epfi']:.0f}).")
+            else:
+                warn.append(f"{d['name']}에서는 일부 인원이 권장 피난경로를 벗어나 이동하였습니다(EPFI {d['epfi']:.0f}).")
+    for u in ups:
+        good.append(f"{josa(u['name'], '은/는')} 경보 후 {kdur(u['floor_end'])}에 피난을 완료하였"
+                    + (f"으며, {kdur(u['final_end'])}에 1층 외부 탈출을 완료하였습니다." if D["final_scope"] else "습니다."))
+    sc = scope_short(D)
+    head = (f"{sc} 피난은 전반적으로 우수하게 수행되었습니다.", "g-good") if not warn else \
+        ((f"{sc} 피난은 전반적으로 양호하였으나, 일부 개선이 필요한 사항이 확인되었습니다.", "g-mid")
+         if len(warn) <= len(good) else (f"{sc} 피난은 개선이 필요한 것으로 평가되었습니다.", "g-bad"))
+    li = "".join(f'<li class="good">{t}</li>' for t in good) + "".join(f'<li class="warn">{t}</li>' for t in warn)
+    verdict = f'<div class="verdict {head[1]}"><h2>{head[0]}</h2><ul>{li}</ul></div>'
+    ideal = ('<div class="ideal">평가 기준: 바람직한 피난은 <b>① 경보 직후 신속한 대피 개시(IDR)</b>, '
+             '<b>② 설계 기준에 따른 비상구 균등 이용(SEI 100에 근접)</b>, <b>③ 비상구 앞 혼잡 최소화(CBS 0에 근접)</b>, '
+             '<b>④ 권장 피난경로 준수(EPFI 100에 근접)</b>로 판단합니다. '
+             '비상구가 균등하게 이용될수록 특정 비상구 앞 혼잡이 줄어듭니다.</div>')
+    return page("피난훈련 평가 보고서", "평가 의견", f"CJ제일제당센터 · 2026-10-22 · {D['scope']}", verdict + ideal)
 
 def slide_timeline(D: dict, vw: int) -> str:
     fl = D["floors"]
@@ -395,7 +500,7 @@ def slide_timeline(D: dict, vw: int) -> str:
         end = d.get("floor_end") or T
         rows.append(f'<div style="position:absolute;left:0;top:{y}px;width:{lab_w - 14}px;font-weight:800;font-size:17px">{d["name"]}'
                     f'<div style="font-size:12px;color:var(--text-3);font-weight:400">'
-                    f'{"피난층" if d["role"] == "upper" else "피난(탈출)층"} · 00:00~{mmss(end)}</div></div>')
+                    f'{"피난층" if d["role"] == "upper" else "피난층(지상 출구)"} · 00:00~{mmss(end)}</div></div>')
         rows.append(f'<div style="position:absolute;left:{X(0)}px;top:{y + 9}px;width:{X(end) - X(0)}px;height:6px;'
                     f'background:var(--bg-4);border-radius:3px"></div>')
         if d.get("idr_delay") is not None and d["role"] == "upper":
@@ -411,7 +516,7 @@ def slide_timeline(D: dict, vw: int) -> str:
             t = d["final_end"]
             rows.append(f'<div style="position:absolute;left:{X(t) - 1}px;top:{y - 2}px;width:3px;height:26px;background:#ff8a85"></div>'
                         f'<div style="position:absolute;left:{X(t) + 6}px;top:{y + 12}px;font-size:12.5px;color:#ff8a85;white-space:nowrap">'
-                        f'1층 밖 탈출 {mmss(t)}</div>'
+                        f'1층 외부 탈출 {mmss(t)}</div>'
                         f'<div style="position:absolute;left:{X(d["floor_end"])}px;top:{y + 9}px;width:{X(t) - X(d["floor_end"])}px;'
                         f'height:0;border-top:2px dashed #ff8a85;opacity:.6"></div>')
         y += 34
@@ -419,7 +524,7 @@ def slide_timeline(D: dict, vw: int) -> str:
             col = COLS[k % 3]
             if e["first"] is None:
                 rows.append(f'<div style="position:absolute;left:{lab_w - 4}px;top:{y}px;font-size:12.5px;color:var(--text-3)">'
-                            f'{e["name"]} — 통과 없음</div>')
+                            f'{e["name"]} 통과 없음</div>')
             else:
                 rows.append(
                     f'<div style="position:absolute;left:{X(e["first"])}px;top:{y + 8}px;width:{max(2, X(e["last"]) - X(e["first"]))}px;height:2px;background:{col};opacity:.55"></div>'
@@ -439,12 +544,12 @@ def slide_timeline(D: dict, vw: int) -> str:
         final = (f'<div style="position:absolute;left:{X(T) - 1}px;top:0;bottom:22px;width:3px;background:var(--danger)"></div>'
                  f'<div style="position:absolute;left:{X(T) - 150}px;top:2px;font-size:13px;color:#ff8a85;font-weight:700;text-align:right;width:140px">'
                  f'최종 종료 {mmss(T)}</div>')
-    body = (f'<div class="legend">굵은 막대 = 출구 이용 인원 80%가 지나간 시간대 · 가는 선 = 첫 통과~마지막 통과'
+    body = (f'<div class="legend">굵은 막대: 이용 인원의 80%가 통과한 시간대 · 가는 선: 최초~최종 통과 시간'
             f'<span style="margin-left:18px;color:#7ee39a">● 대피 개시</span>'
             f'<span style="margin-left:14px;color:#F5A623">┃ 피난층 종료</span>'
             + ('<span style="margin-left:14px;color:#ff8a85">┃ 최종 종료</span>' if final else "") + '</div>'
             f'<div class="tl">{ticks}{"".join(rows)}{final}</div>')
-    return page("피난훈련 평가 보고서", "피난 타임라인", f"{D['scope']} · 경보 후 경과(분:초)", body)
+    return page("피난훈련 평가 보고서", "피난 타임라인", f"{D['scope']} · 경보 후 경과 시간(분:초)", body)
 
 
 def floor_panel(d: dict, D: dict) -> str:
@@ -467,15 +572,15 @@ def floor_panel(d: dict, D: dict) -> str:
                 f'<td class="n">{(e["cbs"] or 0):.1f}{pill(e["cbs"] or 0, "cbs")}</td>'
                 f'<td>{(e["over_sec"] or 0):.0f}초</td>'
                 f'<td>{(e["peak_density"] or 0):.2f}</td></tr>')
-    tbl = ('<table><thead><tr><th>출구</th><th>인원</th><th>분담 편차</th><th>80% 통과 시간대</th>'
-           '<th>최대 명/분</th><th>출구 앞 CBS</th><th>임계 초과</th><th>최대 밀도 명/㎡</th></tr></thead>'
+    tbl = ('<table><thead><tr><th>비상구</th><th>인원</th><th>분담 편차</th><th>80% 통과 시간대</th>'
+           '<th>최대 명/분</th><th>비상구 앞 CBS</th><th>임계 초과</th><th>최대 밀도 명/㎡</th></tr></thead>'
            f'<tbody>{trs}</tbody></table>')
     obs, rec = floor_reading(d)
     read = "".join(f"<li>{t}</li>" for t in obs) + "".join(f'<li class="rec">{t}</li>' for t in rec)
-    return (f'<div class="col"><div class="sh">{d["name"]} — 출구 {len(d["exits"])}곳 · {tot}명'
+    return (f'<div class="col"><div class="sh">{d["name"]} · 비상구 {len(d["exits"])}개소 · {tot}명'
             f'<span class="m">00:00 ~ {mmss(end)} · SEI {d["sei"]:.0f}{pill(d["sei"])} · CBS {d["cbs"]:.1f}{pill(d["cbs"], "cbs")}</span></div>'
             f'<div class="bars">{bars}</div>'
-            f'<div class="legend">막대 = 실제 분담 · <i></i>흰 눈금 = 설계 분담(출구 폭 비례)</div>'
+            f'<div class="legend">막대: 실제 분담 · <i></i>흰 눈금: 설계 분담(출구 폭 비례)</div>'
             f'{tbl}<div class="read"><ul>{read}</ul></div></div>')
 
 
@@ -483,79 +588,74 @@ def slide_floor(D: dict, ds: list[dict]) -> str:
     body = (f'<div class="grid2">{"".join(floor_panel(d, D) for d in ds)}</div>' if len(ds) > 1
             else floor_panel(ds[0], D))
     names = " · ".join(d["name"] for d in ds)
-    return page("피난훈련 평가 보고서", f"출구별 분석 — {names}", D["scope"], body,
-                "CBS = 출구 앞 병목 구역에서 임계밀도(0.8명/㎡)를 넘긴 혼잡의 시간 누적 · 0 이 이상적 · "
-                "분담 편차 = 실제 분담 − 설계 분담")
+    return page("피난훈련 평가 보고서", f"비상구별 분석 ({names})", D["scope"], body,
+                "CBS: 비상구 앞 구역에서 임계밀도(0.8명/㎡)를 초과한 혼잡의 시간 누적값(0에 가까울수록 양호) · "
+                "분담 편차: 실제 분담 − 설계 분담")
 
 
 def slide_building(D: dict) -> str:
     fl = D["floors"]
-    B = D["building"]
     ups = [d for d in fl if d["role"] == "upper"]
     ground = next((d for d in fl if d["role"] == "ground"), None)
-    cols = "".join(f"<th>{d['name']}</th>" for d in fl) + "<th>건물 통합</th>"
-    starts = [(d["name"], d["idr_delay"]) for d in ups if d["idr_delay"] is not None]
-    first = min(starts, key=lambda s: s[1]) if starts else None
+    cols = "".join(f"<th>{d['name']}</th>" for d in fl)
 
     def cell_start(d):
-        if d["role"] == "upper":
-            return f"{int(d['idr_delay'])}초 ({mmss(d['idr_delay'])})" if d["idr_delay"] is not None else "미개시"
-        return (f"{mmss(d['idr_delay'])} 흐름 형성" if d["idr_delay"] is not None else "—")
+        if d["idr_delay"] is None:
+            return "미개시"
+        return (f"{int(d['idr_delay'])}초 ({mmss(d['idr_delay'])})" if d["role"] == "upper"
+                else f"{mmss(d['idr_delay'])} 피난 흐름 형성")
     rows = [
-        ("대피 개시 (IDR)", [cell_start(d) for d in fl],
-         f"{first[0]} {int(first[1])}초" if first else "—"),
-        ("출구 균등 사용 (SEI)", [f"{d['sei']:.0f}{pill(d['sei'])}" for d in fl], f"{B['sei']:.0f}{pill(B['sei'])}"),
-        ("병목 혼잡 (CBS)", [f"{d['cbs']:.1f}{pill(d['cbs'], 'cbs')}" for d in fl], f"{B['cbs']:.1f}{pill(B['cbs'], 'cbs')}"),
-        ("경로 충실도 (EPFI)", [f"{d['epfi']:.0f}{pill(d['epfi'])}" if d["epfi"] is not None else "—" for d in fl],
-         f"{B['epfi']:.0f}{pill(B['epfi'])}"),
-        ("출구 통과 인원", [f"{sum(e['count'] for e in d['exits'])}명" for d in fl], ""),
+        ("대피 개시 (경보 후)", [cell_start(d) for d in fl]),
+        ("비상구·출구 통과 인원", [f"{sum(e['count'] for e in d['exits'])}명" for d in fl]),
         ("피난층 종료 / 최종 종료",
-         [f"{mmss(d['floor_end'])} / {mmss(d['final_end'])}" if d["role"] == "upper" else f"~ {mmss(D['final_scope'])}" for d in fl],
-         f"최종 {mmss(D['final_scope'])}"),
+         [f"{mmss(d['floor_end'])} / {mmss(d['final_end'])}" if d["role"] == "upper" else f"~ {mmss(D['final_scope'])}" for d in fl]),
     ]
-    trs = "".join(f"<tr><td>{k}</td>" + "".join(f'<td class="n">{v}</td>' for v in vs) + f'<td class="n">{b}</td></tr>'
-                  for k, vs, b in rows)
-    tbl = f'<table><thead><tr><th>지표</th>{cols}</tr></thead><tbody>{trs}</tbody></table>'
-    # 결론
+    trs = "".join(f"<tr><td>{k}</td>" + "".join(f'<td class="n">{v}</td>' for v in vs) + "</tr>" for k, vs in rows)
+    tbl = f'<table><thead><tr><th>구분</th>{cols}</tr></thead><tbody>{trs}</tbody></table>'
     con, rec = [], []
+    starts = [(d["name"], d["idr_delay"]) for d in ups if d["idr_delay"] is not None]
     if len(starts) >= 2:
         a, b = sorted(starts, key=lambda s: s[1])
-        con.append(f"대피 개시는 {a[0]}이 경보 후 {int(a[1])}초로 가장 빨랐고, {b[0]}은 {int(b[1])}초로 "
-                   f"<b>{int(b[1] - a[1])}초 늦었다</b>.")
-        rec.append(f"{b[0]}: 경보 인지·초기 지휘(자위소방대 첫 안내) 시점 점검.")
-    elif first:
-        con.append(f"건물 대피는 {first[0]}이 경보 후 <b>{int(first[1])}초</b>에 시작했다"
-                   + (f"; 1층 출구 쪽 흐름은 {mmss(ground['idr_delay'])}에 형성 — "
-                      f"피난층 인원이 1층에 닿은 뒤다." if ground and ground["idr_delay"] is not None else "."))
+        con.append(f"대피 개시는 {josa(a[0], '이/가')} 경보 후 {int(a[1])}초로 가장 빨랐으며, "
+                   f"{josa(b[0], '은/는')} {int(b[1])}초로 {int(b[1] - a[1])}초 늦게 개시되었습니다.")
+        rec.append(f"(개선) {josa(b[0], '은/는')} 경보 인지 및 자위소방대 초기 안내 시점에 대한 점검이 필요합니다.")
+        if ground and ground["idr_delay"] is not None:
+            con.append(f"1층 출구 방향 피난 흐름은 경보 후 {mmss(ground['idr_delay'])}에 형성되었습니다.")
+    elif starts:
+        a = starts[0]
+        con.append(f"건물 대피는 경보 후 {int(a[1])}초에 {a[0]}에서 개시되었으며"
+                   + (f", 1층 출구 방향 피난 흐름은 {mmss(ground['idr_delay'])}에 형성되었습니다."
+                      if ground and ground["idr_delay"] is not None else "니다."))
     for u in ups:
-        con.append(f"{u['name']}: {kdur(u['floor_end'])}에 층을 비우고, 그 인원이 {kdur(u['final_end'])}에 1층 밖으로 나갔다"
-                   f" (계단·1층 이동 {kdur(u['final_end'] - u['floor_end'])}).")
-    best = max(fl, key=lambda d: (d["sei"] or 0) - 3 * (d["cbs"] or 0))
-    worst = min(fl, key=lambda d: (d["sei"] or 0) - 3 * (d["cbs"] or 0))
-    con.append(f"이상적 피난(출구 균등·무병목)에 가장 가까운 층은 <b>{best['name']}</b>(SEI {best['sei']:.0f}·CBS {best['cbs']:.1f}), "
-               f"가장 먼 층은 <b>{worst['name']}</b>(SEI {worst['sei']:.0f}·CBS {worst['cbs']:.1f}).")
+        con.append(f"{josa(u['name'], '은/는')} 경보 후 {kdur(u['floor_end'])}에 피난을 완료하였으며, "
+                   f"{kdur(u['final_end'])}에 1층 외부 탈출을 완료하였습니다.")
     if ground:
         o = max(ground["exits"], key=lambda e: e["share"] - e["design_share"])
         u = min(ground["exits"], key=lambda e: e["share"] - e["design_share"])
-        con.append(f"1층은 {o['name']}으로 {o['share'] * 100:.0f}%(설계 {o['design_share'] * 100:.0f}%)가 나갔고 "
-                   f"{u['name']}의 분담은 {u['share'] * 100:.0f}%(설계 {u['design_share'] * 100:.0f}%)에 그쳤다"
-                   + (f" — {o['name']} 앞 CBS {o['cbs']:.1f}." if (o["cbs"] or 0) > CBS_CUTS[0] else "."))
-        rec.append(f"1층: {u['name']} 이용 유도 — 더 넓은 {u['name']}에 여유가 남는 동안 {o['name']} 앞에 사람이 쌓였다."
-                   if u["width_m"] and o["width_m"] and u["width_m"] > o["width_m"] else
-                   f"1층: {u['name']} 이용 유도로 {o['name']} 부담 분산.")
+        dv = (o["share"] - o["design_share"]) * 100
+        con.append(f"1층은 피난 인원의 {o['share'] * 100:.0f}%가 {josa(sn(ground, o), '을/를')} 이용하여 "
+                   f"설계 분담({o['design_share'] * 100:.0f}%)을 {'크게 ' if dv >= 15 else ''}상회하였으며, "
+                   f"{josa(sn(ground, u), '은/는')} {u['share'] * 100:.0f}%로 설계 분담({u['design_share'] * 100:.0f}%)에 "
+                   "미치지 못하였습니다." + (f" 이에 따라 {sn(ground, o)} 앞에서 혼잡이 발생하였습니다(CBS {o['cbs']:.1f})."
+                                       if (o["cbs"] or 0) > CBS_CUTS[0] else ""))
+        if u["width_m"] and o["width_m"] and u["width_m"] > o["width_m"]:
+            rec.append(f"(개선) 폭이 더 넓은 {sn(ground, u)}에 여력이 있었음에도 {sn(ground, o)}에 인원이 집중되었으므로, "
+                       f"{sn(ground, u)} 이용 유도가 필요합니다.")
+        else:
+            rec.append(f"(개선) {sn(ground, u)} 이용 유도를 통해 {sn(ground, o)}의 부담을 분산할 필요가 있습니다.")
     for d in ups:
-        rec += floor_reading(d)[1]
+        rec += floor_reading(d, prefix=f"{d['name']}: ")[1]
     read = "".join(f"<li>{t}</li>" for t in con) + "".join(f'<li class="rec">{t}</li>' for t in rec)
-    body = (f'{tbl}<div class="read"><div class="sh" style="margin-bottom:6px">건물 관점 결론</div><ul>{read}</ul></div>')
+    body = f'{tbl}<div class="read"><div class="sh" style="margin-bottom:6px">건물 종합 의견</div><ul>{read}</ul></div>'
     return page("피난훈련 평가 보고서", "건물 종합 평가", D["scope"], body,
-                "건물 통합: SEI = 전 출구 통과 분포 vs 설계 분포(출구 폭 비례) · CBS = 층 합계 · EPFI = 전원 평균 · "
-                "IDR = 가장 먼저 움직인 층 기준")
+                "건물 통합 산정: SEI는 전체 비상구 이용 분포와 설계 분포 비교, CBS는 층별 합계, "
+                "EPFI는 전체 인원 평균, IDR은 개시 구역 비율 기준")
 
 
 def slides(D: dict) -> list[tuple[str, str]]:
     fmt = D["format"]
     vw = FORMAT[fmt][1][0]
-    out = [("summary", slide_summary(D)), ("timeline", slide_timeline(D, vw))]
+    out = [("summary", slide_summary(D)), ("opinion", slide_opinion(D)), ("timeline", slide_timeline(D, vw))]
     fl = D["floors"]
     if fmt == "wide" and len(fl) == 2:
         out.append(("floor", slide_floor(D, fl)))
@@ -564,7 +664,6 @@ def slides(D: dict) -> list[tuple[str, str]]:
     if len(fl) > 1:
         out.append(("building", slide_building(D)))
     return out
-
 
 # ───────────────────────────────────────────────────────── 4) 캡처·인코딩
 def capture(oid: str, pages: list[tuple[str, str]], fmt: str) -> list[Path]:
