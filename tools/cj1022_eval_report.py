@@ -618,7 +618,6 @@ def slide_building(D: dict) -> str:
         a, b = sorted(starts, key=lambda s: s[1])
         con.append(f"대피 개시는 {josa(a[0], '이/가')} 경보 후 {int(a[1])}초로 가장 빨랐으며, "
                    f"{josa(b[0], '은/는')} {int(b[1])}초로 {int(b[1] - a[1])}초 늦게 개시되었습니다.")
-        rec.append(f"(개선) {josa(b[0], '은/는')} 경보 인지 및 자위소방대 초기 안내 시점에 대한 점검이 필요합니다.")
         if ground and ground["idr_delay"] is not None:
             con.append(f"1층 출구 방향 피난 흐름은 경보 후 {mmss(ground['idr_delay'])}에 형성되었습니다.")
     elif starts:
