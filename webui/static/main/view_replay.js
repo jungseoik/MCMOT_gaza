@@ -1632,7 +1632,10 @@ Views.replay = (() => {
       if (!(drill && window.Session && Session.openDrillReport)) return;
       // ID 재구성은 리포트 안의 [ID 재구성] 탭에서 처리한다 — 재생 화면 옆에
       // 객체를 하나씩 늘어놓으면 조잡하고, 필요한 건 분석 결과를 따로 보는 것.
-      Session.openDrillReport({ ...drill, jy_floor: curDrillFloor });
+      // 도면(출구 이름·병목 도형)과 1초 타임라인도 넘긴다 — 리포트의 비상구별 분석·
+      // 피난 타임라인이 세션 당시 도면과 재계산된 통과 시각을 쓰게 한다.
+      Session.openDrillReport({ ...drill, jy_floor: curDrillFloor,
+                                sites: drillSites, timelines: drillTimelines });
     };
   }
 

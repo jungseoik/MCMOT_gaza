@@ -789,6 +789,39 @@ body.rehearsing .rhbanner{ display:block; }
 .repverdict-line.good::before{ content:"✔ "; color:#3FB950; font-weight:700; }
 .repverdict-line.warn::before{ content:"⚠ "; color:#F5A623; font-weight:700; }
 
+/* 등급 기준표 — 경계값은 grade.js 상수에서 만든다 */
+.modalbox.report .replg th, .modalbox.report .replg td{ text-align:center; padding:5px 6px; font-size:11.5px; }
+.modalbox.report .replg td:first-child, .modalbox.report .replg th:first-child{ text-align:left; color:var(--text-3); white-space:nowrap; }
+.replg tr.lg-h td{ padding-top:9px; }
+.replg td{ color:var(--text-2); }
+
+/* 비상구별 분석 — 층마다 머리줄 + 표 + 해석 문장 */
+.exsec{ margin-bottom:18px; }
+.exsec-h{ display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px; margin:4px 0 8px; }
+.exsec-h b{ font-size:13.5px; color:var(--text-1); }
+.exsec-h span{ font-size:12px; color:var(--text-3); }
+.modalbox.report .extbl td b{ color:var(--text-1); }
+.extbl .dv-up{ color:#FF9A6B; } .extbl .dv-dn{ color:#8FB7FF; }
+.repread{ list-style:none; margin:10px 0 0; padding:11px 16px; background:var(--bg-2);
+  border:1px solid var(--stroke-3); border-radius:var(--r-md); }
+.repread li{ position:relative; padding-left:14px; font-size:12.5px; line-height:1.7; color:var(--text-2); }
+.repread li::before{ content:"•"; position:absolute; left:1px; color:#30DCFB; }
+.repread li.rec{ color:#FFD9A0; } .repread li.rec::before{ color:#F5A623; }
+
+/* 피난 타임라인 (SVG) — 글자·선 색은 테마 토큰 */
+.tl-legend{ font-size:11px; color:var(--text-3); margin-bottom:6px; }
+.tl-legend .tl-leg-start{ margin-left:14px; color:#3FB950; }
+.tlsvg{ display:block; width:100%; height:auto; }
+.tlsvg text{ font-family:inherit; font-size:12px; fill:var(--text-2); }
+.tlsvg .tl-fl{ font-size:14px; font-weight:800; fill:var(--text-1); }
+.tlsvg .tl-ex{ fill:var(--text-2); }
+.tlsvg .tl-lab{ fill:var(--text-2); font-variant-numeric:tabular-nums; }
+.tlsvg .tl-tick{ font-size:11px; fill:var(--text-3); font-variant-numeric:tabular-nums; }
+.tlsvg .tl-grid{ stroke:var(--stroke-3); stroke-width:1; }
+.tlsvg .tl-base{ fill:var(--bg-4, rgba(255,255,255,.08)); }
+.tlsvg .tl-start{ fill:#3FB950; stroke:var(--bg-modal, #121212); stroke-width:2; }
+.tlsvg .tl-start-t{ font-size:11.5px; fill:#7EE39A; }
+
 /* ---------------- 글로벌 ID 설정 (① 추론 모델 패널, v1.13) ---------------- */
 .gidbox{ margin-top:10px; padding-top:10px; border-top:1px dashed var(--stroke-3);
   display:flex; flex-direction:column; gap:7px; }
@@ -1212,5 +1245,10 @@ body.rehearsing .rhbanner{ display:block; }
   body.print-report #resultModal .reptabs { display: none !important; }
   body.print-report #resultModal .repcard,
   body.print-report #resultModal .repverdict,
+  body.print-report #resultModal .repread,
+  body.print-report #resultModal .replg,
+  body.print-report #resultModal .tlsvg,
   body.print-report #resultModal tr { break-inside: avoid; }
+  body.print-report #resultModal .repsec-h,
+  body.print-report #resultModal .exsec-h { break-after: avoid; }
 }

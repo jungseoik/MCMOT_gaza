@@ -1177,11 +1177,12 @@ const Session = (() => {
   const repRow = (k, v) => `<div class="resrow"><span>${k}</span><b class="t-num">${v}</b></div>`;
   const fmtDT = (ts) => ts ? new Date(ts * 1000).toLocaleString("ko-KR", { hour12: false }) : "—";
 
+  // 지표별 "무엇을 재는가" — 보고서 문장(공공기관 보고 어투, ~합니다)으로 쓴다.
   const REP_WHAT = {
-    epfi: "재실자들이 권장 피난경로를 얼마나 충실히 따라갔는가. 100 = 전원 경로 위로 이동, 낮을수록 경로 이탈이 많았다는 뜻.",
-    sei:  "출구들이 설계 의도대로 골고루 쓰였는가. 100 = 실제 이용 분포가 설계 분포와 일치, 낮을수록 특정 출구로 쏠림.",
-    cbs:  "병목(문·계단 앞)에서 임계밀도를 넘긴 혼잡이 시간에 걸쳐 얼마나 쌓였는가. 0 = 정체 없음, 클수록 오래·심하게 막힘.",
-    idr:  "경보 후 각 구역이 피난을 시작했는가, 얼마나 빨리 반응했는가(개시 구역 수·반응 지연).",
+    epfi: "재실자가 권장 피난경로를 얼마나 따라 이동하였는지 나타내며, 100에 가까울수록 양호합니다.",
+    sei:  "비상구가 설계 기준대로 고르게 이용되었는지 나타내며, 100에 가까울수록 양호합니다.",
+    cbs:  "병목(비상구·계단 앞) 구역에서 임계밀도를 초과한 혼잡의 시간 누적값으로, 0에 가까울수록 양호합니다.",
+    idr:  "경보 후 각 구역이 피난을 개시하였는지를 개시 구역 비율로 나타내며, 반응 지연(초)을 함께 표기합니다.",
   };
 
   function repCard(key, name, sub, value, grade, what, read) {
@@ -1193,56 +1194,118 @@ const Session = (() => {
     </div>`;
   }
 
+  // ---------------------------------------------------------------- 이름·조사·시간 표기
+  // 리포트가 읽을 층별 도면(출구 이름·병목 도형). 리플레이는 응답의 site_by_floor
+  // (세션 당시 도면·편집본)를 넘겨 주고, 그 외(라이브 종료·단일 세션)는 현재 사이트
+  // 설정(App.site.floors)을 쓴다. 단일 세션은 floor=null → 현재 층 별칭(App.site).
+  let REP_SITES = {};
+  function repSiteOf(floor) {
+    if (floor && REP_SITES[floor]) return REP_SITES[floor];
+    if (typeof App === "undefined" || !App.site) return null;
+    if (!floor) return App.site;
+    return (App.site.floors || []).find((f) => f.id === floor) || null;
+  }
+  // 출구·병목 이름 — 도면에 name 이 있으면 그것(예: "출구2"), 없으면 id
+  function exName(floor, id) {
+    const st = repSiteOf(floor);
+    const e = st && (st.exits || []).find((x) => x.id === id);
+    return (e && e.name) || id;
+  }
+  function bnName(floor, id) {
+    const st = repSiteOf(floor);
+    const b = st && (st.bottlenecks || []).find((x) => x.id === id);
+    return (b && b.name) || id;
+  }
+  const flPre = (floor, fname) => (floor && fname ? fname(floor) + " " : "");
+
+  /** 조사 고르기 — pair 는 '을/를' 처럼 (받침 있음/없음). 괄호가 있으면 괄호 앞 글자로,
+   *  숫자·영문은 읽는 소리로 판단한다(출구2 → '이' → 를, e1 → '일' → 을). */
+  function josa(word, pair) {
+    const base = String(word).split("(")[0].trim();
+    const ch = base.slice(-1);
+    let has = false, rieul = false;
+    if (ch >= "가" && ch <= "힣") {
+      const j = (ch.charCodeAt(0) - 0xAC00) % 28;
+      has = j !== 0; rieul = j === 8;
+    } else if (/[0-9]/.test(ch)) {
+      has = "013678".includes(ch); rieul = "178".includes(ch);
+    } else if (/[lmnLMN]/.test(ch)) {
+      has = true; rieul = /[lL]/.test(ch);
+    }
+    const [a, b] = pair.split("/");
+    if (pair === "으로/로" && rieul) return word + "로";
+    return word + (has ? a : b);
+  }
+  // 경보 후 경과 — 분:초 / "1분 20초"
+  const mmss = (s) => {
+    const t = Math.max(0, Math.round(s));
+    return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+  };
+  const kdur = (s) => {
+    const t = Math.max(0, Math.round(s)), m = Math.floor(t / 60), ss = t % 60;
+    return m ? (ss ? `${m}분 ${ss}초` : `${m}분`) : `${ss}초`;
+  };
+  const RISK_KO = { low: "낮음", mid: "보통", high: "높음" };
+
   // 해석 문장 — 아래 함수들의 인자는 {m: 지표, floor: 층id|null} 목록 (드릴은 층 표기 포함)
   function readEpfi(avg, persons) {
-    if (avg == null) return "표본 부족 — 경로에 배정된 이동 객체가 없어 산출하지 못했습니다.";
+    if (avg == null) return "경로에 배정된 이동 객체가 없어 표본이 부족하므로 산출하지 않았습니다.";
     const ps = persons.filter((p) => p.epfi != null);
     const low = ps.filter((p) => p.epfi < 60).length;
     const devs = ps.map((p) => p.mean_deviation_m).filter((v) => v != null);
     const md = devs.length ? devs.reduce((a, v) => a + v, 0) / devs.length : null;
-    let t = `추적 ${ps.length}명 평균 <b>${fmt1(avg)}점</b>`
-          + (md != null ? ` · 평균 경로이탈 ${fmt1(md)}m` : "") + ".";
-    t += low ? ` 이 중 ${low}명은 60점 미만 — 권장 경로를 크게 벗어나 이동했습니다.`
-             : " 대부분 권장 경로를 따라 이동했습니다.";
+    // 표본은 추적 구간(끊긴 트랙 조각 포함) 단위라 '명'이 아니라 비율로 적는다
+    let t = `경로 충실도 평균은 <b>${fmt1(avg)}점</b>`
+          + (md != null ? `이며, 평균 경로 이탈 거리는 ${fmt1(md)}m입니다.` : "입니다.");
+    t += low ? ` 추적 구간의 약 ${Math.round(low / ps.length * 100)}%는 60점 미만으로, 권장 피난경로를 크게 벗어난 이동이 관측되었습니다.`
+             : " 대부분의 인원이 권장 피난경로를 따라 이동하였습니다.";
     return t;
   }
   function readSei(sei, exits, fname) {
-    if (sei == null) return "표본 부족 — 출구를 통과한 인원이 없어 산출하지 못했습니다.";
+    if (sei == null) return "비상구를 통과한 인원이 없어 표본이 부족하므로 산출하지 않았습니다.";
     const es = exits.filter((e) => e.m.actual_share != null && e.m.design_share != null);
-    if (!es.length) return `<b>${fmt1(sei)}점</b>.`;
+    if (!es.length) return `<b>${fmt1(sei)}점</b>으로 산출되었습니다.`;
     let w = es[0];
     es.forEach((e) => {
       if (Math.abs(e.m.actual_share - e.m.design_share)
           > Math.abs(w.m.actual_share - w.m.design_share)) w = e;
     });
     const d = (w.m.actual_share - w.m.design_share) * 100;
-    const nm = (w.floor ? fname(w.floor) + " " : "") + w.m.exit_id;
-    return Math.abs(d) < 5
-      ? "실제 출구 이용이 설계 분포와 거의 일치했습니다."
-      : `<b>${nm}</b> 출구가 설계보다 ${Math.abs(d).toFixed(0)}%p ${d > 0 ? "많이" : "적게"} 사용됨 — 안내·유도 개선 검토 지점.`;
+    const nm = flPre(w.floor, fname) + exName(w.floor, w.m.exit_id);
+    if (Math.abs(d) < 5) return "실제 비상구 이용 분포가 설계 분담과 거의 일치하였습니다.";
+    const lead = `<b>${nm}</b>의 이용 분담이 설계보다 ${Math.abs(d).toFixed(0)}%p ${d > 0 ? "높았" : "낮았"}`;
+    // 10%p 기준은 비상구별 분석(floorReading)의 '고르게 이용' 판정과 같다
+    return Math.abs(d) < 10
+      ? lead + "으나, 전반적으로 설계 분담과 유사하였습니다."
+      : lead + "으며, 안내 및 유도 방식에 대한 검토가 필요합니다.";
   }
   function readCbs(total, bns, fname) {
-    if (!bns.length) return "병목이 설정되지 않아 관측 대상이 없습니다.";
-    if ((total || 0) <= 0.01) return "훈련 내내 모든 병목이 임계밀도 아래 — 정체 없이 통과했습니다.";
+    if (!bns.length) return "병목 구역이 설정되지 않아 관측 대상이 없었습니다.";
+    if ((total || 0) <= 0.01) return "훈련 전 구간에서 모든 병목 구역이 임계밀도 이하로 유지되어 정체 없이 통과하였습니다.";
     let w = bns[0];
     bns.forEach((b) => { if ((b.m.cbs || 0) > (w.m.cbs || 0)) w = b; });
-    const nm = (w.floor ? fname(w.floor) + " " : "") + w.m.bottleneck_id;
-    return `가장 막힌 곳은 <b>${nm}</b> — 임계 초과 ${Math.round(w.m.over_threshold_sec)}초, `
-         + `최대 ${fmt1(w.m.peak_density)}명/㎡ (위험도 ${w.m.risk_level}).`;
+    const nm = flPre(w.floor, fname) + bnName(w.floor, w.m.bottleneck_id);
+    return `혼잡이 가장 컸던 지점은 <b>${nm}</b>이며, 임계밀도 초과 ${Math.round(w.m.over_threshold_sec)}초, `
+         + `최대 밀도 ${fmt1(w.m.peak_density)}명/㎡(위험도 ${RISK_KO[w.m.risk_level] || w.m.risk_level})로 측정되었습니다.`;
   }
   function readIdr(zones, fname) {
     if (!zones.length) return "구역이 설정되지 않았습니다.";
-    const zn = (z) => (z.floor ? fname(z.floor) + " " : "") + z.m.zone_id;
+    const zn = (z) => {
+      const st = repSiteOf(z.floor);
+      const zz = st && (st.zones || []).find((x) => x.id === z.m.zone_id);
+      return flPre(z.floor, fname) + ((zz && zz.name) || z.m.zone_id);
+    };
     const st = zones.filter((z) => z.m.status === "started");
     const miss = zones.filter((z) => z.m.status !== "started");
-    let t = `<b>${st.length}/${zones.length}</b> 구역 피난 개시.`;
+    let t = `${zones.length}개 구역 중 <b>${st.length}개</b> 구역에서 피난 개시가 확인되었습니다.`;
     const dl = st.filter((z) => z.m.response_delay_sec != null);
     if (dl.length) {
       let w = dl[0];
       dl.forEach((z) => { if (z.m.response_delay_sec > w.m.response_delay_sec) w = z; });
-      t += ` 가장 늦은 <b>${zn(w)}</b> — 경보 후 ${Math.round(w.m.response_delay_sec)}초에 개시.`;
+      const wn = josa(zn(w), "으로/로"), wb = zn(w);
+      t += ` 가장 늦게 개시한 구역은 <b>${wb}</b>${wn.slice(wb.length)} 경보 후 ${Math.round(w.m.response_delay_sec)}초에 개시하였습니다.`;
     }
-    if (miss.length) t += ` 미개시: ${miss.map(zn).join(", ")} (판정조건 미충족 또는 인원 없음).`;
+    if (miss.length) t += ` 미개시 구역(${miss.map(zn).join(", ")})은 판정 조건 미충족 또는 인원 부재로 판단됩니다.`;
     return t;
   }
 
@@ -1259,7 +1322,7 @@ const Session = (() => {
   }
 
   /** 종합평 — 일반인이 "훈련이 어땠는가"를 한 문단으로 읽게 한다.
-   *  등급을 잘된 점/개선 지점 두 줄로 풀고 총평 한 문장을 머리에 단다. */
+   *  등급을 잘된 점/개선 지점 문장으로 풀고 총평 한 문장을 머리에 단다. */
   function repVerdict(o) {
     const pos = [], neg = [];
     const add = (grade, posTxt, midTxt, badTxt) => {
@@ -1268,30 +1331,30 @@ const Session = (() => {
       else neg.push(grade[1] === "g-mid" ? midTxt : badTxt);
     };
     add(gradeOf(o.epfi),
-        "재실자 대부분이 권장 피난경로를 따라 이동",
-        "일부 인원이 권장 경로를 벗어나 이동",
-        "다수 인원이 권장 경로를 벗어나 이동 — 경로 안내 점검 필요");
+        "재실자 대부분이 권장 피난경로를 따라 이동하였습니다.",
+        "일부 인원이 권장 피난경로를 벗어나 이동하였습니다.",
+        "다수 인원이 권장 피난경로를 벗어나 이동하여 경로 안내에 대한 점검이 필요합니다.");
     add(gradeOf(o.sei),
-        "출구가 설계 의도대로 고르게 사용됨",
-        "일부 출구로 이용이 쏠림 — 유도 안내 점검",
-        "특정 출구로 크게 쏠림 — 유도 안내 개선 필요");
+        "비상구가 설계 기준대로 고르게 이용되었습니다.",
+        "일부 비상구로 이용이 편중되어 유도 안내에 대한 점검이 필요합니다.",
+        "특정 비상구로 이용이 크게 편중되어 유도 안내 개선이 필요합니다.");
     add(gradeOf(o.cbs || 0, "cbs"),
-        "병목 정체 없이 원활하게 통과",
-        "병목에서 가벼운 정체 발생",
-        "병목에서 심한 정체 발생 — 위험 지점 점검 필요");
+        "병목 구역을 정체 없이 원활하게 통과하였습니다.",
+        "병목 구역에서 경미한 정체가 발생하였습니다.",
+        "병목 구역에서 심한 정체가 발생하여 해당 지점에 대한 점검이 필요합니다.");
     if (o.zTot) {
-      if (o.zStarted === o.zTot) pos.push("모든 구역에서 피난 개시 확인");
-      else neg.push(`${o.zTot - o.zStarted}개 구역은 피난 개시가 확인되지 않음`);
+      if (o.zStarted === o.zTot) pos.push("모든 구역에서 피난 개시가 확인되었습니다.");
+      else neg.push(`${o.zTot - o.zStarted}개 구역에서는 피난 개시가 확인되지 않았습니다.`);
     }
     const head = !neg.length
-      ? ["이번 훈련은 전반적으로 <b>우수</b>했습니다.", "g-good"]
+      ? ["이번 훈련은 전반적으로 <b>우수</b>하게 수행되었습니다.", "g-good"]
       : neg.length <= pos.length
-        ? ["이번 훈련은 전반적으로 <b>양호</b>하나, 개선 지점이 있습니다.", "g-mid"]
-        : ["이번 훈련은 <b>개선이 필요</b>합니다.", "g-bad"];
+        ? ["이번 훈련은 전반적으로 <b>양호</b>하였으나, 일부 개선이 필요한 사항이 확인되었습니다.", "g-mid"]
+        : ["이번 훈련은 <b>개선이 필요</b>한 것으로 평가되었습니다.", "g-bad"];
     return `<div class="repverdict ${head[1]}">
       <div class="repverdict-head">${head[0]}</div>
-      ${pos.length ? `<div class="repverdict-line good">${pos.join(" · ")}</div>` : ""}
-      ${neg.length ? `<div class="repverdict-line warn">${neg.join(" · ")}</div>` : ""}
+      ${pos.map((t) => `<div class="repverdict-line good">${t}</div>`).join("")}
+      ${neg.map((t) => `<div class="repverdict-line warn">${t}</div>`).join("")}
     </div>`;
   }
 
@@ -1315,19 +1378,299 @@ const Session = (() => {
       + `</div>`;
   }
 
+  /** 4대 지표 등급 기준표 — 경계값은 grade.js 상수에서 만든다(하드코딩 금지).
+   *  기준이 바뀌면 이 표도 함께 바뀐다. */
+  const GRADE_MEAN = {
+    score: ["기준 충분히 충족", "대체로 충족", "일부 개선 필요", "개선 필요", "전반적 개선 필요"],
+    cbs:   ["혼잡 거의 없음", "일시적 경미한 혼잡", "단시간 혼잡", "지속적 혼잡", "장시간 심한 정체"],
+  };
+  function gradeLegend() {
+    if (!window.Grade) return "";
+    const S = Grade.SCORE_CUTS, C = Grade.CBS_CUTS;
+    // 점수형: 하한 경계(위에서부터) — "90 이상", "75~90", …, "40 미만"
+    const sR = [`${S[0]} 이상`].concat(S.slice(1).map((c, i) => `${c}~${S[i]}`), [`${S[S.length - 1]} 미만`]);
+    // CBS: 상한 경계 — "0.5 이하", "0.5~3", …, "30 초과"
+    const cR = [`${C[0]} 이하`].concat(C.slice(1).map((c, i) => `${C[i]}~${c}`), [`${C[C.length - 1]} 초과`]);
+    const n = Grade.SCORE_LABELS.length;
+    const pills = (labs) => labs.map((l, i) => `<td><span class="gpill g${i + 1}">${l}</span></td>`).join("");
+    const cells = (arr) => arr.map((t) => `<td>${t}</td>`).join("");
+    return `<div class="repsec-h">등급 기준</div>
+      <table class="drill-tbl replg">
+        <thead><tr><th>구분</th>${Array.from({ length: n }, (_, i) => `<th>${i + 1}단계</th>`).join("")}</tr></thead>
+        <tbody>
+          <tr class="lg-h"><td>SEI · EPFI · IDR</td>${pills(Grade.SCORE_LABELS)}</tr>
+          <tr><td>점수 구간</td>${cells(sR)}</tr>
+          <tr><td>의미</td>${cells(GRADE_MEAN.score)}</tr>
+          <tr class="lg-h"><td>CBS</td>${pills(Grade.CBS_LABELS)}</tr>
+          <tr><td>누적 구간</td>${cells(cR)}</tr>
+          <tr><td>의미</td>${cells(GRADE_MEAN.cbs)}</tr>
+        </tbody></table>
+      <div class="repnote">※ 등급 구간은 참고 기준이며, 고객 확정 시 조정될 수 있습니다.
+        SEI·EPFI는 0~100으로 높을수록, CBS는 0에 가까울수록 양호합니다.
+        IDR은 개시 구역 비율(개시 구역 수 ÷ 전체 구역 수 × 100)로 등급을 매기며, 반응 지연(초)을 함께 표기합니다.</div>`;
+  }
+
   /** 출구별 실제(막대) vs 설계(주황 눈금) 분포 — SEI의 근거 시각화. */
   function exitBars(exits, fname) {
-    const fn = fname || ((f) => f);
     const es = exits.filter((e) => e.m.actual_share != null);
     if (!es.length) return "";
-    return `<div class="repsec-h">출구별 이용 분포 — 막대=실제, <span style="color:#F5A623">▏주황 눈금</span>=설계 기대</div>`
+    return `<div class="repsec-h">출구별 이용 분포 (막대: 실제, <span style="color:#F5A623">▏주황 눈금</span>: 설계 기대)</div>`
       + es.map((e) => {
           const a = e.m.actual_share * 100, d = (e.m.design_share || 0) * 100;
-          const nm = (e.floor ? fn(e.floor) + " " : "") + e.m.exit_id;
+          const nm = flPre(e.floor, fname) + exName(e.floor, e.m.exit_id);
           return `<div class="ebar"><span>${nm}</span>
             <div class="ebar-t"><i class="a" style="width:${a.toFixed(1)}%"></i><i class="d" style="left:${d.toFixed(1)}%"></i></div>
             <span class="ebar-v">${e.m.actual_count}명 · ${a.toFixed(0)}% (설계 ${d.toFixed(0)}%)</span></div>`;
         }).join("");
+  }
+
+  // ---------------------------------------------------------------- 비상구별 분석
+  // 이상적인 피난은 출구가 설계대로 고르게 쓰이고(SEI→100) 출구 앞 혼잡이 없는(CBS→0) 것이다.
+  // 그래서 CBS 를 층 합계로만 보지 않고 **출구별로**(출구 앞 병목을 그 출구에 묶어) 보고,
+  // 쏠린 출구와 혼잡한 출구가 같은지 다른지로 원인을 읽는다.
+  // 문구·판정은 발표용 오프라인 보고서(tools/cj1022_eval_report.py floor_reading)와 같다.
+
+  /** 한 층(또는 단일 세션)의 출구별 분석 행.
+   *  r = EvaluationResult, tl = TimelinePoint[](없으면 시간대 열 생략), t0 = 경보 시각.
+   *  출구 앞 CBS = 병목 도형 중심(shape.center 또는 polygon 평균)이 가장 가까운
+   *  출구(출구 선 중점 기준)에 그 병목을 묶어 합산. 도형이 없으면 CBS 열 생략. */
+  function exitAnalysis(r, floor, tl, t0) {
+    const ems = (r && r.exit_metrics) || [];
+    if (!ems.length) return null;
+    // 출구별 통과 시각(경보 후 초) — 누적 카운트 타임라인의 증가분
+    const passes = {}, prev = {};
+    let hasTl = false;
+    if (t0 != null) {
+      (tl || []).forEach((p) => {
+        Object.entries(p.exit_counts || {}).forEach(([k, v]) => {
+          const d = v - (prev[k] || 0);
+          if (d > 0) {
+            hasTl = true;
+            const arr = passes[k] || (passes[k] = []);
+            for (let i = 0; i < d; i++) arr.push(p.ts - t0);
+          }
+          prev[k] = v;
+        });
+      });
+    }
+    // 병목 → 가장 가까운 출구
+    const st = repSiteOf(floor);
+    const mid = {};
+    ((st && st.exits) || []).forEach((e) => {
+      if (e.line && e.line.length >= 2)
+        mid[e.id] = [(e.line[0][0] + e.line[1][0]) / 2, (e.line[0][1] + e.line[1][1]) / 2];
+    });
+    const mids = Object.keys(mid);
+    const bms = {};
+    (r.bottleneck_metrics || []).forEach((b) => { bms[b.bottleneck_id] = b; });
+    const bnExit = {};
+    if (mids.length) {
+      ((st && st.bottlenecks) || []).forEach((b) => {
+        if (!bms[b.id]) return;
+        const pg = b.polygon || [];
+        const c = (b.shape && b.shape.center)
+          || (pg.length ? [pg.reduce((a, q) => a + q[0], 0) / pg.length,
+                           pg.reduce((a, q) => a + q[1], 0) / pg.length] : null);
+        if (!c) return;
+        let best = null, bd = Infinity;
+        mids.forEach((k) => {
+          const dd = Math.hypot(c[0] - mid[k][0], c[1] - mid[k][1]);
+          if (dd < bd) { bd = dd; best = k; }
+        });
+        bnExit[b.id] = best;
+      });
+    }
+    const hasCbs = Object.keys(bnExit).length > 0;
+    const rows = ems.map((em) => {
+      const ts = (passes[em.exit_id] || []).slice().sort((a, b) => a - b);
+      const n = ts.length;
+      let peak = 0;
+      for (let i = 0, j = 0; i < n; i++) {          // 최대 분당 통과 — 60초 창
+        while (j < n && ts[j] < ts[i] + 60) j++;
+        peak = Math.max(peak, j - i);
+      }
+      const bids = Object.keys(bnExit).filter((b) => bnExit[b] === em.exit_id);
+      return {
+        id: em.exit_id, name: exName(floor, em.exit_id),
+        count: em.actual_count || 0, share: em.actual_share, design: em.design_share,
+        first: n ? ts[0] : null, last: n ? ts[n - 1] : null,
+        p10: n ? ts[Math.floor(n * 0.1)] : null, p90: n ? ts[Math.min(n - 1, Math.floor(n * 0.9))] : null,
+        peakMin: peak,
+        cbs: hasCbs ? bids.reduce((a, b) => a + (bms[b].cbs || 0), 0) : null,
+        overSec: bids.length ? bids.reduce((a, b) => a + (bms[b].over_threshold_sec || 0), 0) : null,
+        peakDens: bids.length ? Math.max(...bids.map((b) => bms[b].peak_density || 0)) : null,
+      };
+    });
+    return { floor, rows, hasTl, hasCbs, sei: r.sei, cbs: r.cbs_total };
+  }
+
+  /** 층 하나의 비상구별 해석 → [관찰 문장[], 개선 제안[]]. 공공기관 보고 어투.
+   *  근거 없는 합성 점수로 순위를 매기지 않는다 — 측정값(분담·CBS·통과 시간대)만 쓴다. */
+  function floorReading(fa, prefix) {
+    prefix = prefix || "";
+    const obs = [], rec = [];
+    const tot = fa.rows.reduce((a, e) => a + e.count, 0);
+    const es = fa.rows.filter((e) => e.share != null && e.design != null);
+    if (!tot || !es.length) return [["비상구 통과 인원이 확인되지 않았습니다."], []];
+    const dv = (e) => e.share - e.design;
+    const over = es.reduce((w, e) => (dv(e) > dv(w) ? e : w));
+    const under = es.reduce((w, e) => (dv(e) < dv(w) ? e : w));
+    const dev = dv(over) * 100;
+    const seiTag = fa.sei != null ? `(SEI ${fa.sei.toFixed(0)}, ${Grade.of(fa.sei, "sei").label})` : "";
+    const C = Grade.CBS_CUTS;
+    if (es.length < 2) {
+      obs.push(`${josa(over.name, "을/를")} 통해 ${over.count}명이 피난하였습니다.`);
+    } else if (dev < 10) {
+      obs.push(`비상구별 이용 분담이 설계 기준과 유사하여 비상구가 고르게 이용되었습니다${seiTag}.`);
+    } else {
+      obs.push(`피난 인원의 ${(over.share * 100).toFixed(0)}%가 ${josa(over.name, "을/를")} 이용하여 `
+        + `설계 분담(${(over.design * 100).toFixed(0)}%)보다 ${dev.toFixed(0)}%p 높았으며, `
+        + `${josa(under.name, "은/는")} ${(under.share * 100).toFixed(0)}%를 처리하였습니다${seiTag}.`);
+    }
+    const skew = es.length >= 2 && dev >= 10;
+    if (fa.hasCbs) {
+      const worst = fa.rows.reduce((w, e) => ((e.cbs || 0) > (w.cbs || 0) ? e : w));
+      if ((worst.cbs || 0) > C[0]) {
+        const tail = `(CBS ${worst.cbs.toFixed(1)}, ${Grade.of(worst.cbs, "cbs").label}, `
+                   + `임계밀도 초과 ${Math.round(worst.overSec || 0)}초)`;
+        if (worst === over && skew) {
+          obs.push(`혼잡 또한 이용이 편중된 ${worst.name} 앞에서 발생하였습니다${tail}. `
+            + "특정 비상구로의 편중이 혼잡으로 이어진 것으로 판단됩니다.");
+          rec.push(`(개선) ${prefix}안내방송 및 유도원 배치를 통해 ${under.name} 이용을 유도하면 `
+            + `${worst.name} 앞 혼잡을 줄일 수 있을 것으로 판단됩니다.`);
+        } else {
+          const few = worst.share != null && worst.design != null && worst.share < worst.design;
+          obs.push(`혼잡은 ${few ? "이용 인원이 상대적으로 적은 " : ""}${worst.name} 앞에서 발생하였습니다${tail}.`);
+          if (worst.p10 != null)
+            obs.push(`이는 ${worst.name} 이용 인원의 80%가 ${kdur(worst.p90 - worst.p10)} 동안 `
+              + `집중적으로 통과(최대 분당 ${worst.peakMin}명)하였기 때문으로 판단됩니다.`);
+          rec.push(`(개선) ${prefix}시차 피난 또는 유도원 배치를 통해 ${worst.name} 진입 시점을 분산할 필요가 있습니다.`);
+        }
+        const clean = fa.rows.filter((e) => (e.cbs || 0) <= C[0] && e.count);
+        if (clean.length && worst.cbs > C[1]) {
+          const c = clean[0];
+          obs.push(`${josa(c.name, "은/는")} ${c.count}명이 통과하는 동안 혼잡이 발생하지 않아 수용 여력이 있었습니다.`);
+        }
+      } else {
+        obs.push("비상구 앞에서 임계밀도를 초과하는 혼잡은 거의 발생하지 않았습니다.");
+        if (skew)
+          rec.push(`(개선) ${prefix}안내방송 및 유도원 배치를 통해 ${under.name} 이용을 유도할 필요가 있습니다.`);
+      }
+    } else if (skew) {
+      rec.push(`(개선) ${prefix}안내방송 및 유도원 배치를 통해 ${under.name} 이용을 유도할 필요가 있습니다.`);
+    }
+    obs.push(`평가 구간 동안 총 ${tot}명이 비상구를 통해 피난하였습니다.`);
+    return [obs, rec];
+  }
+
+  /** 비상구별 분석 블록(층 하나) — 머리줄 + 표 + 해석. title 은 층 이름(단일 세션은 null). */
+  function exitSection(fa, title) {
+    if (!fa) return "";
+    const tot = fa.rows.reduce((a, e) => a + e.count, 0);
+    const pct = (v) => (v != null ? (v * 100).toFixed(0) + "%" : "—");
+    const head = `<div class="exsec-h"><b>${title ? title + " · " : ""}비상구 ${fa.rows.length}개소 · ${tot}명</b>`
+      + `<span>SEI ${fa.sei != null ? fmt1(fa.sei) : "—"} ${pill(gradeOf(fa.sei))}`
+      + ` · CBS ${fmt1(fa.cbs || 0)} ${pill(gradeOf(fa.cbs || 0, "cbs"))}</span></div>`;
+    const th = `<th>비상구</th><th>인원</th><th>실제 / 설계 분담</th><th>분담 편차</th>`
+      + (fa.hasTl ? `<th>80% 통과 시간대</th><th>최대 명/분</th>` : "")
+      + (fa.hasCbs ? `<th>비상구 앞 CBS</th><th>임계 초과</th><th>최대 밀도 명/㎡</th>` : "");
+    const trs = fa.rows.map((e) => {
+      const dv = (e.share != null && e.design != null) ? (e.share - e.design) * 100 : null;
+      const dvc = dv == null ? "" : (dv >= 10 ? "dv-up" : (dv <= -10 ? "dv-dn" : ""));
+      return `<tr><td>${e.name}</td><td class="t-num"><b>${e.count}명</b></td>`
+        + `<td class="t-num">${pct(e.share)} / ${pct(e.design)}</td>`
+        + `<td class="t-num ${dvc}">${dv == null ? "—" : (dv >= 0 ? "+" : "") + dv.toFixed(0) + "%p"}</td>`
+        + (fa.hasTl ? `<td class="t-num">${e.p10 != null ? mmss(e.p10) + "~" + mmss(e.p90) : "—"}</td>`
+                    + `<td class="t-num">${e.first != null ? e.peakMin : "—"}</td>` : "")
+        + (fa.hasCbs ? `<td class="t-num"><b>${fmt1(e.cbs || 0)}</b> ${pill(gradeOf(e.cbs || 0, "cbs"))}</td>`
+                     + `<td class="t-num">${e.overSec != null ? Math.round(e.overSec) + "초" : "—"}</td>`
+                     + `<td class="t-num">${e.peakDens != null ? e.peakDens.toFixed(2) : "—"}</td>` : "")
+        + `</tr>`;
+    }).join("");
+    const [obs, rec] = floorReading(fa);
+    return `<div class="exsec">${head}
+      <table class="drill-tbl extbl"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>
+      <ul class="repread">${obs.map((t) => `<li>${t}</li>`).join("")}${rec.map((t) => `<li class="rec">${t}</li>`).join("")}</ul>
+    </div>`;
+  }
+  /** 비상구별 분석 아래 용어 설명 — 실제로 나온 열만 설명한다. fas = exitAnalysis 결과[] */
+  function exitNote(fas) {
+    const cbs = fas.some((f) => f && f.hasCbs), tl = fas.some((f) => f && f.hasTl);
+    return `<div class="repnote">`
+      + (cbs ? "비상구 앞 CBS: 비상구 앞 병목 구역(도형 중심이 가장 가까운 비상구에 귀속)에서 "
+             + "임계밀도를 초과한 혼잡의 시간 누적값으로, 0에 가까울수록 양호합니다. " : "")
+      + "분담 편차: 실제 분담 − 설계 분담."
+      + (tl ? " 80% 통과 시간대: 해당 비상구 이용 인원의 10%~90%가 통과한 시간(경보 후 분:초)." : "")
+      + `</div>`;
+  }
+
+  // ---------------------------------------------------------------- 피난 타임라인
+  const TL_COLS = ["#30DCFB", "#FF9F43", "#A78BFA", "#3FB950", "#FF6F9C", "#F5D90A"];
+  /** 층별 대피 개시 → 출구별 통과 시간대(가는 선 = 최초~최종, 굵은 막대 = 80% 통과 구간).
+   *  items = [{label, start(경보 후 초|null), fa}]. 통과 기록이 하나도 없으면 "" (섹션 생략).
+   *  SVG(viewBox 고정 폭)라 창 크기·인쇄에 맞춰 같이 늘고 준다. 색은 main.css .tlsvg 토큰. */
+  function repTimeline(items) {
+    const its = (items || []).filter((it) => it.fa && it.fa.hasTl);
+    if (!its.length) return "";
+    let T = 0;
+    its.forEach((it) => {
+      it.fa.rows.forEach((e) => { if (e.last != null) T = Math.max(T, e.last); });
+      if (it.start != null) T = Math.max(T, it.start);
+    });
+    const step = [30, 60, 120, 300, 600].find((s) => (T + 20) / s <= 12) || 900;
+    const TA = Math.max(step, Math.ceil((T + 20) / step) * step);
+    // 오른쪽에 "인원 · 최초~최종" 글자 칸을 따로 둔다 — 막대 옆에 붙이면 왼쪽 끝 막대가
+    // 출구 이름과 겹친다.
+    const W = 1000, LW = 110, RW = 170;
+    const X = (s) => LW + (W - LW - RW) * s / TA;
+    let y = 22;
+    const g = [];
+    its.forEach((it) => {
+      const ends = it.fa.rows.map((e) => e.last).filter((v) => v != null);
+      const end = ends.length ? Math.max(...ends) : null;
+      g.push(`<text class="tl-fl" x="0" y="${y + 12}">${it.label}</text>`);
+      if (end != null)
+        g.push(`<rect class="tl-base" x="${X(0)}" y="${y + 6}" width="${X(end) - X(0)}" height="5" rx="2.5"/>`);
+      if (it.start != null) {
+        g.push(`<circle class="tl-start" cx="${X(it.start)}" cy="${y + 8.5}" r="6"/>`);
+        const sx = X(it.start), right = sx > W - RW - 110;
+        g.push(`<text class="tl-start-t" x="${right ? sx - 10 : sx + 10}" y="${y + 4}"`
+          + `${right ? ' text-anchor="end"' : ""}>대피 개시 ${mmss(it.start)}</text>`);
+      }
+      y += 26;
+      it.fa.rows.forEach((e, k) => {
+        const col = TL_COLS[k % TL_COLS.length];
+        g.push(`<text class="tl-ex" x="14" y="${y + 11}">${e.name}</text>`);
+        if (e.first == null) {
+          g.push(`<text class="tl-lab" x="${W}" y="${y + 11}" text-anchor="end">통과 없음</text>`);
+        } else {
+          g.push(`<rect x="${X(e.first)}" y="${y + 6}" width="${Math.max(2, X(e.last) - X(e.first))}" height="2" fill="${col}" opacity=".55"/>`);
+          g.push(`<rect x="${X(e.p10)}" y="${y + 1}" width="${Math.max(4, X(e.p90) - X(e.p10))}" height="12" rx="3" fill="${col}"/>`);
+          const txt = `${e.count}명 · ${mmss(e.first)}~${mmss(e.last)}`;
+          g.push(`<text class="tl-lab" x="${W}" y="${y + 11}" text-anchor="end">${txt}</text>`);
+        }
+        y += 22;
+      });
+      y += 14;
+    });
+    const H = y + 18;
+    const ticks = [];
+    for (let t = 0; t <= TA; t += step) {
+      ticks.push(`<line class="tl-grid" x1="${X(t)}" y1="0" x2="${X(t)}" y2="${H - 20}"/>`
+        + `<text class="tl-tick" x="${X(t)}" y="${H - 5}" text-anchor="middle">${mmss(t)}</text>`);
+    }
+    return `<div class="repsec-h">피난 타임라인 (경보 후 경과 시간, 분:초)</div>
+      <div class="tl-legend">굵은 막대: 이용 인원의 80%가 통과한 시간대 · 가는 선: 최초~최종 통과 시간
+        <span class="tl-leg-start">● 대피 개시</span></div>
+      <svg class="tlsvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMin meet">${ticks.join("")}${g.join("")}</svg>`;
+  }
+
+  /** 층 대피 개시(경보 후 초) — 개시한 구역 중 가장 빠른 반응 지연. 없으면 fallback. */
+  function floorStartSec(r, fallback) {
+    const ds = ((r && r.zone_metrics) || [])
+      .filter((z) => z.status === "started" && z.response_delay_sec != null)
+      .map((z) => z.response_delay_sec);
+    return ds.length ? Math.min(...ds) : (fallback != null ? fallback : null);
   }
 
   /** 개인 이동 기록(여정) 표 — 🌐 글로벌 ID 모드 전용. items = [{j: PersonJourney, floor}] */
@@ -1342,7 +1685,7 @@ const Session = (() => {
       return `<tr>
         <td><b>${j.gid}</b>${floor ? ` <i class="mtag">${fn(floor)}</i>` : ""}</td>
         <td>${hhmmss(j.start_ts)}${j.start_zone ? ` (${j.start_zone})` : ""}</td>
-        <td>${j.exit_id ? `${j.exit_id} · ${hhmmss(j.exit_ts)}` : "—"}</td>
+        <td>${j.exit_id ? `${exName(floor, j.exit_id)} · ${hhmmss(j.exit_ts)}` : "—"}</td>
         <td class="t-num">${j.total_dist_m != null ? fmt1(j.total_dist_m) + "m" : "—"}</td>
         <td class="t-num">${fmt1(j.duration_sec)}s</td>
         <td class="t-num">${j.avg_speed_mps != null ? fmt1(j.avg_speed_mps) : "—"}</td>
@@ -1350,20 +1693,17 @@ const Session = (() => {
         <td class="jt-cams">${cams}</td>
       </tr>`;
     }).join("");
-    return `<div class="repsec-h">개인 이동 기록 — 🌐 글로벌 ID 기준 ${rows.length}명
+    return `<div class="repsec-h">개인 이동 기록 (🌐 글로벌 ID 기준 ${rows.length}명)
         <span class="mtag" title="같은 사람이 카메라를 옮겨도 하나의 id 로 이어붙인 기록. 출구 통과 = 그 id 의 최초 퇴장">여정</span></div>
       <div class="jt-wrap"><table class="drill-tbl jt">
         <thead><tr><th>ID</th><th>시작 (구역)</th><th>출구 통과</th><th>이동거리</th><th>소요</th><th>평균 m/s</th><th>커버리지</th><th>경유 카메라</th></tr></thead>
         <tbody>${body}</tbody></table></div>`;
   }
 
-  const REP_NOTE = `<div class="repnote">※ 등급(우수·보통·미흡)은 이해를 돕기 위한 표시 기준
-    (SEI·EPFI 80/60점, CBS 0.5/10)이며 공식 판정 기준이 아닙니다. SEI·EPFI는 0~100으로 높을수록,
-    CBS는 0에 가까울수록 좋고, IDR은 구역별 개시 여부와 반응 지연(초)으로 읽습니다.</div>`;
-
   function showResultModal() {
     if (!result) return;
     const r = result;
+    REP_SITES = {};                       // 단일 세션 — 현재 층 도면(App.site)
     const dur = r.ended_at ? (r.ended_at - r.alarm_ts) : 0;
     const zs = (r.zone_metrics || []).map((m) => ({ m, floor: null }));
     const es = (r.exit_metrics || []).map((m) => ({ m, floor: null }));
@@ -1371,6 +1711,10 @@ const Session = (() => {
     const started = zs.filter((z) => z.m.status === "started").length;
     const totOut = es.reduce((s, e) => s + (e.m.actual_count || 0), 0);
     const aos = (r.alarm_origins && r.alarm_origins.length) ? r.alarm_origins : [r.alarm_origin];
+    // 타임라인은 이 결과의 세션 것만 쓴다(경보~종료 구간 밖이면 다른 세션 것 — 생략)
+    const tEnd = r.ended_at || Infinity;
+    const tl = (timeline || []).filter((p) => p.ts >= r.alarm_ts - 1 && p.ts <= tEnd + 5);
+    const fa = exitAnalysis(r, null, tl, r.alarm_ts);
     $("resTitle").textContent = `평가 세션 결과 — ${r.session_id}`;
     const ov = { sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
                  zStarted: started, zTot: zs.length, totOut,
@@ -1384,15 +1728,16 @@ const Session = (() => {
         + repRow("평가 시간", `${Math.floor(dur / 60)}분 ${Math.floor(dur % 60)}초 (종료 ${r.ended_at ? hhmmss(r.ended_at) : "—"})`)
         + repRow("경보 발생원", aos.map((o, i) => `#${i + 1}(${Math.round(o[0])},${Math.round(o[1])})`).join(" · "))
         + repRow("출구 총 통과", `${totOut}명 · 출구 ${es.length}곳`)
-        + repRow("추적 객체", `${(r.person_metrics || []).length}개`)
         + repRow("설정 버전", `calibration v${r.calibration_version} · config v${r.config_version}`)
       + `</div>`
       + `<div class="repsec-h">4대 지표 해석</div>`
       + repCards({ sei: r.sei, epfi: r.epfi_avg, cbs: r.cbs_total,
                    exits: es, persons: r.person_metrics || [], zones: zs, bns: bs })
+      + gradeLegend()
       + exitBars(es)
-      + journeysTable((r.journeys || []).map((j) => ({ j, floor: null })))
-      + REP_NOTE;
+      + (fa ? `<div class="repsec-h">비상구별 분석</div>` + exitSection(fa, null) + exitNote([fa]) : "")
+      + repTimeline(fa ? [{ label: "평가 층", start: floorStartSec(r), fa }] : [])
+      + journeysTable((r.journeys || []).map((j) => ({ j, floor: null })));
     $("resultModal").classList.remove("hidden");
   }
 
@@ -1903,11 +2248,14 @@ const Session = (() => {
     if (!roll) return;
     const b = roll.building || {}, s = roll.summary || {};
     const fname = (f) => (typeof App !== "undefined" ? App.floorName(f) : f);
+    // 리플레이는 세션 당시 도면·1초 타임라인을 같이 넘긴다(없으면 현재 설정·섹션 생략)
+    REP_SITES = roll.sites || {};
+    const tls = roll.timelines || {};
     // IDR — 구역별 유지(건물 단일평균 없음). 층 표기를 붙여 전 층 구역을 나열.
     const zones = [];
     Object.entries(b.idr_by_floor || {}).forEach(([f, zs]) =>
       (zs || []).forEach((z) => zones.push({ m: z, floor: f })));
-    // 층별 결과를 층 표기와 함께 평탄화 — 해석 문장("가장 막힌 곳은 10F b2")용
+    // 층별 결과를 층 표기와 함께 평탄화 — 해석 문장("혼잡이 가장 컸던 지점은 10F b2")용
     const exits = [], bns = [], persons = [], journeys = [];
     (roll.per_floor || []).forEach((pf) => {
       const r = pf.result || {};
@@ -1920,19 +2268,45 @@ const Session = (() => {
     const zStarted = zones.filter((z) => z.m.status === "started").length;
     const startTxt = Object.entries(s.floor_start_ts || {})
       .map(([f, ts]) => `${fname(f)} ${ts != null ? hhmmss(ts) : "—"}`).join(" · ") || "—";
+    // 층별 상세 — 숫자 옆에 grade.js 등급 배지
     const perFloor = (roll.per_floor || []).map((pf) => {
       const r = pf.result || {};
       const passed = (r.exit_metrics || []).reduce((a, e) => a + (e.actual_count || 0), 0);
+      const nz = (r.zone_metrics || []).length;
       const started = (r.zone_metrics || []).filter((z) => z.status === "started").length;
       return `<tr>
         <td>${fname(pf.floor_id)}</td>
-        <td class="t-num">${r.sei != null ? fmt1(r.sei) : "—"}</td>
-        <td class="t-num">${r.epfi_avg != null ? fmt1(r.epfi_avg) : "—"}</td>
-        <td class="t-num">${fmt1(r.cbs_total || 0)}</td>
+        <td class="t-num">${r.sei != null ? fmt1(r.sei) : "—"} ${pill(gradeOf(r.sei))}</td>
+        <td class="t-num">${r.epfi_avg != null ? fmt1(r.epfi_avg) : "—"} ${pill(gradeOf(r.epfi_avg))}</td>
+        <td class="t-num">${fmt1(r.cbs_total || 0)} ${pill(gradeOf(r.cbs_total || 0, "cbs"))}</td>
         <td class="t-num">${passed}</td>
-        <td class="t-num">${started}/${(r.zone_metrics || []).length}</td>
+        <td class="t-num">${started}/${nz} ${nz ? pill(gradeOf(Grade.idrScore(started, nz, true))) : ""}</td>
       </tr>`;
     }).join("");
+    // 층별 비상구 분석 + 타임라인 재료
+    const tlItems = [];
+    const exitSecs = (roll.per_floor || []).map((pf) => {
+      const r = pf.result || {};
+      const t0 = r.alarm_ts != null ? r.alarm_ts : roll.alarm_ts;
+      const fa = exitAnalysis(r, pf.floor_id, tls[pf.floor_id], t0);
+      const fst = (s.floor_start_ts || {})[pf.floor_id];
+      tlItems.push({ label: fname(pf.floor_id), fa,
+                     start: floorStartSec(r, fst != null && t0 != null ? fst - t0 : null) });
+      return exitSection(fa, fname(pf.floor_id));
+    }).join("");
+    // 층별 대피 개시 순서 — 측정 시각만 나열한다(순위·합성 점수 없음)
+    const st = tlItems.filter((it) => it.start != null).sort((a, c) => a.start - c.start);
+    const noSt = tlItems.filter((it) => it.start == null && it.fa);
+    const tlRead = [];
+    if (st.length >= 2) {
+      tlRead.push(`층별 대피 개시는 ${st.map((it) => `${it.label} ${mmss(it.start)}`).join(", ")} 순으로 확인되었습니다(경보 후 경과 시간).`);
+    }
+    if (noSt.length) tlRead.push(`${noSt.map((it) => it.label).join(", ")}에서는 대피 개시가 확인되지 않았습니다.`);
+    tlItems.forEach((it) => {
+      const ls = it.fa && it.fa.hasTl ? it.fa.rows.map((e) => e.last).filter((v) => v != null) : [];
+      if (ls.length) tlRead.push(`${josa(it.label, "은/는")} 경보 후 ${kdur(Math.max(...ls))}에 마지막 인원이 비상구를 통과하였습니다.`);
+    });
+    const tlHtml = repTimeline(tlItems);
     $("resTitle").textContent = `건물 훈련 결과 리포트 — ${roll.session_id}`;
     const ov = { sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
                  zStarted, zTot: zones.length, totOut: s.total_passed,
@@ -1947,23 +2321,24 @@ const Session = (() => {
         + repRow("총 통과 인원", `${s.total_passed != null ? s.total_passed : 0}명 · 출구 ${exits.length}곳`)
         + repRow("최대 혼잡 층", s.max_cbs_floor ? fname(s.max_cbs_floor) : "—")
         + repRow("층별 개시시각", startTxt)
-        + repRow("추적 객체", `${persons.length}개 (전 층)`)
       + `</div>`
       + `<div class="repsec-h">4대 지표 해석</div>`
       + repCards({ sei: b.sei, epfi: b.epfi_avg, cbs: b.cbs_total,
                    exits, persons, zones, bns, fname })
+      + gradeLegend()
       + exitBars(exits, fname)
+      + (exitSecs ? `<div class="repsec-h">비상구별 분석</div>` + exitSecs + exitNote(tlItems.map((it) => it.fa)) : "")
+      + (tlHtml ? tlHtml + (tlRead.length ? `<ul class="repread">${tlRead.map((t) => `<li>${t}</li>`).join("")}</ul>` : "") : "")
       + journeysTable(journeys, fname)
       + `<div class="repsec-h">사람별 지표 <i class="mtag">global id 기준</i></div>`
       + `<div id="repPersonTbl"><div class="mnote">ReID 재구성 중…</div></div>`
       + `<div class="drill-perfloor">
         <div class="drill-perfloor-h">층별 상세</div>
         <table class="drill-tbl">
-          <thead><tr><th>층</th><th>SEI</th><th>EPFI</th><th>CBS</th><th>통과</th><th>IDR개시</th></tr></thead>
+          <thead><tr><th>층</th><th>SEI</th><th>EPFI</th><th>CBS</th><th>통과</th><th>IDR 개시</th></tr></thead>
           <tbody>${perFloor}</tbody>
         </table>
-      </div>`
-      + REP_NOTE;
+      </div>`;
     // 여정 재구성은 성격이 달라(후처리 진단) 종합 리포트에 이어 붙이면 읽기가
     // 어렵다 — 탭으로 분리하고 기본은 [종합](기존 리포트 그대로).
     // 사람별 지표는 그 층의 트랙렛 지표를 접어서 만든다 — 층을 못 찾으면 전 층.
