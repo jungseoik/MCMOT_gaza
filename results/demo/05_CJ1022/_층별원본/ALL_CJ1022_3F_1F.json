@@ -1,15 +1,15 @@
 {
-  "session_id": "sess-1792820130375",
+  "session_id": "sess-1792917501527",
   "floor": "floor9",
-  "label": "CJ1022 전체 3개 층 · 선 카운트 · 복도경로",
+  "label": "CJ1022 전체 3개 층 · 1층 카메라 카운트 v2",
   "metric": "ALL",
   "epfi_avg": 70.26206048131161,
-  "sei": 66.46567426669179,
+  "sei": 69.54491803278688,
   "cbs_total": 16.06425694971986,
   "zone_metrics": [
     {
       "zone_id": "z-idr",
-      "evacuation_start_at": 1792820648.3746328,
+      "evacuation_start_at": 1792918019.526633,
       "response_delay_sec": 518.0,
       "graph_distance": 31.389562266249687,
       "idr": 0.060597610552605576,
@@ -23,9 +23,9 @@
   "exit_metrics": [
     {
       "exit_id": "exit-0",
-      "actual_count": 171,
+      "actual_count": 426,
       "design_capacity": 23,
-      "actual_share": 0.6551724137931034,
+      "actual_share": 0.6816,
       "design_share": 0.3770491803278688,
       "width_m": 3.766,
       "width_manual": false,
@@ -33,9 +33,9 @@
     },
     {
       "exit_id": "exit-1",
-      "actual_count": 28,
+      "actual_count": 93,
       "design_capacity": 27,
-      "actual_share": 0.10727969348659004,
+      "actual_share": 0.1488,
       "design_share": 0.4426229508196721,
       "width_m": 4.507,
       "width_manual": false,
@@ -43,9 +43,9 @@
     },
     {
       "exit_id": "exit-2",
-      "actual_count": 62,
+      "actual_count": 106,
       "design_capacity": 11,
-      "actual_share": 0.23754789272030652,
+      "actual_share": 0.1696,
       "design_share": 0.18032786885245902,
       "width_m": 1.894,
       "width_manual": false,

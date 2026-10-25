@@ -56,9 +56,9 @@ DT_HOLD = 2.0                                # 영상·리플레이와 같은 �
 OUTPUTS = {
     "16F_floorend": ("sess-1792820885287", ["floor8"], "16층 단독 · 피난층 종료까지", "single"),
     "17F_floorend": ("sess-1792821419865", ["floor7"], "17층 단독 · 피난층 종료까지", "single"),
-    "16F1F_final":  ("sess-1792820138660", ["floor8", "floor9"], "16층 → 1층 · 건물 관점 (최종 종료까지)", "wide"),
-    "17F1F_final":  ("sess-1792821415890", ["floor7", "floor9"], "17층 → 1층 · 건물 관점 (최종 종료까지)", "wide"),
-    "3F_all":       ("sess-1792820130375", ["floor7", "floor8", "floor9"], "건물 전체 · 17층 · 16층 · 1층", "grid"),
+    "16F1F_final":  ("sess-1792918154687", ["floor8", "floor9"], "16층 → 1층 · 건물 관점 (최종 종료까지)", "wide"),
+    "17F1F_final":  ("sess-1792917499077", ["floor7", "floor9"], "17층 → 1층 · 건물 관점 (최종 종료까지)", "wide"),
+    "3F_all":       ("sess-1792917501527", ["floor7", "floor8", "floor9"], "건물 전체 · 17층 · 16층 · 1층", "grid"),
 }
 #           출력 WxH,     뷰포트(css px), 배율
 FORMAT = {"single": ((1920, 1102), (1280, 735), 1.5),
@@ -161,7 +161,7 @@ def cut_replay(fl: str, sid: str, cut: float) -> dict:
         exits.append({
             "id": em.exit_id, "name": EXIT_NAME[fl].get(em.exit_id, em.exit_id),
             "count": em.actual_count, "share": em.actual_share, "design_share": em.design_share,
-            "width_m": em.width_m,
+            "width_m": em.width_m, "design_capacity": em.design_capacity,
             "first": ts[0] if n else None, "last": ts[-1] if n else None,
             "p10": ts[int(n * 0.1)] if n else None, "p90": ts[min(n - 1, int(n * 0.9))] if n else None,
             "peak_min": max(sum(1 for u in ts if t <= u < t + 60) for t in ts) if n else 0,
@@ -193,8 +193,11 @@ def build_data(oid: str) -> dict:
            "end_scope": end_scope, "final_scope": final_scope, "dt_hold": DT_HOLD}
     for fl in floors:
         g = gt(fl)
-        cut = g["floor_end_sec"] if g else end_scope
+        # 단독(피난층 종료 컷)만 그 층 종료 시각에서 자른다. 합본은 영상 끝의 UI 리포트(세션 전체)와
+        # 같은 숫자여야 하므로 세션 끝까지 센다.
+        cut = g["floor_end_sec"] if (g and final_scope is None) else 10 ** 6
         d = cut_replay(fl, sid, cut)
+        d["count_label"] = "피난층 종료 시점까지" if final_scope is None else "녹화 종료 시점까지"
         if g:
             d.update(role="upper", floor_end=g["floor_end_sec"], final_end=g["final_end_sec"])
         else:
@@ -204,10 +207,7 @@ def build_data(oid: str) -> dict:
               f"EPFI {d['epfi'] or 0:.1f} 개시 {d['idr_delay']}", flush=True)
     # 건물 통합 — 서버 건물 롤업(_aggregate_floors)과 같은 정의: SEI 통합분포·CBS 합·EPFI 전원평균
     # design_share 는 층 안 비율이라 층끼리 섞을 수 없다 → 설계용량(폭 × 같은 q_design) 기준으로 다시 모은다
-    caps = []
-    for d in out["floors"]:
-        meta_caps = {e["id"]: (e["width_m"] or 0) for e in d["exits"]}
-        caps += [(e["count"], meta_caps[e["id"]]) for e in d["exits"]]
+    caps = [(e["count"], e["design_capacity"]) for d in out["floors"] for e in d["exits"] if e.get("design_capacity")]
     se, sc = sum(a for a, _ in caps), sum(c for _, c in caps)
     out["building"] = {
         "sei": (1 - 0.5 * sum(abs(a / se - c / sc) for a, c in caps)) * 100 if se and sc else None,
@@ -266,11 +266,11 @@ def floor_reading(d: dict, prefix: str = "") -> tuple[list[str], list[str]]:
     g_sei = grade(d["sei"])[1]
     if dev < 10:
         obs.append(f"비상구별 이용 분담이 설계 기준과 유사하여 비상구가 고르게 이용되었습니다"
-                   f"(SEI {d['sei']:.0f}, {g_sei}).")
+                   f"(SEI {d['sei']:.1f}, {g_sei}).")
     else:
         obs.append(f"피난 인원의 {over['share'] * 100:.0f}%가 {josa(sn(d, over), '을/를')} 이용하여 "
                    f"설계 분담({over['design_share'] * 100:.0f}%)보다 {dev:.0f}%p 높았으며, "
-                   f"{josa(sn(d, under), '은/는')} {under['share'] * 100:.0f}%를 처리하였습니다(SEI {d['sei']:.0f}, {g_sei}).")
+                   f"{josa(sn(d, under), '은/는')} {under['share'] * 100:.0f}%를 처리하였습니다(SEI {d['sei']:.1f}, {g_sei}).")
     if (worst["cbs"] or 0) > CBS_CUTS[0]:
         gw = grade(worst["cbs"], "cbs")[1]
         tail = f"(CBS {worst['cbs']:.1f}, {gw}, 임계밀도 초과 {worst['over_sec']:.0f}초)"
@@ -293,7 +293,7 @@ def floor_reading(d: dict, prefix: str = "") -> tuple[list[str], list[str]]:
         c = clean[0]
         obs.append(f"{josa(sn(d, c), '은/는')} {c['count']}명이 통과하는 동안 혼잡이 발생하지 않아 수용 여력이 있었습니다.")
     if d["role"] == "upper":
-        obs.append(f"피난층 종료 시점까지 총 {tot}명이 비상구를 통해 피난하였습니다.")
+        obs.append(f"{d.get('count_label', '피난층 종료 시점까지')} 총 {tot}명이 비상구를 통해 피난하였습니다.")
     return obs, rec
 
 
@@ -392,14 +392,14 @@ def metric_table(D: dict) -> str:
         v = d[key]
         if v is None:
             return "—"
-        return f'<span class="v">{v:.1f}</span>{pill(v, "cbs")}' if key == "cbs" else f'<span class="v">{v:.0f}</span>{pill(v)}'
+        return f'<span class="v">{v:.1f}</span>{pill(v, "cbs")}' if key == "cbs" else f'<span class="v">{v:.1f}</span>{pill(v)}'
 
     def bcell(key):
         if key == "idr":
             st = sum(1 for d in fl if d.get("idr_delay") is not None)
             return f'<span class="v">{st}/{len(fl)}</span>{pill(st / len(fl) * 100)}<span class="w">개시 구역 비율</span>'
         v = B[key]
-        return f'<span class="v">{v:.1f}</span>{pill(v, "cbs")}' if key == "cbs" else f'<span class="v">{v:.0f}</span>{pill(v)}'
+        return f'<span class="v">{v:.1f}</span>{pill(v, "cbs")}' if key == "cbs" else f'<span class="v">{v:.1f}</span>{pill(v)}'
     trs = "".join(f'<tr><td><b>{nm}</b><div>{desc}</div></td>' + "".join(f"<td>{cell(k, d)}</td>" for d in fl)
                   + (f"<td>{bcell(k)}</td>" if multi else "") + "</tr>" for k, nm, desc in METRIC_INFO)
     return f'<table class="mt"><thead><tr><th>4대 지표</th>{cols}</tr></thead><tbody>{trs}</tbody></table>'
@@ -433,7 +433,7 @@ def slide_summary(D: dict) -> str:
         cards.append(("피난층 종료", " · ".join(f"{u['name']} {mmss(u['floor_end'])}" for u in ups),
                       "해당 층 최종 인원의 비상구 통과 시각"))
     cards.append(("비상구 피난 인원", f"{sum(sum(e['count'] for e in u['exits']) for u in ups)}명",
-                  " · ".join(f"{u['name']} {sum(e['count'] for e in u['exits'])}명" for u in ups) + " (피난층 종료 시점까지)"))
+                  " · ".join(f"{u['name']} {sum(e['count'] for e in u['exits'])}명" for u in ups) + f" ({ups[0].get('count_label', '피난층 종료 시점까지')})"))
     if ground:
         cards.append(("1층 출구 통과", f"{sum(e['count'] for e in ground['exits'])}명", "1층 재실자 및 타 층 피난 인원 포함"))
     card_html = "".join(f'<div class="card"><div class="l">{l}</div><div class="v num"'
@@ -457,10 +457,10 @@ def slide_opinion(D: dict) -> str:
     for d in fl:
         over = max(d["exits"], key=lambda e: e["share"] - e["design_share"])
         if grade(d["sei"])[0] <= 2:
-            good.append(f"{josa(d['name'], '은/는')} 비상구가 비교적 고르게 이용되었습니다(SEI {d['sei']:.0f}).")
+            good.append(f"{josa(d['name'], '은/는')} 비상구가 비교적 고르게 이용되었습니다(SEI {d['sei']:.1f}).")
         else:
             warn.append(f"{josa(d['name'], '은/는')} 피난 인원의 {over['share'] * 100:.0f}%가 {josa(sn(d, over), '을/를')} 이용하여 "
-                        f"설계 분담({over['design_share'] * 100:.0f}%)보다 편중되었습니다(SEI {d['sei']:.0f}).")
+                        f"설계 분담({over['design_share'] * 100:.0f}%)보다 편중되었습니다(SEI {d['sei']:.1f}).")
         worst = max(d["exits"], key=lambda e: e["cbs"] or 0)
         if grade(worst["cbs"] or 0, "cbs")[0] <= 2:
             good.append(f"{josa(d['name'], '은/는')} 비상구 앞 혼잡이 낮았습니다(최대 CBS {worst['cbs'] or 0:.1f}).")
@@ -469,9 +469,9 @@ def slide_opinion(D: dict) -> str:
                         f"(CBS {worst['cbs']:.1f}, 임계밀도 초과 {worst['over_sec']:.0f}초).")
         if d["epfi"] is not None:
             if grade(d["epfi"])[0] <= 2:
-                good.append(f"{josa(d['name'], '은/는')} 권장 피난경로를 대체로 준수하였습니다(EPFI {d['epfi']:.0f}).")
+                good.append(f"{josa(d['name'], '은/는')} 권장 피난경로를 대체로 준수하였습니다(EPFI {d['epfi']:.1f}).")
             else:
-                warn.append(f"{d['name']}에서는 일부 인원이 권장 피난경로를 벗어나 이동하였습니다(EPFI {d['epfi']:.0f}).")
+                warn.append(f"{d['name']}에서는 일부 인원이 권장 피난경로를 벗어나 이동하였습니다(EPFI {d['epfi']:.1f}).")
     for u in ups:
         good.append(f"{josa(u['name'], '은/는')} 경보 후 {kdur(u['floor_end'])}에 피난을 완료하였"
                     + (f"으며, {kdur(u['final_end'])}에 1층 외부 탈출을 완료하였습니다." if D["final_scope"] else "습니다."))
@@ -553,7 +553,10 @@ def slide_timeline(D: dict, vw: int) -> str:
 
 
 def floor_panel(d: dict, D: dict) -> str:
-    end = d.get("floor_end") if d["role"] == "upper" else (D["final_scope"] or D["end_scope"])
+    if d["role"] == "upper":       # 단독은 피난층 종료까지, 합본은 그 층 녹화 끝(= 최종 종료)까지 센다
+        end = d["floor_end"] if D["final_scope"] is None else d["final_end"]
+    else:
+        end = D["final_scope"] or D["end_scope"]
     tot = sum(e["count"] for e in d["exits"])
     COLS = ["#30DCFB", "#FF9F43", "#A78BFA"]
     bars = "".join(
@@ -578,7 +581,7 @@ def floor_panel(d: dict, D: dict) -> str:
     obs, rec = floor_reading(d)
     read = "".join(f"<li>{t}</li>" for t in obs) + "".join(f'<li class="rec">{t}</li>' for t in rec)
     return (f'<div class="col"><div class="sh">{d["name"]} · 비상구 {len(d["exits"])}개소 · {tot}명'
-            f'<span class="m">00:00 ~ {mmss(end)} · SEI {d["sei"]:.0f}{pill(d["sei"])} · CBS {d["cbs"]:.1f}{pill(d["cbs"], "cbs")}</span></div>'
+            f'<span class="m">00:00 ~ {mmss(end)} · SEI {d["sei"]:.1f}{pill(d["sei"])} · CBS {d["cbs"]:.1f}{pill(d["cbs"], "cbs")}</span></div>'
             f'<div class="bars">{bars}</div>'
             f'<div class="legend">막대: 실제 분담 · <i></i>흰 눈금: 설계 분담(출구 폭 비례)</div>'
             f'{tbl}<div class="read"><ul>{read}</ul></div></div>')
@@ -690,6 +693,45 @@ def capture(oid: str, pages: list[tuple[str, str]], fmt: str) -> list[Path]:
     return pngs
 
 
+PDF_DIR = ROOT / "results/demo/05_CJ1022/평가보고서_PDF"
+PDF_NAME = {"16F_floorend": "16층_피난층종료_0810", "17F_floorend": "17층_피난층종료_0330",
+            "16F1F_final": "16층→1층_최종종료_0910", "17F1F_final": "17층→1층_최종종료_1245",
+            "3F_all": "전체3개층_1245"}
+
+
+def make_pdf(oid: str, D: dict) -> Path:
+    """영상 끝에 붙는 평가 보고서와 **같은 장·같은 내용**을 PDF 한 부로 (장당 1쪽, 가로).
+
+    영상 판형(가로 2배 합본·2×2)과 상관없이 한 판형(1280×735)으로 다시 그린다 — 종이로 읽을 때는
+    층별 분석을 한 장에 하나씩 두는 편이 읽기 쉽다. 글자는 벡터라 확대해도 깨지지 않는다."""
+    from playwright.sync_api import sync_playwright
+    d1 = dict(D, format="single")
+    pages = slides(d1)
+    vw, vh = FORMAT["single"][1]
+    d = OUT / "eval" / oid / "pdf"
+    d.mkdir(parents=True, exist_ok=True)
+    parts = []
+    with sync_playwright() as pw:
+        br = pw.chromium.launch(headless=True)
+        pg = br.new_page(viewport={"width": vw, "height": vh})
+        for k, (_kind, h) in enumerate(pages, 1):
+            hp = d / f"p{k}.html"
+            hp.write_text(h, encoding="utf-8")
+            pg.goto(hp.as_uri())
+            pg.wait_for_load_state("networkidle")
+            pg.evaluate("document.fonts.ready")
+            pp = d / f"p{k}.pdf"
+            pg.pdf(path=str(pp), width=f"{vw}px", height=f"{vh}px", print_background=True,
+                   margin={"top": "0", "bottom": "0", "left": "0", "right": "0"})
+            parts.append(str(pp))
+        br.close()
+    PDF_DIR.mkdir(parents=True, exist_ok=True)
+    dst = PDF_DIR / f"{PDF_NAME[oid]}_피난훈련평가보고서.pdf"
+    subprocess.run(["pdfunite", *parts, str(dst)], check=True)
+    print(f"  → {dst.relative_to(ROOT)} ({len(parts)}쪽)")
+    return dst
+
+
 def encode(oid: str, pngs: list[Path], kinds: list[str], fmt: str) -> Path:
     (W, H), _, _ = FORMAT[fmt]
     dst = OUT / "eval" / f"{oid}.mp4"
@@ -730,7 +772,7 @@ def combine(oid: str, fmt: str) -> Path:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--only", action="append", choices=list(OUTPUTS))
-    ap.add_argument("--stage", default="all", choices=["data", "html", "video", "all"],
+    ap.add_argument("--stage", default="all", choices=["data", "html", "video", "pdf", "all"],
                     help="data: 재계산만 · html: +슬라이드 캡처 · video/all: +mp4·합본")
     ap.add_argument("--reuse-data", action="store_true", help="eval/data_<id>.json 있으면 재계산 생략")
     a = ap.parse_args()
@@ -744,6 +786,9 @@ def main() -> int:
             dp.write_text(json.dumps(D, ensure_ascii=False, indent=1), encoding="utf-8")
         if a.stage == "data":
             continue
+        if a.stage == "pdf":
+            make_pdf(oid, D)
+            continue
         pages = slides(D)
         pngs = capture(oid, pages, D["format"])
         print(f"  {oid}: 슬라이드 {len(pngs)}장")
@@ -751,6 +796,7 @@ def main() -> int:
             continue
         encode(oid, pngs, [k for k, _ in pages], D["format"])
         combine(oid, D["format"])
+        make_pdf(oid, D)
     return 0
 
 

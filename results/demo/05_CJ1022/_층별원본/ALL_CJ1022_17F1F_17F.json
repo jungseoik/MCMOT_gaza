@@ -1,7 +1,7 @@
 {
-  "session_id": "sess-1792821415890",
+  "session_id": "sess-1792917499077",
   "floor": "floor7",
-  "label": "CJ1022 17층+1층 · 선 카운트 · 복도경로",
+  "label": "CJ1022 17층+1층 · 1층 카메라 카운트 v2",
   "metric": "ALL",
   "epfi_avg": 87.97598075214997,
   "sei": 66.27906976744185,
@@ -9,7 +9,7 @@
   "zone_metrics": [
     {
       "zone_id": "z-idr",
-      "evacuation_start_at": 1792821462.889638,
+      "evacuation_start_at": 1792917546.0773365,
       "response_delay_sec": 47.0,
       "graph_distance": 31.056549142659772,
       "idr": 0.6607776413331866,

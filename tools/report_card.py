@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import math
 import subprocess
 import sys
@@ -377,6 +378,9 @@ def main() -> int:
                     help="리포트 모드: 리포트 창 본문 맨 위에 끼워 넣을 HTML 파일(같은 클래스·스타일). "
                          "예: tools/cj1022_eval_report.py 가 만든 피난훈련 평가 보고서 섹션")
     ap.add_argument("--modal-title", default="", help="리포트 모드: 창 제목(#resTitle) 바꾸기")
+    ap.add_argument("--rows", default="",
+                    help="리포트 모드: 개요 행 값 바꾸기 — JSON {라벨: 값} 또는 그 JSON 파일 경로. "
+                         "리허설 녹화의 벽시계(경보 시각·층별 개시시각)를 실훈련 시각으로 바꿀 때")
     ap.add_argument("--keep-png", default="", help="디버그: 각 구간 첫·끝 프레임 PNG 저장 폴더")
     a = ap.parse_args()
     if not a.sid and not a.label:
@@ -492,6 +496,14 @@ def main() -> int:
                             [Path(a.inject_html).read_text(encoding="utf-8") if a.inject_html else "",
                              a.modal_title])
                         time.sleep(0.6)
+                    if a.rows:
+                        rows = Path(a.rows).read_text(encoding="utf-8") if Path(a.rows).is_file() else a.rows
+                        cap.pg.evaluate("""(rows) => {
+                            document.querySelectorAll('#resBody .resrow').forEach((r) => {
+                              const k = (r.querySelector('span') || {}).textContent;
+                              if (k && rows[k] != null) r.querySelector('b').textContent = rows[k];
+                            }); }""", json.loads(rows))
+                        time.sleep(0.3)
                     sub = ("피난훈련 평가 보고서" if a.inject_html else "건물 롤업") \
                         + (f" ({k + 1}/{n})" if n > 1 else "")
                     print(f"  구간 {k + 1}/{n}: 리포트 모달")
