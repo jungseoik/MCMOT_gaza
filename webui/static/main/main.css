@@ -1192,3 +1192,25 @@ body.rehearsing .rhbanner{ display:block; }
   color:var(--text-3); line-height:1.1; margin-top:1px; }
 .jybar .seg.jybasis{ margin-left:8px; vertical-align:middle; }
 .jybar .seg.jybasis .tag-btn{ padding:2px 9px; font-size:11px; }
+
+/* ---------------- 리포트 PDF 저장 (인쇄) ----------------
+   [PDF 저장] 이 body 에 print-report 를 붙이고 window.print() 를 부른다.
+   리포트 창만 남기고, 창 안 스크롤을 풀어 전체를 페이지로 흘린다. 색은 화면 그대로. */
+@media print {
+  @page { size: A4; margin: 10mm; }
+  html:has(body.print-report) { background: var(--bg-modal) !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body.print-report { background: var(--bg-modal) !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body.print-report > *:not(#resultModal) { display: none !important; }
+  body.print-report #resultModal { position: static; display: block; background: none; inset: auto; }
+  body.print-report #resultModal .modalbox.report { width: 100%; max-width: none; max-height: none;
+    border: none; border-radius: 0; padding: 0 4px; display: block; }
+  body.print-report #resultModal .resbody { overflow: visible !important; padding-right: 0; }
+  body.print-report #resultModal .resfoot,
+  body.print-report #resultModal #resClose,
+  body.print-report #resultModal .reptabs { display: none !important; }
+  body.print-report #resultModal .repcard,
+  body.print-report #resultModal .repverdict,
+  body.print-report #resultModal tr { break-inside: avoid; }
+}

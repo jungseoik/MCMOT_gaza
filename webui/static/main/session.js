@@ -114,6 +114,7 @@ const Session = (() => {
     $("pmSess").onclick = () => switchPanel("sess");
     $("pmRt").onclick = () => switchPanel("rt");
     $("resClose").onclick = () => { jyZoomHide(); $("resultModal").classList.add("hidden"); };
+    $("resPdf").onclick = saveReportPdf;
     $("resultModal").onclick = (e) => {
       if (e.target === $("resultModal")) $("resultModal").classList.add("hidden");
     };
@@ -1407,6 +1408,27 @@ const Session = (() => {
   function jyZoomHide() {
     const z = document.getElementById("jyZoom");
     if (z) z.classList.add("hidden");
+  }
+
+  /** [PDF 저장] — 리포트 창에 **지금 보이는 그대로**를 브라우저 인쇄로 PDF 로 뽑는다.
+   *  서버 렌더를 따로 두지 않는 이유: 리플레이 편집본·선택한 탭·재구성 결과까지
+   *  화면 상태가 곧 리포트라, 같은 DOM 을 찍는 것이 가장 정확하다.
+   *  인쇄 전용 스타일(main.css @media print)이 리포트 창만 남기고 펼친다.
+   *  파일 이름은 인쇄 창이 문서 제목을 쓰므로 잠시 바꿨다가 되돌린다. */
+  function saveReportPdf() {
+    const t0 = document.title;
+    const ttl = ($("resTitle").textContent || "리포트").replace(/[\\/:*?"<>|]+/g, " ").trim();
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    document.title = `${ttl} (${ymd})`;
+    document.body.classList.add("print-report");
+    const done = () => {
+      document.body.classList.remove("print-report");
+      document.title = t0;
+      window.removeEventListener("afterprint", done);
+    };
+    window.addEventListener("afterprint", done);
+    window.print();
   }
 
   function mountRepTabs(sid, floor, pm) {

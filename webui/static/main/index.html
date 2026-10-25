@@ -910,7 +910,8 @@
     <div class="modalhead"><b id="resTitle">평가 세션 결과</b><button class="tag-btn" id="resClose">닫기 ✕</button></div>
     <div id="resBody" class="resbody"></div>
     <div class="resfoot">
-      <a class="btn primary sm" id="resJson" href="/api/session/export?format=json" download>JSON 내보내기</a>
+      <button class="btn primary sm" id="resPdf" title="지금 보이는 리포트를 그대로 PDF로 저장 (인쇄 창에서 'PDF로 저장' 선택)">PDF 저장</button>
+      <a class="tag-btn" id="resJson" href="/api/session/export?format=json" download>JSON 내보내기</a>
       <a class="tag-btn" id="resCsv" href="/api/session/export?format=csv" download>CSV 내보내기</a>
     </div>
   </div>
