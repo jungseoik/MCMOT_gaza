@@ -558,7 +558,7 @@ def slide_timeline(D: dict, vw: int) -> str:
             f'<span style="margin-left:14px;color:#F5A623">┃ 피난층 종료</span>'
             + ('<span style="margin-left:14px;color:#ff8a85">┃ 최종 종료</span>' if final else "") + '</div>'
             f'<div class="tl">{ticks}{"".join(rows)}{final}</div>')
-    return page("피난훈련 평가 보고서", "피난 타임라인", f"{D['scope']} · 경보 후 경과 시간(분:초)", body)
+    return page("피난훈련 평가 보고서", "피난 타임라인", f"{D['scope']} · 경보 후 경과 시간(분:초)", body, gap_note(D))
 
 
 def floor_panel(d: dict, D: dict) -> str:
@@ -596,13 +596,28 @@ def floor_panel(d: dict, D: dict) -> str:
             f'{tbl}<div class="read"><ul>{read}</ul></div></div>')
 
 
+def gap_note(D: dict) -> str:
+    """1층 카메라 설치 중·화각 변경 구간(검정 처리)의 관측 공백 — 그 시간의 출구 통과는 세지 못했을 수 있다.
+
+    출구2(cam4)는 모든 합본에서, 출구3(cam16 0:00~5:00)은 전체 합본 v3(2026-10-26 재녹화)에서만 제외했다.
+    """
+    if not any(d["role"] == "ground" for d in D["floors"]):
+        return ""
+    g = ["출구2 카메라 03:52 이전·06:56 이후"]
+    if D["id"] == "3F_all":
+        g.append("출구3 카메라 05:00 이전")
+    return ("1층 카메라 설치 중·화각 변경 구간(" + ", ".join(g)
+            + ")은 관측에서 제외하였으며, 해당 시간의 출구 통과는 집계되지 않았을 수 있습니다.")
+
+
 def slide_floor(D: dict, ds: list[dict]) -> str:
     body = (f'<div class="grid2">{"".join(floor_panel(d, D) for d in ds)}</div>' if len(ds) > 1
             else floor_panel(ds[0], D))
     names = " · ".join(d["name"] for d in ds)
+    gn = gap_note(D) if any(d["role"] == "ground" for d in ds) else ""
     return page("피난훈련 평가 보고서", f"비상구별 분석 ({names})", D["scope"], body,
                 "CBS: 비상구 앞 구역에서 임계밀도(0.8명/㎡)를 초과한 혼잡의 시간 누적값(0에 가까울수록 양호) · "
-                "분담 편차: 실제 분담 − 설계 분담")
+                "분담 편차: 실제 분담 − 설계 분담" + (f"<br>{gn}" if gn else ""))
 
 
 def slide_building(D: dict) -> str:

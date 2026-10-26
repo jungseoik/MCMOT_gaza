@@ -1,5 +1,5 @@
 {
-  "session_id": "sess-1792917501527",
+  "session_id": "sess-1793021833807",
   "floor": "floor7",
   "label": "[CJ 실훈련 10/22] 17·16·1층 전체 합본 (최종 종료 12:45)",
   "metric": "ALL",
@@ -9,7 +9,7 @@
   "zone_metrics": [
     {
       "zone_id": "z-idr",
-      "evacuation_start_at": 1792917548.526633,
+      "evacuation_start_at": 1793021880.8067708,
       "response_delay_sec": 47.0,
       "graph_distance": 31.056549142659772,
       "idr": 0.6607776413331866,
