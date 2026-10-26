@@ -343,6 +343,7 @@ def write_readme(out_dir: Path, src: Path, outputs: list[Output]) -> Path:
     for o in outputs:
         L.append(f"| {o.question} | `{o.folder}/{o.stem}.mp4` |")
     L.append("| 사람이 어디에 몰렸나(밀집) | 위 영상의 `_히트맵` 판 |")
+    L.append("| 카메라 화면 없이 도면만 크게 | `_그리드없음` 판 (16층·17층 단독 · 전체 3개 층) |")
     L.append(f"| 한 층만 따로, 원 길이 그대로 | `{rel_src}/` 층별 원본 |\n")
 
     L.append("## 폴더\n")
@@ -359,8 +360,11 @@ def write_readme(out_dir: Path, src: Path, outputs: list[Output]) -> Path:
                     pass
                 break
         dur = fmt_dur(extra) if extra else fmt_dur(INTRO_SEC + o.end_sec + HOLD_SEC)
-        L.append(f"| `{o.folder}/` | `{o.stem}[_히트맵].mp4` | {o.title} | 00:00 ~ {mmss(o.end_sec)} | {dur} |")
-    L.append(f"| `{rel_src}/` | `ALL_CJ1022_<tag>[_heat].mp4` + `.json` | 위 영상의 재료(층별 렌더, demo_viz 산출) | 세션 전체 | |\n")
+        sfx = [VARIANTS[v][1] for v in ("heat", "nogrid")
+               if (out_dir / o.folder / f"{o.stem}{VARIANTS[v][1]}.mp4").exists()]
+        sfx_s = f"[{' · '.join(sfx)}]" if sfx else ""
+        L.append(f"| `{o.folder}/` | `{o.stem}{sfx_s}.mp4` | {o.title} | 00:00 ~ {mmss(o.end_sec)} | {dur} |")
+    L.append(f"| `{rel_src}/` | `ALL_CJ1022_<tag>[_heat · _nogrid].mp4` + `.json` | 위 영상의 재료(층별 렌더, demo_viz 산출) | 세션 전체 | |\n")
 
     L.append("### 영상 한 편의 흐름\n")
     L.append(f"1. **인트로 {INTRO_SEC:.0f}초** — 도면·피난경로 소개(시계 0:00 이전).")
@@ -377,7 +381,10 @@ def write_readme(out_dir: Path, src: Path, outputs: list[Output]) -> Path:
     L.append("- **합본**: 여러 층의 영상을 한 화면에 나란히(좌우 또는 2×2) 붙인 것. **시계가 동기**돼 있어 "
              "같은 순간의 여러 층을 함께 본다. 각 칸의 지표는 **그 층의 값**이다(건물 합산 아님).")
     L.append("- **점판 / 히트맵판(`_히트맵`)**: 점판은 추적된 사람을 원 관측 그대로 점으로(④ 리플레이와 같은 그림), "
-             "히트맵판은 같은 데이터를 밀도(반경 2.5 m)로 칠한다 — 몰림을 볼 때.\n")
+             "히트맵판은 같은 데이터를 밀도(반경 2.5 m)로 칠한다 — 몰림을 볼 때.")
+    L.append("- **그리드없음판(`_그리드없음`)**: 점판에서 우측 카메라 그리드만 뺀 것. 도면이 화면 가로 전체를 쓰고"
+             "(도면 흰 여백은 잘라 키움) 인트로 소개 글은 도면 왼쪽 위에 얹는다. 지표·컷·리포트는 점판과 같다"
+             "(`demo_viz.py --no-grid` → `cj1022_package.py --variant nogrid`).\n")
 
     L.append("## 원천 세션 (④ 리플레이 → 건물 훈련)\n")
     L.append("층별 원본 사이드카(`.json`)의 `session_id` 에서 읽었다.\n")

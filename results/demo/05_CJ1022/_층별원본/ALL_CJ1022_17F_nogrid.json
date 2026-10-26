@@ -1,0 +1,51 @@
+{
+  "session_id": "sess-1792821419865",
+  "floor": "floor7",
+  "label": "[CJ 실훈련 10/22] 17층 단독 (피난층 종료 03:30)",
+  "metric": "ALL",
+  "epfi_avg": 87.97598075214997,
+  "sei": 66.27906976744185,
+  "cbs_total": 4.231274479569876,
+  "zone_metrics": [
+    {
+      "zone_id": "z-idr",
+      "evacuation_start_at": 1792821466.8650482,
+      "response_delay_sec": 47.0,
+      "graph_distance": 31.056549142659772,
+      "idr": 0.6607776413331866,
+      "idr_per_origin": [
+        0.645617451347669,
+        0.6219900257151925,
+        0.7147254469366983
+      ],
+      "participant_ratio": 1.0,
+      "status": "started"
+    }
+  ],
+  "exit_metrics": [
+    {
+      "exit_id": "e1",
+      "actual_count": 72,
+      "design_capacity": 6,
+      "actual_share": 0.8372093023255814,
+      "design_share": 0.5,
+      "width_m": 0.99,
+      "width_manual": false,
+      "q_design": 6.0
+    },
+    {
+      "exit_id": "e2",
+      "actual_count": 14,
+      "design_capacity": 6,
+      "actual_share": 0.16279069767441862,
+      "design_share": 0.5,
+      "width_m": 1.062,
+      "width_manual": false,
+      "q_design": 6.0
+    }
+  ],
+  "person_routes": {
+    "unreachable": 0,
+    "site_routes": 6
+  }
+}
