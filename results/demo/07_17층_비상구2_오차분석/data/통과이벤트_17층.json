@@ -1,0 +1,896 @@
+{
+  "session": "sess-1792821419865",
+  "floor": "17층(floor7)",
+  "cut_sec": 210,
+  "설명": "경보 후 03:30(피난층 종료)까지 비상구별 판정선 통과 이벤트. time_sec 은 경보 후 경과 초.",
+  "events": [
+    {
+      "exit": "e1",
+      "camera": "cam7",
+      "track_id": 15,
+      "time_sec": 36.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 11,
+      "time_sec": 37.2,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 12,
+      "time_sec": 37.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 8,
+      "time_sec": 38.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 13,
+      "time_sec": 38.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 14,
+      "time_sec": 39.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 18,
+      "time_sec": 41.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 12,
+      "time_sec": 42.6,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 17,
+      "time_sec": 42.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 14,
+      "time_sec": 43.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam19",
+      "track_id": 48,
+      "time_sec": 43.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 18,
+      "time_sec": 44.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 13,
+      "time_sec": 44.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam19",
+      "track_id": 44,
+      "time_sec": 45.0,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 15,
+      "time_sec": 45.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 20,
+      "time_sec": 45.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 16,
+      "time_sec": 46.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 12,
+      "time_sec": 47.2,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 18,
+      "time_sec": 48.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 23,
+      "time_sec": 48.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 22,
+      "time_sec": 49.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 19,
+      "time_sec": 51.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 24,
+      "time_sec": 52.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 32,
+      "time_sec": 52.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 26,
+      "time_sec": 54.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 29,
+      "time_sec": 55.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 30,
+      "time_sec": 56.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 36,
+      "time_sec": 59.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 33,
+      "time_sec": 59.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 48,
+      "time_sec": 63.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 55,
+      "time_sec": 66.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 56,
+      "time_sec": 69.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 42,
+      "time_sec": 69.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam7",
+      "track_id": 54,
+      "time_sec": 69.6,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 43,
+      "time_sec": 71.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 46,
+      "time_sec": 73.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 41,
+      "time_sec": 73.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 45,
+      "time_sec": 76.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 67,
+      "time_sec": 79.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 56,
+      "time_sec": 79.8,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 68,
+      "time_sec": 80.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 65,
+      "time_sec": 81.8,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 66,
+      "time_sec": 83.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 73,
+      "time_sec": 83.8,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 64,
+      "time_sec": 84.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 70,
+      "time_sec": 86.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 74,
+      "time_sec": 88.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 84,
+      "time_sec": 88.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 76,
+      "time_sec": 88.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 73,
+      "time_sec": 89.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 89,
+      "time_sec": 90.2,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 52,
+      "time_sec": 91.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 81,
+      "time_sec": 91.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam23",
+      "track_id": 58,
+      "time_sec": 91.6,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 82,
+      "time_sec": 92.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 53,
+      "time_sec": 93.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 83,
+      "time_sec": 94.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 104,
+      "time_sec": 103.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 87,
+      "time_sec": 105.0,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 88,
+      "time_sec": 106.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 113,
+      "time_sec": 107.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 90,
+      "time_sec": 108.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 86,
+      "time_sec": 108.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 115,
+      "time_sec": 109.2,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 91,
+      "time_sec": 110.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 116,
+      "time_sec": 111.0,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 92,
+      "time_sec": 111.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 94,
+      "time_sec": 112.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 118,
+      "time_sec": 112.8,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 97,
+      "time_sec": 113.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 102,
+      "time_sec": 115.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 93,
+      "time_sec": 115.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 107,
+      "time_sec": 117.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 109,
+      "time_sec": 118.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 106,
+      "time_sec": 119.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 141,
+      "time_sec": 119.8,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 110,
+      "time_sec": 121.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 148,
+      "time_sec": 123.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 113,
+      "time_sec": 124.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 151,
+      "time_sec": 126.2,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 115,
+      "time_sec": 126.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 116,
+      "time_sec": 127.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 129,
+      "time_sec": 130.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 124,
+      "time_sec": 130.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 123,
+      "time_sec": 130.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 160,
+      "time_sec": 131.0,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 130,
+      "time_sec": 133.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 131,
+      "time_sec": 134.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 136,
+      "time_sec": 135.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 144,
+      "time_sec": 154.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam15",
+      "track_id": 181,
+      "time_sec": 154.6,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 143,
+      "time_sec": 155.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 145,
+      "time_sec": 158.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 146,
+      "time_sec": 160.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 149,
+      "time_sec": 161.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 147,
+      "time_sec": 162.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 152,
+      "time_sec": 164.4,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 154,
+      "time_sec": 167.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 158,
+      "time_sec": 173.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 159,
+      "time_sec": 179.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 162,
+      "time_sec": 180.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam23",
+      "track_id": 110,
+      "time_sec": 186.6,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 69,
+      "time_sec": 188.0,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam19",
+      "track_id": 196,
+      "time_sec": 188.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 68,
+      "time_sec": 188.8,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam19",
+      "track_id": 202,
+      "time_sec": 189.4,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 70,
+      "time_sec": 190.0,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam7",
+      "track_id": 108,
+      "time_sec": 199.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam23",
+      "track_id": 117,
+      "time_sec": 202.2,
+      "counted": true,
+      "note": "집계"
+    },
+    {
+      "exit": "e2",
+      "camera": "cam5",
+      "track_id": 74,
+      "time_sec": 204.2,
+      "counted": false,
+      "note": "다른 카메라와 같은 사람으로 보고 중복 제외"
+    },
+    {
+      "exit": "e1",
+      "camera": "cam2",
+      "track_id": 164,
+      "time_sec": 204.4,
+      "counted": true,
+      "note": "집계"
+    }
+  ]
+}
