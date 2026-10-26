@@ -58,8 +58,11 @@ EVENTS_DEFAULT = {
     "17F_floor_end": 210, "17F_final": 765,
 }
 
+# 입력 접미사, 출력 접미사
+#   nogrid: 점판에서 우측 카메라 그리드만 뺀 판
+#   deid:   점판과 같고 우측 카메라 그리드만 비식별 사본(tools/deid/deid_video.py)
 VARIANTS = {"dots": ("", ""), "heat": ("_heat", "_히트맵"),
-            "nogrid": ("_nogrid", "_그리드없음")}   # nogrid: 점판에서 우측 카메라 그리드만 뺀 판   # 입력 접미사, 출력 접미사
+            "nogrid": ("_nogrid", "_그리드없음"), "deid": ("_deid", "_비식별")}
 
 
 def mmss(sec: float) -> str:
@@ -257,7 +260,8 @@ def plan_job(o: Output, variant: str, src: Path, out_dir: Path, report_dir: Path
             (30, "0x9A9AA4", "세 화면 시계 동기 — 같은 순간의 세 층"),
             (30, "0x9A9AA4", f"16층 화면은 {mmss(EV['16F_final'])}(16층 인원 1층 탈출)에서 멈춘다"),
             (30, "0x9A9AA4", "지표는 층별 값 · 임계값 dt_hold=2.0 · "
-                             + {"heat": "히트맵판(밀도)", "nogrid": "점판(원 관측) · 카메라 그리드 제외"}.get(variant, "점판(원 관측)")),
+                             + {"heat": "히트맵판(밀도)", "nogrid": "점판(원 관측) · 카메라 그리드 제외",
+                                "deid": "점판(원 관측) · 카메라 영상 비식별 처리"}.get(variant, "점판(원 관측)")),
             (26, "0x7A7A84", f"세션 {sess}"),
         ]
         dts, y = [], 300
@@ -344,6 +348,7 @@ def write_readme(out_dir: Path, src: Path, outputs: list[Output]) -> Path:
         L.append(f"| {o.question} | `{o.folder}/{o.stem}.mp4` |")
     L.append("| 사람이 어디에 몰렸나(밀집) | 위 영상의 `_히트맵` 판 |")
     L.append("| 카메라 화면 없이 도면만 크게 | `_그리드없음` 판 (16층·17층 단독 · 전체 3개 층) |")
+    L.append("| 외부 공유용(카메라 화면 속 사람 머리 비식별) | `_비식별` 판 (16층·17층 단독 · 전체 3개 층) |")
     L.append(f"| 한 층만 따로, 원 길이 그대로 | `{rel_src}/` 층별 원본 |\n")
 
     L.append("## 폴더\n")
@@ -360,11 +365,11 @@ def write_readme(out_dir: Path, src: Path, outputs: list[Output]) -> Path:
                     pass
                 break
         dur = fmt_dur(extra) if extra else fmt_dur(INTRO_SEC + o.end_sec + HOLD_SEC)
-        sfx = [VARIANTS[v][1] for v in ("heat", "nogrid")
+        sfx = [VARIANTS[v][1] for v in ("heat", "nogrid", "deid")
                if (out_dir / o.folder / f"{o.stem}{VARIANTS[v][1]}.mp4").exists()]
         sfx_s = f"[{' · '.join(sfx)}]" if sfx else ""
         L.append(f"| `{o.folder}/` | `{o.stem}{sfx_s}.mp4` | {o.title} | 00:00 ~ {mmss(o.end_sec)} | {dur} |")
-    L.append(f"| `{rel_src}/` | `ALL_CJ1022_<tag>[_heat · _nogrid].mp4` + `.json` | 위 영상의 재료(층별 렌더, demo_viz 산출) | 세션 전체 | |\n")
+    L.append(f"| `{rel_src}/` | `ALL_CJ1022_<tag>[_heat · _nogrid · _deid].mp4` + `.json` | 위 영상의 재료(층별 렌더, demo_viz 산출) | 세션 전체 | |\n")
 
     L.append("### 영상 한 편의 흐름\n")
     L.append(f"1. **인트로 {INTRO_SEC:.0f}초** — 도면·피난경로 소개(시계 0:00 이전).")
@@ -384,7 +389,11 @@ def write_readme(out_dir: Path, src: Path, outputs: list[Output]) -> Path:
              "히트맵판은 같은 데이터를 밀도(반경 2.5 m)로 칠한다 — 몰림을 볼 때.")
     L.append("- **그리드없음판(`_그리드없음`)**: 점판에서 우측 카메라 그리드만 뺀 것. 도면이 화면 가로 전체를 쓰고"
              "(도면 흰 여백은 잘라 키움) 인트로 소개 글은 도면 왼쪽 위에 얹는다. 지표·컷·리포트는 점판과 같다"
-             "(`demo_viz.py --no-grid` → `cj1022_package.py --variant nogrid`).\n")
+             "(`demo_viz.py --no-grid` → `cj1022_package.py --variant nogrid`).")
+    L.append("- **비식별판(`_비식별`)**: 점판과 같고 우측 카메라 그리드만 머리 영역을 모자이크·블러한 사본으로 바꾼 것. "
+             "머리 검출(real_head)·사람 검출 위쪽·자세 키포인트의 합집합 + 앞뒤 3프레임 유지"
+             "(`tools/deid/deid_video.py` → `demo_viz.py --clip-root …/_deid` → `cj1022_package.py --variant deid`, "
+             "사용법 `tools/deid/README.md`).\n")
 
     L.append("## 원천 세션 (④ 리플레이 → 건물 훈련)\n")
     L.append("층별 원본 사이드카(`.json`)의 `session_id` 에서 읽었다.\n")
@@ -452,7 +461,7 @@ def main() -> int:
     ap.add_argument("--report", action="append", default=[], metavar="ID=PATH")
     ap.add_argument("--only", action="append", default=[],
                     help="출력 id 또는 파일 이름 일부 (반복 가능): 16F_floorend 17F_floorend 16F1F_final 17F1F_final 3F_all")
-    ap.add_argument("--variant", choices=["dots", "heat", "nogrid", "both"], default="both")
+    ap.add_argument("--variant", choices=["dots", "heat", "nogrid", "deid", "both"], default="both")
     ap.add_argument("--jobs", type=int, default=4, help="동시 인코딩 수 (GPU 2장에 번갈아 배정)")
     ap.add_argument("--gpus", default="0,1")
     ap.add_argument("--dry-run", action="store_true")

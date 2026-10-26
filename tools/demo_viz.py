@@ -210,6 +210,10 @@ def main() -> int:
                          "시나리오 번호가 없는 녹화에 쓴다 — session_viz 와 같은 인자")
     ap.add_argument("--scenario", default=None,
                     help="그 패키지의 시나리오 id (예 scenario_16F_only)")
+    ap.add_argument("--clip-root", type=Path, default=None,
+                    help="그리드 카메라 영상을 이 폴더의 같은 상대경로(<시나리오폴더>/<cam>.mp4)"
+                         "에서 읽는다 — 비식별 사본(tools/deid/deid_video.py 산출) 등. "
+                         "사본이 하나라도 없으면 원본으로 대체하지 않고 멈춘다")
     ap.add_argument("--no-grid", action="store_true",
                     help="우측 카메라 그리드 없이 도면이 화면 가로 전체를 쓴다. "
                          "출력 크기·하단 지표 줄·인트로·지표 값은 그리드판과 같다")
@@ -317,6 +321,15 @@ def main() -> int:
 
     cam_ids = sorted({c["cam_id"] for c in meta.get("cameras", [])})
     clips, desc = resolve_clips(cam_ids, label, a.package, a.scenario)
+    if a.clip_root:
+        # 비식별 사본으로 바꿔 끼운다. 원본으로 조용히 대체하면 비식별판에 원본 얼굴이
+        # 섞이므로, 사본이 없으면 멈춘다.
+        sub = {cid: a.clip_root / fp.parent.name / fp.name for cid, fp in clips.items()}
+        miss = [str(p) for p in sub.values() if not p.is_file()]
+        if miss:
+            print("[demo] --clip-root 에 없는 영상:", *miss, sep="\n  "); return 1
+        clips = sub
+        desc += f" · 영상 출처 {a.clip_root}"
     print(f"[demo] {desc}")
     caps, src_fps = {}, {}
     for cid, fp in clips.items():

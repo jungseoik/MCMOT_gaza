@@ -261,3 +261,6 @@ data/videos/case6.mp4
 media/vsource/_raw/
 # 리허설 매니페스트 손 편집 전 백업
 media/vsource/**/rehearsal.json.bak*
+
+# 비식별 사본(tools/deid/deid_video.py) — 로컬 전용, git·HF 미업로드
+media/vsource/**/_deid/

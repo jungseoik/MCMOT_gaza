@@ -1,0 +1,59 @@
+{
+  "session_id": "sess-1792917501527",
+  "floor": "floor9",
+  "label": "[CJ 실훈련 10/22] 17·16·1층 전체 합본 (최종 종료 12:45)",
+  "metric": "ALL",
+  "epfi_avg": 70.26206048131161,
+  "sei": 69.54491803278688,
+  "cbs_total": 16.06425694971986,
+  "zone_metrics": [
+    {
+      "zone_id": "z-idr",
+      "evacuation_start_at": 1792918019.526633,
+      "response_delay_sec": 518.0,
+      "graph_distance": 31.389562266249687,
+      "idr": 0.060597610552605576,
+      "idr_per_origin": [
+        0.060597610552605576
+      ],
+      "participant_ratio": 0.7368421052631579,
+      "status": "started"
+    }
+  ],
+  "exit_metrics": [
+    {
+      "exit_id": "exit-0",
+      "actual_count": 426,
+      "design_capacity": 23,
+      "actual_share": 0.6816,
+      "design_share": 0.3770491803278688,
+      "width_m": 3.766,
+      "width_manual": false,
+      "q_design": 6.0
+    },
+    {
+      "exit_id": "exit-1",
+      "actual_count": 93,
+      "design_capacity": 27,
+      "actual_share": 0.1488,
+      "design_share": 0.4426229508196721,
+      "width_m": 4.507,
+      "width_manual": false,
+      "q_design": 6.0
+    },
+    {
+      "exit_id": "exit-2",
+      "actual_count": 106,
+      "design_capacity": 11,
+      "actual_share": 0.1696,
+      "design_share": 0.18032786885245902,
+      "width_m": 1.894,
+      "width_manual": false,
+      "q_design": 6.0
+    }
+  ],
+  "person_routes": {
+    "unreachable": 0,
+    "site_routes": 3
+  }
+}
