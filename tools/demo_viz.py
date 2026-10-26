@@ -210,6 +210,9 @@ def main() -> int:
                          "시나리오 번호가 없는 녹화에 쓴다 — session_viz 와 같은 인자")
     ap.add_argument("--scenario", default=None,
                     help="그 패키지의 시나리오 id (예 scenario_16F_only)")
+    ap.add_argument("--no-grid", action="store_true",
+                    help="우측 카메라 그리드 없이 도면이 화면 가로 전체를 쓴다. "
+                         "출력 크기·하단 지표 줄·인트로·지표 값은 그리드판과 같다")
     a = ap.parse_args()
 
     db, floor = find_session(a.session, a.floor)
@@ -332,7 +335,7 @@ def main() -> int:
 
     # ── 레이아웃
     OW = a.width
-    LEFT_W = int(OW * 0.46)
+    LEFT_W = OW if a.no_grid else int(OW * 0.46)
     RIGHT_W = OW - LEFT_W
     PANE_H = int(OW * 0.44)
     BAR_H = int(OW * 0.135)
@@ -342,7 +345,26 @@ def main() -> int:
     m_per_px = mp.get("m_per_px") or (mp["scale_m"] / mp["scale_px"] if mp.get("scale_px") else 1)
     mapf = ROOT / "data/sites/default" / ("map.png" if floor == "default" else f"map_{floor}.png")
     mimg = cv2.imread(str(mapf))
+    cx0 = cy0 = 0
+    if a.no_grid:
+        # 그리드가 빠지면 도면이 높이에 묶여 양옆이 빈다 — 도면 바깥 흰 여백을
+        # 잘라 도면을 키운다. 출구·병목·경로가 잘리지 않게 그 좌표도 포함한다.
+        ink = np.argwhere(cv2.cvtColor(mimg, cv2.COLOR_BGR2GRAY) < 200)
+        if len(ink):
+            ys, xs = ink[:, 0], ink[:, 1]
+            pts = [p for e in (site.get("exits") or []) for p in (e.get("line") or [])]
+            pts += [p for b in (site.get("bottlenecks") or []) for p in b["polygon"]]
+            pts += [p for r in (site.get("routes") or []) for p in (r.get("points") or [])]
+            x0_ = min([int(np.percentile(xs, 0.2))] + [int(p[0]) for p in pts])
+            x1_ = max([int(np.percentile(xs, 99.8))] + [int(p[0]) for p in pts])
+            y0b = min([int(np.percentile(ys, 0.2))] + [int(p[1]) for p in pts])
+            y1b = max([int(np.percentile(ys, 99.8))] + [int(p[1]) for p in pts])
+            mg = 30
+            cx0, cy0 = max(0, x0_ - mg), max(0, y0b - mg)
+            cx1 = min(mimg.shape[1], x1_ + mg); cy1 = min(mimg.shape[0], y1b + mg)
+            mimg = mimg[cy0:cy1, cx0:cx1]
     base, msc, mox, moy = fit(mimg, LEFT_W, PANE_H)
+    mox -= int(cx0 * msc); moy -= int(cy0 * msc)
 
     def MP(x, y):
         return int(x * msc + mox), int(y * msc + moy)
@@ -687,7 +709,7 @@ def main() -> int:
             cv2.addWeighted(ov, 0.85 * fade, left, 1 - 0.85 * fade, 0, left)
             frame = np.full((OH, OW, 3), 20, np.uint8)
             frame[:PANE_H, :LEFT_W] = left
-            right = np.full((PANE_H, RIGHT_W, 3), 18, np.uint8)
+            right = np.full((PANE_H, max(RIGHT_W, 560), 3), 18, np.uint8)
             # 인트로는 **지표 한 가지**만 말한다. 각본 이름("문 앞 밀집 2회",
             # "1층 출구 나가기")은 그 영상이 어떻게 찍혔는지지 무엇을 보여주려는
             # 지가 아니다 — 발표에서는 지표가 먼저 읽혀야 한다.
@@ -709,7 +731,15 @@ def main() -> int:
                 cv2.line(right, (42, y0_ + 206), (42 + 150, y0_ + 206),
                          ACCENT[a.metric], 3, cv2.LINE_AA)
                 put(right, "재실자별 피난경로", (40, y0_ + 226), 26, DOT, True)
-            frame[:PANE_H, LEFT_W:] = right
+            if a.no_grid:
+                # 그리드가 없으면 소개 글을 도면 왼쪽 위 어두운 판에 얹는다
+                cwid = int(min(460, max(360, mox - 28)))     # 도면 왼쪽 빈 곳에 맞춘다
+                card = right[max(0, y0_ - 40):min(PANE_H, y0_ + 400), :cwid]
+                hh = min(card.shape[0], PANE_H - 28)
+                roi = frame[14:14 + hh, 14:14 + cwid]
+                frame[14:14 + hh, 14:14 + cwid] = cv2.addWeighted(card[:hh], 0.88, roi, 0.12, 0)
+            else:
+                frame[:PANE_H, LEFT_W:] = right
             frame[PANE_H:] = bar_panel(t0, {}, [], {})
             vw.write(frame)
 
@@ -767,10 +797,10 @@ def main() -> int:
                     cv2.circle(left, MP(o["x"], o["y"]), 7, (20, 20, 20), 1)
 
             right = np.zeros((PANE_H, RIGHT_W, 3), np.uint8)
-            n = len(caps)
-            ccols = int(np.ceil(np.sqrt(n))); crows = int(np.ceil(n / ccols))
+            n = 0 if a.no_grid else len(caps)
+            ccols = max(1, int(np.ceil(np.sqrt(n)))); crows = max(1, int(np.ceil(n / ccols)))
             cw, ch = RIGHT_W // ccols, PANE_H // crows
-            for i, cid in enumerate(caps):
+            for i, cid in enumerate(caps if n else []):
                 want = int(round((t - grid_t0) * src_fps[cid]))
                 cap = caps[cid]
                 if want != pos[cid]:
@@ -795,9 +825,10 @@ def main() -> int:
                         ec[eid] = ec.get(eid, 0) + 1
             frame = np.full((OH, OW, 3), 20, np.uint8)
             frame[:PANE_H, :LEFT_W] = left
-            frame[:PANE_H, LEFT_W:] = right
+            if not a.no_grid:
+                frame[:PANE_H, LEFT_W:] = right
+                cv2.line(frame, (LEFT_W, 0), (LEFT_W, PANE_H), (60, 60, 60), 1)
             frame[PANE_H:] = bar_panel(t, tp, obs, ec)
-            cv2.line(frame, (LEFT_W, 0), (LEFT_W, PANE_H), (60, 60, 60), 1)
             vw.write(frame)
             if k % max(1, int(out_fps * 10)) == 0:
                 print(f"  {t - t0:5.1f}s / {dur:.0f}s · 재실 {len(obs)}", flush=True)

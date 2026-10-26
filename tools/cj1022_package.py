@@ -58,7 +58,8 @@ EVENTS_DEFAULT = {
     "17F_floor_end": 210, "17F_final": 765,
 }
 
-VARIANTS = {"dots": ("", ""), "heat": ("_heat", "_히트맵")}   # 입력 접미사, 출력 접미사
+VARIANTS = {"dots": ("", ""), "heat": ("_heat", "_히트맵"),
+            "nogrid": ("_nogrid", "_그리드없음")}   # nogrid: 점판에서 우측 카메라 그리드만 뺀 판   # 입력 접미사, 출력 접미사
 
 
 def mmss(sec: float) -> str:
@@ -256,7 +257,7 @@ def plan_job(o: Output, variant: str, src: Path, out_dir: Path, report_dir: Path
             (30, "0x9A9AA4", "세 화면 시계 동기 — 같은 순간의 세 층"),
             (30, "0x9A9AA4", f"16층 화면은 {mmss(EV['16F_final'])}(16층 인원 1층 탈출)에서 멈춘다"),
             (30, "0x9A9AA4", "지표는 층별 값 · 임계값 dt_hold=2.0 · "
-                             + ("히트맵판(밀도)" if variant == "heat" else "점판(원 관측)")),
+                             + {"heat": "히트맵판(밀도)", "nogrid": "점판(원 관측) · 카메라 그리드 제외"}.get(variant, "점판(원 관측)")),
             (26, "0x7A7A84", f"세션 {sess}"),
         ]
         dts, y = [], 300
@@ -444,7 +445,7 @@ def main() -> int:
     ap.add_argument("--report", action="append", default=[], metavar="ID=PATH")
     ap.add_argument("--only", action="append", default=[],
                     help="출력 id 또는 파일 이름 일부 (반복 가능): 16F_floorend 17F_floorend 16F1F_final 17F1F_final 3F_all")
-    ap.add_argument("--variant", choices=["dots", "heat", "both"], default="both")
+    ap.add_argument("--variant", choices=["dots", "heat", "nogrid", "both"], default="both")
     ap.add_argument("--jobs", type=int, default=4, help="동시 인코딩 수 (GPU 2장에 번갈아 배정)")
     ap.add_argument("--gpus", default="0,1")
     ap.add_argument("--dry-run", action="store_true")
