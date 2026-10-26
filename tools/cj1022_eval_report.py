@@ -58,7 +58,7 @@ OUTPUTS = {
     "17F_floorend": ("sess-1792821419865", ["floor7"], "17층 단독 · 피난층 종료까지", "single"),
     "16F1F_final":  ("sess-1792918154687", ["floor8", "floor9"], "16층 → 1층 · 건물 관점 (최종 종료까지)", "wide"),
     "17F1F_final":  ("sess-1792917499077", ["floor7", "floor9"], "17층 → 1층 · 건물 관점 (최종 종료까지)", "wide"),
-    "3F_all":       ("sess-1792917501527", ["floor7", "floor8", "floor9"], "건물 전체 · 17층 · 16층 · 1층", "grid"),
+    "3F_all":       ("sess-1793021833807", ["floor7", "floor8", "floor9"], "건물 전체 · 17층 · 16층 · 1층", "grid"),
 }
 #           출력 WxH,     뷰포트(css px), 배율
 FORMAT = {"single": ((1920, 1102), (1280, 735), 1.5),
@@ -121,7 +121,13 @@ def cut_replay(fl: str, sid: str, cut: float) -> dict:
     meta = recorder.load_meta(str(db))
     site = SiteConfig.model_validate(meta["site_view"])
     cams = [CameraConfig.model_validate(c) for c in meta.get("cameras", [])]
-    _apply_overrides(site, {"thresholds": {"dt_hold": DT_HOLD}})
+    # 세션 층별 편집본(.ov.json)의 임계값을 따른다 — ④ 리플레이·UI 리포트와 같은 값.
+    # 예: 1층만 r_th 0.6 (2026-10-26, 개시 판정 구역 비율 완화).
+    th = {"dt_hold": DT_HOLD}
+    ovp = SESS / fl / f"{sid}.ov.json"
+    if ovp.is_file():
+        th.update((json.loads(ovp.read_text(encoding="utf-8")).get("thresholds") or {}))
+    _apply_overrides(site, {"thresholds": th})
     eng = MetricsEngine(site, cams)
     t0 = float(meta["alarm_ts"])
     eng.start_session(t_alarm=t0, alarm_origins=[tuple(o) for o in (meta.get("alarm_origins") or [])] or None)
@@ -171,6 +177,7 @@ def cut_replay(fl: str, sid: str, cut: float) -> dict:
         })
     z = (r.zone_metrics or [None])[0]
     return {
+        "th": th,
         "floor": fl, "name": NAME[fl], "cut": cut,
         "sei": r.sei, "cbs": r.cbs_total, "epfi": r.epfi_avg,
         "epfis": [p.epfi for p in r.person_metrics if p.epfi is not None],
@@ -441,8 +448,10 @@ def slide_summary(D: dict) -> str:
                         + f'>{v}</div><div class="s">{s}</div></div>' for l, v, s in cards)
     body = (f'<div class="cards">{card_html}</div>'
             f'<div class="mrow"><div>{metric_table(D)}</div>{grade_legend()}</div>')
+    note = "".join(f" · {d['name']} IDR 개시 판정 구역 인원 비율 {d['th']['r_th'] * 100:.0f}% 이상(기본 70%)"
+                   for d in fl if (d.get("th") or {}).get("r_th") not in (None, 0.7))
     return page("피난훈련 평가 보고서", "종합 평가", f"CJ제일제당센터 · 2026-10-22 · {D['scope']}", body,
-                "경보(훈련 시작) 14:59:55 = 00:00 · 사이렌 00:05 · 시각은 경보 후 경과 시간(분:초)")
+                "경보(훈련 시작) 14:59:55 = 00:00 · 사이렌 00:05 · 시각은 경보 후 경과 시간(분:초)" + note)
 
 
 def slide_opinion(D: dict) -> str:
