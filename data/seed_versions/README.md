@@ -35,6 +35,9 @@ python tools/seed_version.py restore v1 --apply   # 라이브까지 즉시 복�
 
 ## 보관된 버전
 
+> **2026-11-24 정리.** git 에는 문서가 참조하는 버전과 최신만 둔다 — `v1` · `v5` · `v11` · `v17` · `v21` · `v22` · `v23` · **`v24`(현재 운영 스냅샷 — 건물 3개·층 10개, CJ 실훈련 1022 포함)**.
+> 나머지(`v2~v4` · `v6~v10` · `v12` · `v13` · `v18` · `v20` · `pre-zone-restore`)는 HF `backseollgi/MCMOT/data/seed_versions/` 로 옮겼다 → `bash tools/fetch_assets.sh --seeds`.
+
 | 이름 | 저장 | 내용 |
 |------|------|------|
 | `v7` | 2026-08-20 | **★ 현재 디폴트([Reset] 대상)** — 16F 출입구 **2곳 모두** 카메라 화면 '영역' 게이트: 출구1 cam06 · 출구2 cam07(각 4점 · dwell 2). 층 3개 · 카메라 12대 |

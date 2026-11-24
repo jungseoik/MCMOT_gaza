@@ -22,6 +22,7 @@
 #   bash tools/fetch_assets.sh --onnx         # ONNX만
 #   bash tools/fetch_assets.sh --cad          # CAD 원본만
 #   bash tools/fetch_assets.sh --field        # 현장 화재대피훈련 RTSP 송출본만(1F 3 + 16F 6, 294MB·비공개)
+#   bash tools/fetch_assets.sh --seeds         # 과거 seed 버전 보관분(v2~v20 중 git 에서 뺀 13개)
 #   bash tools/fetch_assets.sh --deid          # 비식별(tools/deid) 모델 3개(~215MB)
 #   bash tools/fetch_assets.sh --manual       # 사용 가이드 docx·pdf·스크린샷(버전별, ~45MB)
 #   bash tools/fetch_assets.sh --force        # 이미 있어도 다시 받기
@@ -31,7 +32,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; DO_MANUAL=0; DO_REHEARSAL=0; DO_DEID=0; FORCE=0; ANY=0
+DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; DO_MANUAL=0; DO_REHEARSAL=0; DO_DEID=0; DO_SEEDS=0; FORCE=0; ANY=0
 # 레포 루트 .env 가 있으면 HF_TOKEN 을 읽는다 (커밋 금지 파일 — .env.example 참조).
 # 없으면 `hf auth login` 으로 저장된 토큰을 hf CLI 가 쓴다.
 if [ -f "$(dirname "$0")/../.env" ]; then set -a; . "$(dirname "$0")/../.env"; set +a; fi
@@ -44,6 +45,7 @@ for a in "$@"; do
     --manual)  DO_MANUAL=1;  ANY=1 ;;
     --rehearsal) DO_REHEARSAL=1; ANY=1 ;;
     --deid)    DO_DEID=1;    ANY=1 ;;
+    --seeds)   DO_SEEDS=1;   ANY=1 ;;
     --all)     DO_WEIGHTS=1; DO_ONNX=1; DO_CAD=1; ANY=1 ;;   # field·manual은 무거워서 --all 제외
     --force)   FORCE=1 ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
@@ -168,6 +170,16 @@ if [ "$DO_REHEARSAL" -eq 1 ]; then
     echo "  검증: python tools/rehearsal_prep.py media/vsource/cj/rehearsal"
   else
     echo "  [실패] rehearsal — 비공개 MCMOT 접근 토큰(HF_TOKEN 또는 hf auth login) 필요" >&2; RC=1
+  fi
+fi
+
+if [ "$DO_SEEDS" -eq 1 ]; then
+  echo "== 과거 seed 버전 (backseollgi/MCMOT/data/seed_versions → ./data/seed_versions/) =="
+  # git 에는 문서가 참조하는 버전과 최신만 둔다(v1·v5·v11·v17·v21~v24). 나머지는 여기서 받는다.
+  if "$HF_BIN" download backseollgi/MCMOT --repo-type model --include "data/seed_versions/**" --local-dir . >/dev/null; then
+    echo "  ↓ data/seed_versions/** ($(ls data/seed_versions | wc -l)개 항목)"
+  else
+    echo "  [실패] seeds — 비공개 MCMOT 접근 토큰(HF_TOKEN) 필요" >&2; RC=1
   fi
 fi
 
