@@ -2609,7 +2609,7 @@ def debug_tracks(floor: str = DEFAULT_FLOOR_ID):
     workers = getattr(rt.ingest, "_workers", {})
     foot_dbg = eng._debug_foot   # gid -> {foot_u/v, map_x/y}
     result = []
-    for gid, d in foot_dbg.items():
+    for gid, d in list(foot_dbg.items()):   # 분석 스레드가 동시에 갱신 — 스냅샷으로 순회
         cam_id = gid.rsplit(":", 1)[0]
         worker = workers.get(cam_id)
         cam_w = getattr(worker, "width", "?") if worker else "?"
