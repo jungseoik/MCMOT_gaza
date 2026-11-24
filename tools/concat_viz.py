@@ -142,8 +142,7 @@ def main():
     ap.add_argument("--max-width", type=int, default=MAX_PANEL_W, help="per-panel max width px")
     ap.add_argument("--align", default=None,
                     help="alignment ref vector 'tx,ty,hx,hy' in ORIGINAL px (tail->head)")
-    ap.add_argument("--detector", choices=["yolox", "rfdetr"], default="yolox",
-                    help="검출기 투트랙 — rfdetr은 tools/setup_rfdetr.sh로 엔진 준비 필요")
+    ap.add_argument("--detector", choices=["yolox"], default="yolox", help="검출기 (기본 yolox)")
     ap.add_argument("--left-only", action="store_true",
                     help="원본 해상도로 좌측 ID-추적 오버레이만 저장(2D맵 패널·다운스케일 없음)")
     args = ap.parse_args()

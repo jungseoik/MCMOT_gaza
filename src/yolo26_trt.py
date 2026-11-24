@@ -3,7 +3,7 @@
 PIASPACE 제공 `yolo26l_v6.3.onnx`(사람 전용 파인튜닝)를 TRT로 구워 직접 돌린다.
 원본 참조 구현은 `ultralytics.YOLO(engine).predict()`를 쓰지만, 그렇게 하면
 AGPL 패키지와 torch 백엔드가 운영 경로(DS 컨테이너 포함)에 끌려 들어온다.
-RF-DETR과 같은 방식(`src/rfdetr_trt.py`)으로 전·후처리를 복제한다.
+전·후처리는 원 구현을 그대로 복제한다.
 
   전처리 : BGR→RGB → letterbox(imgsz, pad 114, **중앙 배치**) → /255 → NCHW float32
   후처리 : end2end(NMS 내장) 출력 (B,300,6)=[x1,y1,x2,y2,conf,cls] — letterbox

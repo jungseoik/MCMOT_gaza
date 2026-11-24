@@ -27,7 +27,6 @@ from default_settings import GeneralSettings
 from tracker.boost_track import BoostTrack, KalmanBoxTracker
 from src.inference import _get_color
 from src.inference_trt import TRTDetector, TRTReID
-from src.rfdetr_trt import RFDETRTRTDetector
 
 
 
@@ -128,7 +127,6 @@ class BoostTrackGPUInference:
         use_reid: bool = True,
         use_ecc: bool = True,
         detector: str = "yolox",
-        rfdetr_engine: str = "external/weights/trt/rfdetr_base_fp16.engine",
         profile: str | None = None,
     ):
         """profile: 추론 프로파일 id (model_zoo.py). "auto"면 현재 선택값
@@ -150,17 +148,15 @@ class BoostTrackGPUInference:
 
         self._configure_settings()
 
-        # TRT detector — 투트랙(YOLOX / RF-DETR) + 프로파일 경로(YOLO26 등).
+        # TRT detector — 기본 YOLOX + 프로파일 경로(YOLO26 등).
         # 모두 detect_frame(frame)->(dets,ref) 공통 인터페이스.
         if self.profile is not None:
             import model_zoo
             self.detector = model_zoo.build_detector(self.profile)
-        elif detector == "rfdetr":
-            self.detector = RFDETRTRTDetector(rfdetr_engine)
         elif detector == "yolox":
             self.detector = TRTDetector(yolox_engine, input_size=input_size)
         else:
-            raise ValueError(f"detector는 'yolox'|'rfdetr' — 받은 값: {detector!r}")
+            raise ValueError(f"detector는 'yolox' — 받은 값: {detector!r} (다른 검출기는 profile= 로)")
         self.detector_kind = detector
 
         # BoostTrack tracker
@@ -342,10 +338,9 @@ def main():
     parser = argparse.ArgumentParser(description="BoostTrack++ GPU-Optimized Inference")
     parser.add_argument("--input", "-i", required=True, help="Input video path")
     parser.add_argument("--output", "-o", required=True, help="Output video path")
-    parser.add_argument("--detector", choices=["yolox", "rfdetr"], default="yolox",
-                        help="검출기 선택(투트랙) — 기존 기본은 yolox")
+    parser.add_argument("--detector", choices=["yolox"], default="yolox",
+                        help="검출기 — 기본 yolox (다른 스택은 --profile)")
     parser.add_argument("--yolox_engine", default="external/weights/trt/yolox_mot20_fp16.engine")
-    parser.add_argument("--rfdetr_engine", default="external/weights/trt/rfdetr_base_fp16.engine")
     parser.add_argument("--reid_engine", default="external/weights/trt/fastreid_sbs_s50_fp16.engine")
     parser.add_argument("--det_thresh", type=float, default=0.4)
     parser.add_argument("--no_reid", action="store_true")
@@ -360,7 +355,6 @@ def main():
         profile=args.profile,
         detector=args.detector,
         yolox_engine=args.yolox_engine,
-        rfdetr_engine=args.rfdetr_engine,
         reid_engine=args.reid_engine,
         input_size=tuple(args.input_size),
         det_thresh=args.det_thresh,
