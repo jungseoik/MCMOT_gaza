@@ -151,7 +151,7 @@ hf download backseollgi/MCMOT --repo-type model --include "results/**" --local-d
 ### 4-1. 호스트 엔진 (단일영상·미리보기용)
 
 ```bash
-python src/build_trt.py                 # YOLOX + FastReID → external/weights/trt/
+python -m src.build_trt --fp16          # YOLOX + FastReID fp16 → external/weights/trt/  (--fp16 없으면 fp32 만 만들어져 서버가 못 쓴다)
 ```
 
 ### 4-2. DeepStream 컨테이너 (다채널 운영용)

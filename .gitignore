@@ -274,3 +274,6 @@ external/deep-person-reid/build/
 results/demo/_annotate/*.bak*
 # MOT17/20 val GT(단일영상 벤치용, 28MB) — HF backseollgi/MCMOT/results/gt
 results/gt/
+
+# 17F·16F 에 적용된 도면 변환본(HF cad/17F_v2.dxf) — fetch_assets.sh --cad 가 받는다
+cad/17F_v2.dxf
