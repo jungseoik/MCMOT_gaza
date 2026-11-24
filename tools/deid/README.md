@@ -21,13 +21,14 @@
   기준이 넓다.
 - 한계: 세 검출이 **모두** 놓치고 앞뒤 3 프레임 안에서도 못 찾은 경우는 가려지지 않는다.
 
-모델 파일(git 미포함):
+모델 파일(git 미포함) — 셋 다 `external/weights/deid/` 에 둔다. 새 서버에서는
+`bash tools/fetch_assets.sh --deid` 로 받는다(HF `backseollgi/MCMOT/deid/`).
 
-| 모델 | 위치 |
+| 모델 | 출처 |
 |---|---|
-| real_head_v0_l_yv11.pt | `~/seoik/.cache/pia_models/real_head_v0_l_yv11/` |
-| yolo26m.pt | `docs/reports/yolo_compare/weights/` |
-| yolo11x-pose.pt | `external/reference/reid/_weights/pose/` |
+| real_head_v0_l_yv11.pt | PIA 자체 학습 — **HF 에만 있다** |
+| yolo26m.pt | Ultralytics 배포본 사본 |
+| yolo11x-pose.pt | Ultralytics 배포본 사본 |
 
 ## 사용법
 

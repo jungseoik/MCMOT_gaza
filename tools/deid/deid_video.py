@@ -34,11 +34,11 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-HEAD_W = Path.home() / "seoik/.cache/pia_models/real_head_v0_l_yv11/real_head_v0_l_yv11.pt"
-if not HEAD_W.exists():
-    HEAD_W = Path("/home/pia/seoik/.cache/pia_models/real_head_v0_l_yv11/real_head_v0_l_yv11.pt")
-DET_W = ROOT / "docs/reports/yolo_compare/weights/yolo26m.pt"
-POSE_W = ROOT / "external/reference/reid/_weights/pose/yolo11x-pose.pt"
+# 모델 3개는 external/weights/deid/ 에 둔다 (git 미포함 — `tools/fetch_assets.sh --deid`).
+DEID_W = ROOT / "external/weights/deid"
+HEAD_W = DEID_W / "real_head_v0_l_yv11.pt"
+DET_W = DEID_W / "yolo26m.pt"
+POSE_W = DEID_W / "yolo11x-pose.pt"
 
 IMGSZ = 1280
 CONF_HEAD = 0.10

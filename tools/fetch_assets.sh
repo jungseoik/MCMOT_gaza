@@ -22,6 +22,7 @@
 #   bash tools/fetch_assets.sh --onnx         # ONNX만
 #   bash tools/fetch_assets.sh --cad          # CAD 원본만
 #   bash tools/fetch_assets.sh --field        # 현장 화재대피훈련 RTSP 송출본만(1F 3 + 16F 6, 294MB·비공개)
+#   bash tools/fetch_assets.sh --deid          # 비식별(tools/deid) 모델 3개(~215MB)
 #   bash tools/fetch_assets.sh --manual       # 사용 가이드 docx·pdf·스크린샷(버전별, ~45MB)
 #   bash tools/fetch_assets.sh --force        # 이미 있어도 다시 받기
 #   HF_TOKEN=hf_xxx bash tools/fetch_assets.sh   # MCMOT(비공개) 접근용
@@ -30,7 +31,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; DO_MANUAL=0; DO_REHEARSAL=0; FORCE=0; ANY=0
+DO_WEIGHTS=0; DO_ONNX=0; DO_CAD=0; DO_FIELD=0; DO_MANUAL=0; DO_REHEARSAL=0; DO_DEID=0; FORCE=0; ANY=0
 # 레포 루트 .env 가 있으면 HF_TOKEN 을 읽는다 (커밋 금지 파일 — .env.example 참조).
 # 없으면 `hf auth login` 으로 저장된 토큰을 hf CLI 가 쓴다.
 if [ -f "$(dirname "$0")/../.env" ]; then set -a; . "$(dirname "$0")/../.env"; set +a; fi
@@ -42,6 +43,7 @@ for a in "$@"; do
     --field)   DO_FIELD=1;   ANY=1 ;;
     --manual)  DO_MANUAL=1;  ANY=1 ;;
     --rehearsal) DO_REHEARSAL=1; ANY=1 ;;
+    --deid)    DO_DEID=1;    ANY=1 ;;
     --all)     DO_WEIGHTS=1; DO_ONNX=1; DO_CAD=1; ANY=1 ;;   # field·manual은 무거워서 --all 제외
     --force)   FORCE=1 ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
@@ -89,17 +91,17 @@ fetch() {
 RC=0
 
 if [ "$DO_WEIGHTS" -eq 1 ]; then
-  echo "== 가중치 (공개 개별 레포 — assets/__init__.py 자동다운로드와 동일 소스) =="
-  fetch "backseollgi/mot20_sbs_S50.pth"     model "mot20_sbs_S50.pth"     "external/weights/mot20_sbs_S50.pth"     || RC=1
-  fetch "backseollgi/bytetrack_x_mot20.tar" model "bytetrack_x_mot20.tar" "external/weights/bytetrack_x_mot20.tar" || RC=1
+  echo "== 가중치 (backseollgi/MCMOT/weights — 실패 시 예전 공개 개별 레포로 폴백) =="
+  for w in mot20_sbs_S50.pth bytetrack_x_mot20.tar; do
+    fetch "backseollgi/MCMOT" model "weights/$w" "external/weights/$w" \
+      || fetch "backseollgi/$w" model "$w" "external/weights/$w" || RC=1
+  done
 fi
 
 if [ "$DO_ONNX" -eq 1 ]; then
   echo "== ONNX (TRT 엔진 재빌드 원천 — backseollgi/MCMOT) =="
   fetch "backseollgi/MCMOT" model "onnx/yolox_mot20_dynamic.onnx" "external/weights/trt/yolox_mot20_dynamic.onnx" || RC=1
   fetch "backseollgi/MCMOT" model "onnx/fastreid_sbs_s50.onnx"    "external/weights/trt/fastreid_sbs_s50.onnx"    || RC=1
-  # RF-DETR(투트랙 검출기) — 이 ONNX가 있으면 tools/setup_rfdetr.sh가 rfdetr venv 없이 엔진만 빌드.
-  fetch "backseollgi/MCMOT" model "onnx/rfdetr-base.onnx"         "external/weights/onnx/rfdetr-base.onnx"        || RC=1
   # 신규 추론 프로파일(yolo26_clipreid) 원천 — 엔진 빌드는 tools/build_profile_engines.sh
   fetch "backseollgi/MCMOT" model "onnx/yolo26l_v6.3.onnx"        "external/weights/onnx/yolo26l_v6.3.onnx"       || RC=1
   fetch "backseollgi/MCMOT" model "onnx/clipreid_person.onnx"     "external/weights/onnx/clipreid_person.onnx"    || RC=1
@@ -167,6 +169,13 @@ if [ "$DO_REHEARSAL" -eq 1 ]; then
   else
     echo "  [실패] rehearsal — 비공개 MCMOT 접근 토큰(HF_TOKEN 또는 hf auth login) 필요" >&2; RC=1
   fi
+fi
+
+if [ "$DO_DEID" -eq 1 ]; then
+  echo "== 비식별 모델 (tools/deid — backseollgi/MCMOT/deid) =="
+  for f in real_head_v0_l_yv11.pt yolo26m.pt yolo11x-pose.pt; do
+    fetch "backseollgi/MCMOT" model "deid/$f" "external/weights/deid/$f" || RC=1
+  done
 fi
 
 if [ "$DO_MANUAL" -eq 1 ]; then
