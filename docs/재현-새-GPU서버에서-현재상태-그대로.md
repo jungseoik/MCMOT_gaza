@@ -250,6 +250,16 @@ ffprobe -v error rtsp://127.0.0.1:8554/field_16f_n   # 스트림이 잡히면 OK
 
 ## 6. 서비스 기동
 
+> **한 번에 띄우기.** 5·6단계의 pm2 등록은 레포 루트 **`ecosystem.config.js`** 하나로 끝난다 —
+> 운영 서버의 프로세스 23개(서버 2 + RTSP 송출 21)와 같은 구성이다. 영상이 없는 송출은 자동으로 빠진다.
+> ```bash
+> bash tools/rtsp/setup_rtsp_streams.sh --all      # mediamtx + 테스트 영상 12개(~/rtsp-stream)
+> bash tools/fetch_assets.sh --field               # 현장 영상 9개
+> GPU_DEVICES=1 pm2 start ecosystem.config.js && pm2 save
+> pm2 start ecosystem.config.js --only macs-system,evac-editor   # 서버만(리허설 파일 모드는 이것으로 충분)
+> ```
+> 포트·env 이름은 `MACS_PORT` · `EVAC_PORT` · `CONDA_ENV` 로 바꿀 수 있다. 아래는 같은 일을 손으로 하는 절차다.
+
 ```bash
 # 멀티카메라 시스템 (:8900)
 #   GPU_DEVICES 는 **그 서버의 실제 인덱스**로 바꿀 것 (nvidia-smi -L 로 확인).

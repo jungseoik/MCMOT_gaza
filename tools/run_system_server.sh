@@ -30,8 +30,9 @@ export OPENCV_FOR_THREADS_NUM="${OPENCV_FOR_THREADS_NUM:-4}"
 #   (2026-10-23 실측: 17대 리허설 12% 손실, 같은 영상인데 녹화마다 출구 카운트가 ±5 흔들림).
 export VSOURCE_FILE_NODROP="${VSOURCE_FILE_NODROP:-0}"
 
-CMD="conda run --no-capture-output -n boosttrack \
-  uvicorn system.api.server:app --host 0.0.0.0 --port 8900"
+# 포트·conda env 는 환경변수로 바꿀 수 있다(같은 서버에 두 벌 띄워 검증할 때 등).
+CMD="conda run --no-capture-output -n ${CONDA_ENV:-boosttrack} \
+  uvicorn system.api.server:app --host 0.0.0.0 --port ${MACS_PORT:-8900}"
 
 # deepstream 모드는 docker.sock 접근이 필요한데, pm2 데몬이 docker 그룹 없이
 # 떠 있으면 자식도 그룹을 못 받아 "permission denied … docker.sock"로 죽는다.
