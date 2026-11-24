@@ -88,5 +88,6 @@
     ]
   },
   "valid_roi": null,
-  "min_conf": null
+  "min_conf": 0.7,
+  "min_box_h": null
 }
