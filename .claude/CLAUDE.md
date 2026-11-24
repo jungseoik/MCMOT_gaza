@@ -20,8 +20,8 @@
 BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자를 검출·추적하고,
 평면도 좌표 변환·속도·밀도·피난 이벤트를 산출하는 피난 분석 엔진 + 웹 UI.
 
-- **추론 엔진**: `src/` — `inference.py`(PyTorch), `inference_gpu.py`/`inference_trt.py`(TRT 최적화), `build_trt.py`. **검출기 투트랙**(YOLOX ↔ RF-DETR): `BoostTrackGPUInference(detector=...)`·CLI `--detector`, RF-DETR은 `src/rfdetr_trt.py`(라이브러리 불필요)+`tools/setup_rfdetr.sh`. 근거·사용법 `docs/reports/RF-DETR-TRT-변환-사용법.md`
-- **추론 프로파일(모델 교체)**: 검출기·ReID·트래커 조합을 레포 루트 **`model_zoo.py`** 한 곳에서 갈아끼운다 — `yolox_fastreid`(기본, 기존 동작) ↔ `yolo26_clipreid`(YOLO26-L v6.3 + CLIP-ReID). 세 호출 지점(단일영상·ffmpeg 백엔드·DS 컨테이너)이 프로파일 id 하나만 받는다. **:8900 [① 설정 → 추론 모델]에서 전환**(세션 중 불가). 엔진 빌드 `tools/build_profile_engines.sh [--ds]`, ONNX는 `tools/fetch_assets.sh --onnx`. 설계 `docs/architecture/07-추론-프로파일-교체구조.md` · 실측 `docs/reports/2026-08-20_신규-추론스택-YOLO26-CLIPReID-도입-실측.md`
+- **추론 엔진**: `src/` — `inference.py`(PyTorch), `inference_gpu.py`/`inference_trt.py`(TRT 최적화), `build_trt.py`. (RF-DETR 투트랙·RT-DETRv4 프로파일은 2026-11-24 제거 — 실측 기록만 `docs/reports/` 에 남음)
+- **추론 프로파일(모델 교체)**: 검출기·ReID·트래커 조합을 레포 루트 **`model_zoo.py`** 한 곳에서 갈아끼운다 — `yolox_fastreid`(코드 기본값) ↔ `yolo26_clipreid`(YOLO26-L v6.3 + CLIP-ReID, **현재 운영 스택**). 프로파일은 이 둘뿐이다. 세 호출 지점(단일영상·ffmpeg 백엔드·DS 컨테이너)이 프로파일 id 하나만 받는다. **:8900 [① 설정 → 추론 모델]에서 전환**(세션 중 불가). 엔진 빌드 `tools/build_profile_engines.sh [--ds]`, ONNX는 `tools/fetch_assets.sh --onnx`. 설계 `docs/architecture/07-추론-프로파일-교체구조.md` · 실측 `docs/reports/2026-08-20_신규-추론스택-YOLO26-CLIPReID-도입-실측.md`
 - **단일채널 웹 UI**: `webui/` — `server.py`, 속도/밀도/카운팅/뎁스 모듈, RTSP 라이브 (포트 8000)
 - **보조 편집기(발표·분석 전용, 운영 설정 무관)**: 장애물 표시 **:8920** `tools/obstacle_editor.py` (→ `results/demo/_annotate/obstacles_<층>.json`, 피난경로가 벽으로 취급) · 병목 위치 **:8940** `tools/bottleneck_editor.py` (→ `bn_edit_<층>.json`, demo 렌더·v2 지표가 읽음) · 동선 편집기 **:8930** `tools/path_editor.py`
 - **발표용 시각화**: `tools/demo_viz.py`(녹화 세션 → 지표가 보이는 영상) · `tools/floor_demo_viz.py`(층 라이브 — 2×2 그리드·SSE 보간·서브픽셀) · `tools/demo_loopfold.py`(루프 영상 여러 바퀴를 겹쳐 사람별 궤적 복원) · `tools/record_opsview.py`(운영 뷰 화면 녹화) · `tools/compose_grid.py`(녹화 + 카메라 그리드 싱크 합성). 기록 `results/demo/README.md` · `results/floor_viz/README.md` · `results/rehearsal_sessions/README.md`
@@ -42,7 +42,7 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 | `docs/guide/` | **사용 가이드 허브(3종)** — 단일영상-분석-MVP(:8000) · 멀티카메라-시스템 4대지표(:8900) · 도면-편집기(:8910). 각 하위폴더 README + img (스크린샷 기반) |
 | `docs/manual/` | **배포용 사용 매뉴얼(PDF·DOCX)** — 버전 폴더 = 스냅샷. 원고(`원고.md`)만 git, 산출물·img 는 HF. 최신 **v0.0.8**(2026-10-01, A4 67쪽). 개정은 `/manual-build` 스킬 |
 | `docs/optimization-report.md` | 추론 최적화 보고서 |
-| `docs/재현-새-GPU서버에서-현재상태-그대로.md` | **새 서버/노트북에서 현재 운영상태 그대로 재현** — clone + HF 토큰만으로 12채널·17F/16F/10F·AI hub 1·3층 도면·리허설 패키지·편집기까지. `tools/fetch_assets.sh [--rehearsal]` + `tools/seed_version.py restore v11 --apply` |
+| `docs/재현-새-GPU서버에서-현재상태-그대로.md` | **새 서버/노트북에서 현재 운영상태 그대로 재현** — clone + `.env` 토큰 2종(`HF_TOKEN`=backseollgi/MCMOT · `HF_TOKEN_PIA`=PIA-SPACE 원본)으로 건물 3개·층 10개·리허설 패키지 4개·세션·편집기까지. `pip install -r requirements.lock.txt` + `tools/fetch_assets.sh [--rehearsal --deid --seeds]` + `tools/seed_version.py restore v24 --apply`. **재현 범위는 :8900·:8910**(단일영상 `webui/`·`src/` 는 범위 밖). 단계마다 `python tools/smoke_ports.py --compare results/_smoke/baseline.json` 로 회귀 확인 |
 | `docs/설치-맨서버-부트스트랩.md` | **순정 우분투(드라이버만) 0단계 시스템 준비** — conda·docker·nvidia-container-toolkit·ffmpeg·node/pm2·CAD 복붙 체크리스트 + 기능별 필수의존 표 + 재현 판정. 대용량은 `tools/fetch_assets.sh`(HF `backseollgi/MCMOT`) |
 | `docs/이관가이드-다른-GPU-서버로.md` | **다른 GPU 서버 이관 체크리스트** — 현 기준은 전부 Blackwell(sm_120). 다른 아키텍처(RTX 5000 Ada 등)면 TRT 엔진 재빌드·한계 재측정·`GPU_DEVICES` 실인덱스 확인 필수 |
 | `docs/현장-NVR-RTSP-수집-대응계획.md` | **PoC 현장(CJ제일제당) NVR 수집 계획** — H.265/VBR/RTSP 세션 개념 정리 + 수집 아키텍처 3안 비교(권장: 로컬 mediamtx 허브) + 현장 진단 체크리스트·업체 요청서 |
@@ -55,7 +55,8 @@ BoostTrack++ 다중 객체 추적(MOT)을 활용해 CCTV 영상에서 재실자�
 
 - 문서는 **한국어**로 작성하고, 각 하위 폴더에는 인덱스 `README.md`를 둔다(기존 컨벤션).
 - 새 요구사항/스펙이 추가되면 `docs/requirements/`에 넣고 이 CLAUDE.md의 북극성 링크를 갱신한다.
-- 환경: conda `boosttrack` (Python 3.12). 설치는 `requirements.txt` + `install_yolox.sh` 참조.
+- 환경: conda `boosttrack` (Python 3.12). 설치는 `requirements.lock.txt`(정확한 버전 고정) + `install_yolox.sh`. 패키지를 바꾸면 잠금 파일도 갱신한다.
+- **대용량·모델은 HF `backseollgi/MCMOT` 한 곳**에서 관리한다(`weights/` · `onnx/` · `deid/` · `cad/` · `media/vsource/` · `field/` · `data/` · `results/` · `manual/`). 새 자산을 추가하면 `tools/fetch_assets.sh` 와 재현 문서의 표를 함께 갱신한다. TRT 엔진은 GPU 종속이라 올리지 않는다.
 - **주간 WBS 점검**: 매주 레포 기준으로 WBS 진척을 점검하고 기록한다 → **`/wbs-review` 스킬**.
   최신 WBS는 그 주차 폴더(`docs/weekly/YYYY-MM-N주차/C-lab_PoC_WBS_vN.xlsx`)에 두고(컨벤션 #1),
   수정 시 `vN→vN+1` 버전업 + 변경이력(`docs/wbs/WBS-변경이력.md`) 기록 + 진척 보고서

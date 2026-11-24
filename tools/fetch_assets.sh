@@ -21,7 +21,7 @@
 #   bash tools/fetch_assets.sh --weights      # 가중치만(공개, 토큰 불필요)
 #   bash tools/fetch_assets.sh --onnx         # ONNX만
 #   bash tools/fetch_assets.sh --cad          # CAD 원본만
-#   bash tools/fetch_assets.sh --field        # 현장 화재대피훈련 RTSP 송출본만(1F 3 + 16F 6, 294MB·비공개)
+#   bash tools/fetch_assets.sh --field        # 현장 화재대피훈련 영상 — RTSP 송출본(encoded 294MB) + 원본 avi(raw 450MB)
 #   bash tools/fetch_assets.sh --seeds         # 과거 seed 버전 보관분(v2~v20 중 git 에서 뺀 13개)
 #   bash tools/fetch_assets.sh --deid          # 비식별(tools/deid) 모델 3개(~215MB)
 #   bash tools/fetch_assets.sh --manual       # 사용 가이드 docx·pdf·스크린샷(버전별, ~45MB)
@@ -149,8 +149,7 @@ fi
 
 if [ "$DO_FIELD" -eq 1 ]; then
   echo "== 현장 영상 (실제 화재대피훈련 0521 — backseollgi/MCMOT/field, 비공개·개인정보) =="
-  # HF 에는 **RTSP 송출본(encoded/, H.264 mp4)** 만 올려둔다 — 9채널 송출에 필요한 최소 집합.
-  # 원본 avi(raw/)·추론 산출물(infer/)은 4.9GB 라 원본 서버에만 둔다.
+  # HF 에는 RTSP 송출본(encoded/, H.264 mp4)과 원본 avi(raw/)가 있다. 9채널 송출에는 encoded 만 쓴다.
   if "$HF_BIN" download backseollgi/MCMOT --repo-type model --include "field/**" --local-dir . >/dev/null; then
     echo "  ↓ field/** → ./field/  ($(du -sh field 2>/dev/null | cut -f1))"
   else

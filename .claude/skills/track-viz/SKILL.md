@@ -43,13 +43,9 @@ $PY tools/concat_viz.py
 # 방향성 정렬도(alignment) 시각화: 출구 방향 기준벡터(꼬리->머리, 원본 px)
 $PY tools/concat_viz.py vid.mp4 --align "tx,ty,hx,hy"
 
-# 검출기 투트랙: 기본 yolox. RF-DETR로 바꾸려면(고소·어안 화각에 강함) 엔진 준비 후 --detector rfdetr
-#   bash tools/setup_rfdetr.sh   # 1회(모델다운→ONNX→TRT). 근거: docs/reports/RF-DETR-TRT-변환-사용법.md
-$PY tools/concat_viz.py vid.mp4 --detector rfdetr
 ```
 `--align` 를 주면 우측 맵의 객체 화살표가 정렬색(녹=정렬/황=가로질러/적=역류)으로
 칠해지고 평균 정렬도가 표기된다. 안 주면 기존대로 동작(opt-in).
-`--detector rfdetr` 는 검출기만 RF-DETR로 교체(트래커·ReID 동일). 안 주면 기존 YOLOX.
 - 출력: `<out>/<영상명>_concat.mp4`. 좌우 패널 각 `max-width` 이하로 다운스케일(4K 부담↓).
 - 배치가 오래 걸리면 **백그라운드로 실행**하고 `> <out>/_batch.log 2>&1` 로 로그를 남긴다.
 

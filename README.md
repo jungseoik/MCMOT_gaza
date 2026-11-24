@@ -9,15 +9,16 @@ BoostTrack++ 다중 객체 추적(MOT) 기술을 활용하여 실시간으로 �
 > **[docs/설치-맨서버-부트스트랩.md](docs/설치-맨서버-부트스트랩.md)** 의 "0단계: 시스템 준비"
 > (conda·docker·nvidia-container-toolkit·ffmpeg·node/pm2·CAD 스택)를 복붙으로 갖춘 뒤 아래로.
 > 대용량 자산(가중치·ONNX·CAD)은 `bash tools/fetch_assets.sh` 로 일괄 다운로드
-> (HF `backseollgi/MCMOT`; 현재 비공개라 `HF_TOKEN` 필요).
+> (HF `backseollgi/MCMOT`; 비공개라 `.env` 의 `HF_TOKEN` 필요 — `.env.example` 참조).
+> **운영 서버와 똑같이 재현**하려면 → **[docs/재현-새-GPU서버에서-현재상태-그대로.md](docs/재현-새-GPU서버에서-현재상태-그대로.md)**
 
 ```bash
 # Conda 가상환경 생성
 $ conda create -n boosttrack python=3.12 -y
 $ conda activate boosttrack
 
-# 종속성 설치
-$ pip install -r requirements.txt
+# 종속성 설치 — 운영 서버와 같은 버전으로 고정(권장). 최신으로 받으려면 requirements.txt
+$ pip install -r requirements.lock.txt
 
 # yolox 설치 (torch 빌드 의존성으로 별도 설치)
 $ bash install_yolox.sh
@@ -33,7 +34,8 @@ $ bash install_yolox.sh
 
 **가중치는 `import assets` 시점에 HuggingFace에서 자동 다운로드된다** (`assets/__init__.py`).
 추론/추적 코드가 `assets`를 import하면 아래 파일이 없을 때 `external/weights/`로 내려받는다.
-**두 레포 모두 공개**라 **토큰 불필요**(clone 후 첫 실행에 자동 확보).
+1차로 `backseollgi/MCMOT/weights/`(비공개, `.env` 의 `HF_TOKEN`)에서 받고, 실패하면 아래 **공개 개별 레포**로
+폴백한다(토큰 불필요).
 
 | 모델 종류 | HF repo (공개) | 저장 경로 |
 |-----------|--------------------------|----------------------------|
@@ -63,28 +65,25 @@ $ python -m src.build_trt --fp16
 $ python -m src.inference_gpu -i video.mp4 -o output.mp4
 ```
 
-### 검출기 투트랙 (YOLOX ↔ RF-DETR)
-검출기만 갈아끼울 수 있다(트래커 BoostTrack++·ReID 백엔드는 동일). RF-DETR은
-파인튜닝 없이 상용 사전학습(COCO)을 TRT fp16으로 쓰며, 고소·어안 등 어려운 화각에서
-YOLOX보다 잘 잡는다. 자세한 근거·설계는 [docs/reports/RF-DETR-TRT-변환-사용법](docs/reports/RF-DETR-TRT-변환-사용법.md).
+### 다른 추론 스택 (프로파일)
+검출기·ReID 조합은 `model_zoo.py` 의 **추론 프로파일**로 고른다 — `yolox_fastreid`(기본) ·
+`yolo26_clipreid`(YOLO26-L v6.3 + CLIP-ReID, 현재 :8900 운영 스택).
 ```bash
-# RF-DETR 엔진 준비(모델 다운로드→ONNX→TRT fp16, 1회). HF ONNX가 있으면 fetch만으로도 됨:
-$ bash tools/fetch_assets.sh --onnx   # (선택) HF에서 rfdetr-base.onnx 받기
-$ bash tools/setup_rfdetr.sh          # 엔진 빌드 → external/weights/trt/rfdetr_base_fp16.engine
-
-# 검출기 선택 실행
-$ python -m src.inference_gpu -i video.mp4 -o out.mp4 --detector rfdetr --det_thresh 0.15 --no_ecc
+$ bash tools/build_profile_engines.sh                      # 프로파일 엔진 빌드(1회)
+$ python -m src.inference_gpu -i video.mp4 -o out.mp4 --profile yolo26_clipreid
 ```
+> RF-DETR 투트랙·RT-DETRv4 실험 프로파일은 2026-11-24 제거했다(서버 미사용). 실측 기록은
+> `docs/reports/` 에 남아 있다.
 
 ### 공통 옵션
 | 인자 | 기본값 | 설명 |
 |------|--------|------|
 | `--input`, `-i` | (필수) | 입력 비디오 경로 |
 | `--output`, `-o` | (필수) | 출력 비디오 경로 |
-| `--detector` | yolox | 검출기 선택: `yolox` \| `rfdetr` (투트랙) |
-| `--det_thresh` | 0.4 | 탐지 신뢰도 임계값 (RF-DETR 권장 0.15) |
+| `--profile` | (없음) | 추론 프로파일 id — 지정 시 검출기·ReID·임계값이 프로파일에서 온다 |
+| `--det_thresh` | 0.4 | 탐지 신뢰도 임계값 |
 | `--no_reid` | false | ReID 외형 특징 비활성화 |
-| `--no_ecc` | false | 카메라 모션 보정 비활성화 (고정 CCTV·RF-DETR 권장) |
+| `--no_ecc` | false | 카메라 모션 보정 비활성화 (고정 CCTV 권장) |
 
 ### Python API
 ```python
@@ -93,9 +92,9 @@ from src.inference import BoostTrackInference
 tracker = BoostTrackInference(det_thresh=0.4)
 result = tracker.run("input.mp4", "output.mp4")
 
-# 고속 (검출기 투트랙 — "yolox"(기본) | "rfdetr")
+# 고속 (TRT) — 다른 스택은 profile="yolo26_clipreid"
 from src.inference_gpu import BoostTrackGPUInference
-tracker = BoostTrackGPUInference(detector="yolox")            # 또는 detector="rfdetr"
+tracker = BoostTrackGPUInference()                            # 또는 profile="yolo26_clipreid"
 result = tracker.run("input.mp4", "output.mp4")
 ```
 

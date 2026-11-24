@@ -1,5 +1,8 @@
 # 검출기 투트랙 (YOLOX ↔ RF-DETR) · RF-DETR TRT 변환·사용법
 
+> ⚠️ **2026-11-24 제거됨.** RF-DETR 투트랙(`src/rfdetr_trt.py` · `tools/setup_rfdetr.sh` · `--detector rfdetr`)은
+> 서버가 쓰지 않아 코드·모델을 지웠다. 이 문서는 당시 실측·설계 기록으로만 남긴다. 되살리려면 커밋 `b3c64f6` 이전을 참고.
+
 현장 exit 카메라(고소·급경사·어안·문앞 초크포인트) 화각에서 기존 YOLOX-MOT20이 사람을
 자주 놓치는 문제 → **파인튜닝 없이** 상용 사전학습 [**RF-DETR base**](https://github.com/roboflow/rf-detr)
 (Roboflow, ICLR 2026, Apache-2.0)를 TensorRT fp16으로 얹어 **검출기를 갈아끼울 수 있게** 통합했다.

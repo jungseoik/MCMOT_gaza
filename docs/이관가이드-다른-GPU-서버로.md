@@ -53,7 +53,7 @@ nvidia-smi | grep "CUDA Version"     # 드라이버가 지원하는 CUDA
 git clone <repo> && cd MCMOT_gaza
 git checkout feature/deepstream-ingest       # 또는 병합된 브랜치
 conda create -n boosttrack python=3.12 && conda activate boosttrack
-pip install -r requirements.txt              # ⚠️ CUDA 버전 대상 서버에 맞는지 §1 확인 후
+pip install -r requirements.lock.txt         # 운영 서버와 같은 버전. ⚠️ CUDA 버전이 다르면 requirements.txt 로 받고 §1 확인
 bash install_yolox.sh
 ```
 
@@ -88,9 +88,8 @@ CUDA_VISIBLE_DEVICES=<빈GPU> conda run -n boosttrack python docs/reports/bench/
 # (a) 호스트 conda용 엔진 → external/weights/trt/   (단일영상/webui 경로)
 CUDA_VISIBLE_DEVICES=<빈GPU> conda run -n boosttrack python -m src.build_trt --fp16
 
-# (a-2) RF-DETR 검출기(투트랙, 선택) → external/weights/trt/rfdetr_base_fp16.engine
-#   ONNX(HF)만 있으면 rfdetr 라이브러리 없이 엔진만 재빌드된다.
-CUDA_VISIBLE_DEVICES=<빈GPU> bash tools/setup_rfdetr.sh
+# (a-2) 운영 프로파일(YOLO26-L + CLIP-ReID) 엔진 — 호스트·DS 컨테이너 한 번에
+CUDA_VISIBLE_DEVICES=<빈GPU> bash tools/build_profile_engines.sh --ds
 
 # (b) DeepStream 컨테이너용 엔진 → external/weights/trt_ds/  (멀티카메라 경로)
 docker build -t macs-deepstream:9.0 system/ingest_ds/docker    # 이미지 먼저

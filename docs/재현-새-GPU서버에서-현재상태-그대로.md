@@ -1,7 +1,12 @@
 # 새 GPU 서버/노트북에서 현재 상태 그대로 재현하기
 
-`git clone` + **HF 토큰 하나**로 지금 이 서버(:8900 12채널 · 17F/16F 도면 · CAD 편집기)와
-같은 상태를 만드는 절차. 위에서 아래로 그대로 따라가면 된다.
+`git clone` + **HF 토큰**으로 지금 이 서버(:8900 멀티카메라 시스템 · :8910 CAD 편집기 ·
+건물 3개/층 10개 · 리허설 패키지 4개)와 같은 상태를 만드는 절차. 위에서 아래로 그대로 따라가면 된다.
+
+> **재현 범위(2026-11-24 기준).** 재현·검증 대상은 **:8900 과 :8910** 이다.
+> 단일영상 `webui/`(:8000)·`src/` 추론 코드는 레포에 있지만 재현 검증 대상이 아니다.
+> 추론 프로파일은 `yolox_fastreid` · `yolo26_clipreid` **두 개**다(RF-DETR·RT-DETRv4 는 제거됨).
+> 진행 중 동작 확인은 `python tools/smoke_ports.py` (8단계).
 
 > 이 문서는 **"돌아가게 만드는 것"**이 목표다.
 > OS 부트스트랩(드라이버·conda·docker·ffmpeg 설치)은
@@ -31,24 +36,26 @@ git clone https://github.com/jungseoik/MCMOT_gaza.git
 cd MCMOT_gaza
 git checkout feature/inference-module          # 현재 통합 브랜치
 
-conda env create -f environment.yml            # 또는 requirements.txt
+conda create -n boosttrack python=3.12 -y
 conda activate boosttrack
-bash install_yolox.sh
+pip install -r requirements.lock.txt           # 운영 서버와 같은 버전(정확히 고정)
+bash install_yolox.sh                          # yolox 는 빌드 때 torch 가 필요해 따로
 ```
 
 ## 2. HF 토큰
 
+토큰은 **2개**다. 계정이 달라 서로의 레포를 못 본다.
+
+| 변수 | 계정 | 쓰임 |
+|---|---|---|
+| `HF_TOKEN` | `backseollgi` | **필수.** 비공개 `backseollgi/MCMOT` — 모델·ONNX·CAD·영상·세션·매뉴얼 전부 |
+| `HF_TOKEN_PIA` | `PIA-SPACE` | 선택. 촬영 원본 데이터셋 `PIA-SPACE/C-lab*` 를 다시 받을 때만 |
+
 ```bash
-export HF_TOKEN=hf_xxxxxxxxxxxxxxxx            # 절대 커밋 금지
-# 또는:  hf auth login
+cp .env.example .env && $EDITOR .env           # 두 값을 채운다. 절대 커밋 금지
 ```
 
-### 토큰을 파일로 두기 (선택)
-레포 루트 `.env` 에 `HF_TOKEN` 을 적어두면 `tools/fetch_assets.sh` 가 자동으로 읽는다(커밋 금지).
-`hf auth login` 으로 저장해도 된다 — 둘 중 하나.
-```bash
-cp .env.example .env && $EDITOR .env      # HF_TOKEN=hf_xxx (backseollgi/MCMOT 읽기 권한)
-```
+`tools/fetch_assets.sh` 가 `.env` 를 자동으로 읽는다. `hf auth login`(backseollgi)으로 저장해도 된다.
 
 ## 3. 대용량 자산 내려받기
 
@@ -58,13 +65,35 @@ git 에는 없는 것들(가중치·ONNX·CAD 원본·현장 영상)을 한 번�
 bash tools/fetch_assets.sh              # 가중치 + ONNX + CAD 원본
 bash tools/fetch_assets.sh --field      # 현장 훈련영상 송출본 (294MB, 9채널)
 bash tools/fetch_assets.sh --manual     # 사용 가이드 docx·pdf (선택)
+bash tools/fetch_assets.sh --deid       # 비식별(tools/deid) 모델 3개 (선택)
+bash tools/fetch_assets.sh --seeds      # git 에서 뺀 과거 seed 버전 13개 (선택)
 ```
+
+### HF `backseollgi/MCMOT` 에 있는 것 (한 곳에서 관리)
+
+| HF 경로 | 내용 | 받는 법 |
+|---|---|---|
+| `weights/` | ReID·검출 가중치(`mot20_sbs_S50.pth` · `bytetrack_x_mot20.tar`) | 기본 실행 / import 시 자동 |
+| `onnx/` | TRT 엔진 원천 ONNX 4개(YOLOX·FastReID·YOLO26-L·CLIP-ReID) | 기본 실행 |
+| `deid/` | 비식별 모델 3개 | `--deid` |
+| `cad/` | 도면 원본·추출물 | 기본 실행 |
+| `media/vsource/` | 리허설 패키지 4개 영상(약 43GB) | `--rehearsal` |
+| `field/encoded/` · `field/raw/` | 현장 훈련영상 송출본 · 원본 avi | `--field` |
+| `videos/` | RTSP 테스트 영상 12개 | `tools/rtsp/setup_rtsp_streams.sh` |
+| `data/sites/default/sessions/` | 세션 녹화본 전체(2026-11-24 스냅샷, 10GB) | 아래 "세션 녹화본" |
+| `data/seed_versions/` | 과거 seed 버전 | `--seeds` |
+| `results/` | 발표·시각화 산출물, MOT GT | 아래 "세션 녹화본" 과 같은 방식 |
+| `manual/` | 사용 가이드 | `--manual` |
+
+**다른 곳에서 다시 받을 수 있는 것**(HF MCMOT 에 없어도 됨): DeepStream 베이스 이미지(NGC),
+pip 패키지(PyPI·PyTorch·NVIDIA 인덱스), 촬영 원본(`PIA-SPACE/C-lab` · `C-lab-AIHub` ·
+`C-lab-AIHub-2026-10-22`). **TRT 엔진은 어디에도 두지 않는다** — GPU 종속이라 4단계에서 빌드한다.
 
 받아지는 것:
 
 ```
-external/weights/mot20_sbs_S50.pth          ReID 가중치       (공개, 토큰 불필요)
-external/weights/bytetrack_x_mot20.tar      검출 가중치       (공개, 토큰 불필요)
+external/weights/mot20_sbs_S50.pth          ReID 가중치       (MCMOT/weights — 실패 시 공개 개별 레포 폴백)
+external/weights/bytetrack_x_mot20.tar      검출 가중치       (〃)
 external/weights/trt/*.onnx                 TRT 엔진 원천     (MCMOT, 토큰 필요)
 cad/17F.dwg · 17F.dxf · 17F_v2.dwg · …      도면 원본         (MCMOT, 토큰 필요)
 field/encoded/1F/*.mp4 · 16F/*.mp4          현장 RTSP 송출본  (MCMOT, 토큰 필요)
@@ -97,11 +126,22 @@ field/encoded/1F/*.mp4 · 16F/*.mp4          현장 RTSP 송출본  (MCMOT, 토�
 
 ### 리허설 패키지 영상 (ADR 09)
 ```bash
-bash tools/fetch_assets.sh --rehearsal    # backseollgi/MCMOT/media/vsource/** → ./media/vsource/ (1.4GB)
-python tools/rehearsal_prep.py media/vsource/cj/rehearsal   # 64파일 baseline 검증 → ✅
+bash tools/fetch_assets.sh --rehearsal    # backseollgi/MCMOT/media/vsource/** → ./media/vsource/ (약 43GB)
 ```
-패키지 정의(`media/vsource/cj/rehearsal/rehearsal.json` — 시나리오·카메라·**매핑**)는 git 에
-들어 있으므로 clone 만으로 따라온다. 영상만 HF 에서 받는다.
+패키지 4개가 한 번에 내려온다: `aihub/rehearsal`(5.3GB) · `aihub/drill-1f3f`(22GB) ·
+`cj/rehearsal`(2.5GB) · `cj/drill-1022`(12.7GB). 패키지 정의(`rehearsal.json` — 시나리오·카메라·**매핑**)는
+git 에 들어 있으므로 clone 만으로 따라온다. 영상만 HF 에서 받는다.
+
+> `python tools/rehearsal_prep.py <패키지>` 는 점검 결과를 `rehearsal.json` 의 `prep` 에 **덮어쓴다**
+> (git 변경이 생긴다). 확인만 할 거면 돌린 뒤 `git checkout -- media/vsource` 로 되돌린다.
+
+### 세션 녹화본·결과물 (선택)
+```bash
+set -a; . ./.env; set +a
+hf download backseollgi/MCMOT --repo-type model --include "data/sites/default/sessions/**" --local-dir .
+hf download backseollgi/MCMOT --repo-type model --include "results/**" --local-dir .
+```
+세션은 ④ 리플레이·지표 재계산의 입력이고, `results/` 는 그 세션으로 만든 발표·시각화 영상이다.
 
 ## 4. TRT 엔진 빌드 (GPU마다 필수)
 
@@ -112,7 +152,6 @@ python tools/rehearsal_prep.py media/vsource/cj/rehearsal   # 64파일 baseline 
 
 ```bash
 python src/build_trt.py                 # YOLOX + FastReID → external/weights/trt/
-bash tools/setup_rfdetr.sh              # RF-DETR (선택)
 ```
 
 ### 4-2. DeepStream 컨테이너 (다채널 운영용)
@@ -140,10 +179,10 @@ docker run --rm --gpus device=1 -v "$PWD:/workspace" -w /workspace macs-deepstre
   --memPoolSize=workspace:4096M'
 ```
 
-### 4-3. 신규 추론 프로파일 (YOLO26-L + CLIP-ReID) — 선택
+### 4-3. 운영 추론 프로파일 (YOLO26-L + CLIP-ReID)
 
-`:8900 [① 설정 → 추론 모델]`에서 고를 수 있는 두 번째 스택. 엔진이 없으면 UI에
-"엔진 없음"으로 뜨고 선택되지 않으니, 쓸 계획이면 여기서 함께 구워 둔다.
+**현재 운영 서버가 쓰는 스택**이다(`:8900 [① 설정 → 추론 모델]`). 엔진이 없으면 UI에
+"엔진 없음"으로 뜨고 선택되지 않으니 여기서 함께 구워 둔다.
 호스트·컨테이너 엔진을 한 번에 만든다(각 1분 남짓):
 
 ```bash
@@ -151,8 +190,8 @@ bash tools/fetch_assets.sh --onnx            # 3단계에서 이미 받았으면
 bash tools/build_profile_engines.sh --ds     # --ds 없으면 호스트 엔진만
 ```
 
-기본 프로파일은 기존 스택(`yolox_fastreid`)이라, 굽지 않아도 운영 재현에는 지장이
-없다. 배포 기본값을 바꾸려면 `INFER_PROFILE=yolo26_clipreid` 환경변수를 준다
+코드 기본값은 기존 스택(`yolox_fastreid`)이다. 운영 서버와 같게 하려면 UI에서
+YOLO26-L + CLIP-ReID 를 고르거나 `INFER_PROFILE=yolo26_clipreid` 환경변수를 준다
 (UI에서 고른 값은 `data/infer_profile.json`에 남으며 git에는 올라가지 않는다).
 설계·실측 근거: `docs/architecture/07-추론-프로파일-교체구조.md`.
 
@@ -233,42 +272,40 @@ pm2 save
 층·맵·카메라·매핑·구역이 전부 들어 있는 스냅샷을 통째로 되돌린다.
 
 ```bash
-python tools/seed_version.py list          # 보관된 버전 확인
-python tools/seed_version.py show v5       # 내용 미리보기
-python tools/seed_version.py restore v5 --apply
+python tools/seed_version.py list           # 보관된 버전 확인
+python tools/seed_version.py show v24       # 내용 미리보기
+python tools/seed_version.py restore v24 --apply
 ```
 
-`v5` 가 현재 운영 구성이다 (= `data/seed/` 와 동일. 서버 첫 기동 시 자동 복사되므로
-7단계는 확인용이고, 실험 후 원복할 때 쓴다):
+**`v24` 가 현재 운영 구성이다**(2026-11-24 라이브 스냅샷). `data/seed/`([Reset] 대상)는 그보다
+이전 상태(층 7개)라, 운영 서버와 같게 만들려면 반드시 `restore v24 --apply` 를 한다.
 
 ```
-default  17F     3400x3207  0.02391 m/px (수동 2점)  경로2 구역3 병목2 출입구2
-floor2   16F     2000x1887  0.03662 m/px (CAD 자동)  경로8 구역9 병목4 출입구2
-floor3   지상1층  2346x1672  0.04    m/px (CAD 자동)  요소 없음
+건물 cj     CJ제일제당센터      default(17F) · floor2(16F) · floor3(지상1층) · floor10(10F)
+건물 aihub  AI-hub             floor4(AI hub 3층) · floor5(AI hub 1층) · floor6(3층 1차 리허설)
+건물 cjpoc  최종CJ제일제당PoC   floor7(17층) · floor8(16층) · floor9(1층)   ← CJ 실훈련 1022
 
-cam01~cam03  17F   매핑 O   (1_v1 · 2_v1 · 3_v1)
-cam04~cam09  16F   매핑 O   (field_16f_*)
-cam10~cam12  지상1층 미매핑·비활성 (field_1f_*)
-유효 ROI 없음 — 대응점 컨벡스 헐이 자동으로 투영 게이트가 된다
+cam01~cam03  17F     매핑 O   (1_v1 · 2_v1 · 3_v1)
+cam04~cam09  16F     매핑 O   (field_16f_*)
+cam10~cam12  지상1층  미매핑·비활성 (field_1f_*)
 ```
 
 | 버전 | 내용 |
 |---|---|
-| `v1` | 초기 시드 — 17F·19F 시드맵, 카메라 3대 |
-| `v2` | 16F CAD 적용 + 현장 6채널 매핑 (17F 도 CAD 상태) |
-| `v3` | 17F 는 시드 도면 3채널, 16F 는 CAD·현장 6채널 |
-| `v4` | ROI 전부 제거 + 16F 병목 4·수동경로 r1~r3 |
-| `v5` | **현재** — 화면 통과선 기능 도입 시점 · cam06 재매핑 |
+| `v1` · `v5` | 초기 3층 구성 · 화면 통과선 도입 시점 |
+| `v11` | AI hub 1층·3층 추가 |
+| `v17` | 건물 개념 + 출구 카운팅 GT 14/14 세팅 |
+| `v21`~`v23` | IDR 판정식 v1.13 · EPFI d_allow 조정 |
+| `v24` | **현재** — 건물 3개·층 10개, CJ 실훈련 1022 포함 |
+
+git 에 없는 과거 버전(`v2~v4` · `v6~v10` · `v12` · `v13` · `v18` · `v20`)은 `bash tools/fetch_assets.sh --seeds`.
 
 `restore` 는 되돌리기 직전 상태를 `auto-<타임스탬프>` 로 자동 보관한다.
 세부는 [data/seed_versions/README.md](../data/seed_versions/README.md).
 
 ## 7-b. 리허설 시연 (RTSP 불필요 — 파일 모드)
 리허설 패키지는 **RTSP 송출 없이** 영상 파일을 직접 읽어 프레임 잠금 동기로 분석한다
-(ADR 09 §11). 5절의 송출 서버가 없어도 시연된다. 사이트 seed 는 **v17**(건물 개념 + 출구 카운팅 GT 14/14 세팅)로:
-```bash
-python tools/seed_version.py restore v17 --apply   # 건물(CJ제일제당센터·AI-hub) + 17F·16F·1F + 10F + AI hub 1·3층
-```
+(ADR 09 §11). 5절의 송출 서버가 없어도 시연된다. 사이트 seed 는 7단계의 **v24** 그대로면 된다(4개 패키지의 층이 모두 들어 있다).
 :8900 → ⑤ 리허설 → 📦 CJ제일제당센터 리허설 → 시나리오 선택 → [층] 10F → **[▶ 준비 (파일)]**
 → (매핑은 패키지에 이미 저장돼 있음) → ③ 운영 뷰에서 경보 발생원 [+ 추가] → **[🎬 리허설 훈련 시작]**
 → 27~33초 재생 · 4대 지표 · 세션 결과. 호스트 GPU 에 추론 프로파일 엔진(4-3절)이 있어야 한다.
@@ -276,7 +313,8 @@ python tools/seed_version.py restore v17 --apply   # 건물(CJ제일제당센터
 ## 8. 확인
 
 ```bash
-curl -s localhost:8900/api/floors | python -m json.tool      # 층 3개
+python tools/smoke_ports.py                                  # :8900·:8910 GET 경로 + RTSP 송출 병렬 확인
+curl -s localhost:8900/api/floors | python -m json.tool      # 층 10개
 curl -s localhost:8900/api/cameras | python -c "
 import json,sys
 for c in json.load(sys.stdin):
@@ -329,6 +367,8 @@ GPU 1장당 총 처리량 상한   ≈ 75~78 fps
 | 항목 | 이유 |
 |---|---|
 | TRT 엔진 | GPU 아키텍처 종속 — 4단계에서 재빌드 |
-| 세션 녹화본(`data/sites/*/sessions/`) | 실행 이력이라 옮기지 않음 |
-| `field/raw`, `field/infer` | 원본 avi·추론 산출물(4.9GB) — 원본 서버에만 있음. 송출엔 `encoded` 로 충분 |
+| `field/infer` | 검출기 비교 산출물 — 2026-11-24 삭제(비교 종료) |
+| 비식별 사본(`media/**/_deid/`) | 재생성 가능 — `tools/deid/deid_video.py` |
+| 재인코딩 전 원본(`_orig_high_profile`) | 출처가 `PIA-SPACE/C-lab*` 데이터셋이라 거기서 다시 받는다 |
+| RTSP 송출 스크립트(`~/rtsp-stream/`) · pm2 등록 | 레포 밖 — 5단계 스크립트가 다시 만든다 |
 | 카메라 실시간 상태 | 스트림을 띄워야 `running` 이 된다(5단계) |
