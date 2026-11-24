@@ -44,14 +44,14 @@ def test_source_default_is_file(pkg):
 def test_standby_holds_first_frame_and_status_schema(pkg):
     got = []
     r = vf.FileSourceRunner(queue_put=got.append)
-    st = r.standby(pkg, "scenario_01", cams_floor={"rh_cam1": "floor9", "rh_cam2": "floor9"}, fps=5.0)
+    st = r.standby(pkg, "scenario_01", cams_floor={"rh_t_cam1": "floor9", "rh_t_cam2": "floor9"}, fps=5.0)
     try:
         assert st["running"] and st["mode"] == "standby" and st["source"] == "file"
         assert st["cams_receiving"] == st["cams_total"] == 2      # 대기 즉시 완료 (부착 없음)
         assert st["floors"] == ["floor9"]
         assert st["scenario_id"] == "pkg:t-rehearsal:scenario_01"
-        assert r.snapshot("rh_cam1") is not None                    # 매핑용 정지 프레임
-        assert [s.cam_id for s in r.states()] == ["rh_cam1", "rh_cam2"]
+        assert r.snapshot("rh_t_cam1") is not None                    # 매핑용 정지 프레임
+        assert [s.cam_id for s in r.states()] == ["rh_t_cam1", "rh_t_cam2"]
         assert not got                                              # 대기 중엔 분석 안 함
         for k in ("t0", "lead_sec", "alarm_at", "cycle_sec", "loop", "streams",
                   "cycle_pos_sec", "next_cycle_in", "pm2_stopped"):
@@ -78,7 +78,7 @@ def test_play_lockstep_ts_grid(pkg):
             by_step.setdefault(round(it.ts - st["t0"], 3), set()).add(it.cam_id)
         steps = sorted(by_step)
         assert len(steps) == 5, steps                                # 1.0s @5fps
-        assert all(by_step[s] == {"rh_cam1", "rh_cam2"} for s in steps), by_step
+        assert all(by_step[s] == {"rh_t_cam1", "rh_t_cam2"} for s in steps), by_step
         gaps = [round(b - a, 3) for a, b in zip(steps, steps[1:])]
         assert gaps == [0.2] * 4, gaps
         assert all(it.frame.shape == (64, 64, 3) for it in got)
@@ -86,7 +86,7 @@ def test_play_lockstep_ts_grid(pkg):
     finally:
         r.stop()
     assert r.status() == {"running": False, "source": "file"}
-    assert r.snapshot("rh_cam1") is None                            # 종료 = 전부 해제
+    assert r.snapshot("rh_t_cam1") is None                            # 종료 = 전부 해제
 
 
 def test_stop_midway_releases(pkg):
@@ -125,10 +125,10 @@ def test_snapshot_skips_black_segments(pkg, tmp_path):
     r = vf.FileSourceRunner(queue_put=lambda it: None)
     r.standby(p, "scenario_full", fps=5.0)
     try:
-        fr = r.snapshot("rh_cam1")
+        fr = r.snapshot("rh_t_cam1")
         assert fr is not None and float(fr.mean()) > 60, "준비 스냅샷이 검정 구간을 피해야 한다"
-        assert r.snapshot_is_black("rh_cam1") is False
-        assert r.snapshot("rh_cam1", t=0.2) is not None and float(r.snapshot("rh_cam1", t=0.2).mean()) < 12
+        assert r.snapshot_is_black("rh_t_cam1") is False
+        assert r.snapshot("rh_t_cam1", t=0.2) is not None and float(r.snapshot("rh_t_cam1", t=0.2).mean()) < 12
         assert r.status()["streams"][0]["snapshot_candidates_sec"] == [2.0]
     finally:
         r.stop()

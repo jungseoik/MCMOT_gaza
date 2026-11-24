@@ -70,7 +70,7 @@ class TestScenarioLoad:
         assert [x.path for x in s.streams] == ["test_cam1", "test_cam2"]
         assert s.cycle_sec >= 1                     # 자동 산출(최장+여유)
         # cameras=[] 여도 패키지 가상 카메라 기준으로 매칭된다
-        assert [x.cam_id for x in s.streams] == ["rh_cam1", "rh_cam2"]
+        assert [x.cam_id for x in s.streams] == ["rh_test_cam1", "rh_test_cam2"]
 
     def test_unknown_pkg_scenario_raises(self, pkg_dir):
         with pytest.raises(FileNotFoundError):
@@ -82,7 +82,7 @@ class TestVirtual:
         """rh_ 접두 — 사이트 cam01.. 발번과 충돌하지 않는 게 복원 안전성의 핵심.
         층은 **사이트 층 id 그대로**(빙의 모드) — ① 맵설정의 도면·구역을 빌려 쓴다."""
         cams = vpkg.virtual_cameras(vpkg.get("test-rehearsal"), rtsp_host="h:8554")
-        assert [c.cam_id for c in cams] == ["rh_cam1", "rh_cam2"]
+        assert [c.cam_id for c in cams] == ["rh_test_cam1", "rh_test_cam2"]
         assert cams[0].rtsp == "rtsp://h:8554/test_cam1"
         assert cams[0].floor_id == "f10"
 
