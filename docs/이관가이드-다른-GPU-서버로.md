@@ -59,7 +59,7 @@ bash install_yolox.sh
 
 ### 2-2. 가중치 (git 미포함 — **`import assets`가 자동 다운로드**)
 `.gitignore`로 제외되지만 **별도 반입 불필요** — 추론/추적 코드가 `assets`를 import하면
-(`assets/__init__.py`) 아래 파일이 없을 때 **공개 HF 레포에서 자동 다운로드**된다(토큰 불필요):
+(`assets/__init__.py`) 아래 파일이 없을 때 **HF 에서 자동 다운로드**된다 — 1차 `backseollgi/MCMOT/weights/`(`.env` 의 `HF_TOKEN`), 실패 시 아래 공개 개별 레포로 폴백:
 - `external/weights/bytetrack_x_mot20.tar` (~793MB) ← `backseollgi/bytetrack_x_mot20.tar` (공개)
 - `external/weights/mot20_sbs_S50.pth` (~337MB) ← `backseollgi/mot20_sbs_S50.pth` (공개)
 
@@ -70,7 +70,7 @@ bash install_yolox.sh
 
 > 💡 **대용량 일괄 다운로드**: 가중치·ONNX·CAD 원본을 한 번에 받으려면
 > `export HF_TOKEN=hf_xxx && bash tools/fetch_assets.sh` (멱등). ONNX·CAD는 `backseollgi/MCMOT`
-> (현재 비공개→토큰 필요), 가중치는 공개 개별 레포. 상세: [설치-맨서버-부트스트랩.md §2단계](설치-맨서버-부트스트랩.md).
+> (비공개→`.env` 의 `HF_TOKEN`), 가중치도 같은 레포 `weights/` 에 있다(공개 개별 레포는 폴백). 상세: [설치-맨서버-부트스트랩.md §2단계](설치-맨서버-부트스트랩.md).
 
 ### 2-3. ONNX 수출 (GPU 무관 — 원본에서 복사 가능)
 `external/weights/trt/*.onnx`는 GPU 아키텍처와 무관하므로 원본 서버 복사 또는

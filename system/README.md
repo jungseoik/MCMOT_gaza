@@ -17,6 +17,8 @@ npm install -g pm2
 # 실서버 (RTSP → NVDEC → TRT 추적 → 맵 좌표 → SSE → 4대 지표 세션) + main 탭 UI
 # 상시 기동(권장): pm2 등록 완료 — pm2 restart macs-system
 pm2 start tools/run_system_server.sh --name macs-system
+# 또는 레포 루트 ecosystem.config.js 로 서버 2개(+RTSP 송출)를 한 번에:
+#   pm2 start ecosystem.config.js --only macs-system,evac-editor
 # 수동 실행:
 conda run -n boosttrack uvicorn system.api.server:app --host 0.0.0.0 --port 8900
 # → http://<host>:8900/  (맵 설정 → 카메라 등록·매핑 → 운영 뷰)

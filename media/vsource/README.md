@@ -49,5 +49,11 @@ media/vsource/
 |---|---|---|
 | `cj/rehearsal/` | **CJ제일제당센터 리허설 영상** — 시나리오 14개(`scenario_01`~`14`), 각 4~5캠(cam1~14 조합). 1080p·30fps·h264 baseline·23~33초. `grid_preview/` 14개 별도 | **정본** HF `backseollgi/MCMOT/media/vsource/cj/rehearsal/` (`fetch_assets.sh --rehearsal`) · 원본(High 프로파일) 출처 HF dataset `PIA-SPACE/C-lab/03_scenarios.7z.001` |
 | `aihub/rehearsal/` | **AI지원센터(AI hub) 리허설 영상** — 시나리오 9개(`scenario_01`~`09`), 각 5~12캠(액션캠 18대, cam01~18 도면 위치 번호). 1080p·30fps·h264 baseline·32~70초. `grid_preview/` 9개 별도 | **정본** HF `backseollgi/MCMOT/media/vsource/aihub/rehearsal/` (`fetch_assets.sh --rehearsal`) · 원본(High 프로파일) 출처 HF dataset `PIA-SPACE/C-lab-AIHub/03_scenarios` |
+| `aihub/drill-1f3f/` | **AI hub 1층+3층 합동 훈련** — 시나리오 25개(`scenario_01`~`14` + `combo_01`~`11`), 343파일·22GB. 정답지 `answers.json` | **정본** HF `backseollgi/MCMOT/media/vsource/aihub/drill-1f3f/` · 원본 출처 `PIA-SPACE/C-lab-AIHub` |
+| `cj/drill-1022/` | **CJ 실훈련(2026-10-22) 26대** — 건물 `cjpoc` 17·16·1층, 49파일·12.7GB | **정본** HF `backseollgi/MCMOT/media/vsource/cj/drill-1022/` · 원본 출처 `PIA-SPACE/C-lab-AIHub-2026-10-22` |
+
+> 4개 패키지 영상 587개(42.5GB)가 전부 HF 에 있다(2026-11-24 일치 검증). 재인코딩 전 원본(`_orig_high_profile/`)·
+> 원본 다운로드(`_raw/`)·비식별 사본(`_deid/`)은 로컬에 두지 않는다 — 원본은 `PIA-SPACE` 데이터셋(`.env` 의 `HF_TOKEN_PIA`)에 있고
+> 비식별 사본은 `tools/deid/deid_video.py` 로 다시 만든다.
 
 상세는 각 폴더의 `README.md` 참조.

@@ -59,7 +59,7 @@ media/vsource/aihub/drill-1f3f/
 ├── scenario_01/              cam01.mp4 … (시나리오별 클립)
 │   └── …
 ├── grid_preview/             검증용 그리드 — **송출 금지**
-└── _orig_high_profile/       원본(재인코딩 전)
+(재인코딩 전 원본 `_orig_high_profile/` 은 2026-11-24 삭제 — 출처 `PIA-SPACE/C-lab-AIHub`)
 ```
 
 ## 시나리오별 오버라이드 (ADR 09 §21.5)

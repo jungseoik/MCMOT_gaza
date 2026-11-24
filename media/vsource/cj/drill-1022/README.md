@@ -75,12 +75,18 @@ floor7/8/9 는 기존 CJ 층(default 17F · floor2 16F · floor3 지상1층)의 
 
 ## 영상 받기
 
+
+> **평소에는 이 절차가 필요 없다.** 패키지 영상 49개는 HF `backseollgi/MCMOT/media/vsource/cj/drill-1022/` 에
+> 그대로 있어 `bash tools/fetch_assets.sh --rehearsal` 로 받는다. 아래는 촬영 원본에서 패키지를 **다시 조립**할 때만 쓴다
+> (`_raw/` 는 2026-11-24 로컬에서 지웠다).
+
 ```bash
 # .env 의 HF_TOKEN(PIA-SPACE) 이 필요하다. backseollgi 토큰은 이 레포에 권한이 없다.
 python - <<'PY'
 import re
-tok=[re.match(r'\s*HF_TOKEN\s*=\s*(.+)',l).group(1).strip().strip('"\'')
-     for l in open('.env') if re.match(r'\s*HF_TOKEN\s*=',l)][0]
+# PIA-SPACE 데이터셋은 .env 의 HF_TOKEN_PIA 로 받는다 (HF_TOKEN 은 backseollgi/MCMOT 용)
+tok=[re.match(r'\s*HF_TOKEN_PIA\s*=\s*(.+)',l).group(1).strip().strip('"\'')
+     for l in open('.env') if re.match(r'\s*HF_TOKEN_PIA\s*=',l)][0]
 from huggingface_hub import snapshot_download
 snapshot_download("PIA-SPACE/C-lab-AIHub-2026-10-22", repo_type="dataset", token=tok,
                   allow_patterns=["03_scenarios/**"],

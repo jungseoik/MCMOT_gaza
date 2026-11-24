@@ -16,7 +16,7 @@ mp4를 만든다. 같은 ID는 좌우 같은 색이라 매칭이 한눈에 된�
 
 ## 환경 (이미 준비됨, 재설치 금지)
 - **파이썬**: `~/miniconda3/envs/boosttrack/bin/python` (torch+TensorRT+CUDA).
-- **TRT 엔진**: `external/weights/trt/yolox_mot20_fp16.engine`, `fastreid_sbs_s50_fp16.engine` — 이미 빌드됨. `BoostTrackGPUInference()`가 기본 경로로 로드. (검출기 투트랙 — RF-DETR 쓰려면 `rfdetr_base_fp16.engine`을 `bash tools/setup_rfdetr.sh`로 준비 후 `detector="rfdetr"`.)
+- **TRT 엔진**: `external/weights/trt/yolox_mot20_fp16.engine`, `fastreid_sbs_s50_fp16.engine` — 이미 빌드됨. `BoostTrackGPUInference()`가 기본 경로로 로드. (새 서버에서는 `python -m src.build_trt --fp16` 로 먼저 빌드.)
 - **GPU 1장 직렬 사용**: 모델 1개를 한 번 로드해 영상들을 순차 처리.
 
 ## 핵심 파일

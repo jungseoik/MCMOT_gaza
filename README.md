@@ -186,7 +186,7 @@ DeepStream 인제스트: [system/ingest_ds/README.md](system/ingest_ds/README.md
 > `src/eval_trt.py`, `src/eval_trt_opt.py`)가 포함되어 있지 않습니다.** `main.py`는
 > 이 모듈들을 import하므로 **그대로 실행하면 `ModuleNotFoundError`로 즉시 실패**합니다.
 > 아래는 평가 진입점(`main.py`)이 제공하기로 설계된 인터페이스 명세이며, 실제 동작에는
-> `src/eval_*.py` 구현과 MOT GT(`results/gt/…`, 일부 동봉)·TRT 엔진이 필요합니다.
+> `src/eval_*.py` 구현과 MOT GT(`results/gt/…` — git 미포함, HF `backseollgi/MCMOT/results/gt`)·TRT 엔진이 필요합니다.
 > 평가 채점 엔진 자체(TrackEval)는 `external/TrackEval/`에 포함돼 있습니다.
 
 `main.py`는 MOT17/MOT20 벤치마크 평가의 진입점으로, 백엔드를 `--engine` 인자로 선택하도록 설계돼 있습니다.
@@ -253,6 +253,10 @@ docs/
   optimization-report.md       # 최적화 상세 보고서
   webui.md                     # 실시간 추적 웹 UI 사용법
   webui-dev/                   # 웹 UI 개발 문서(재현 가이드 포함)
+model_zoo.py                   # 추론 프로파일(검출기·ReID·트래커 조합) — yolox_fastreid · yolo26_clipreid
+ecosystem.config.js            # pm2 구성(서버 2 + RTSP 송출 21) — pm2 start ecosystem.config.js
+requirements.lock.txt          # 운영 env 정확한 버전 고정본 (설치는 이 파일로)
+tools/                         # fetch_assets.sh(HF 자산) · smoke_ports.py(포트 스모크) · seed_version.py · 리허설·시각화 도구
 main.py                        # MOT 평가 진입점 (--engine 분기, src/eval_* 미포함 → WIP)
 tracker/                       # 핵심 추적 알고리즘 (변경 없음)
 external/                      # 외부 모듈 (변경 없음)

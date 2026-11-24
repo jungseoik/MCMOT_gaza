@@ -7,7 +7,7 @@ CJ제일제당센터 **10층**에서 촬영한 (전 시나리오 공통 — 시�
 - 원본 출처: HuggingFace dataset `PIA-SPACE/C-lab` → `03_scenarios.7z.001` (3.48GB, High 프로파일, 2026-08-27 수령)
 - 원본(`01_original`)·concat(`02_concat`)·sync(`04_sync`)는 같은 레포에 있으나 미수령
 - 전부 1920×1080 · 30fps · **h264 baseline 재인코딩본**(2026-08-27, `rehearsal_prep.py --encode`) · yuv420p, 길이 23~33초
-  — HF 원본은 High 프로파일이라 앞머리(baseline) concat 에서 스트림이 깨짐(실측). 원본은 `_orig_high_profile/` 에 보관
+  — HF 원본은 High 프로파일이라 앞머리(baseline) concat 에서 스트림이 깨짐(실측). 원본(High 프로파일)은 로컬에 두지 않는다(2026-11-24 삭제) — 필요하면 출처 데이터셋에서 다시 받는다(`PIA-SPACE/C-lab/03_scenarios.7z.001`, `.env` 의 `HF_TOKEN_PIA`)
 - 시나리오 내 채널 간 길이 차 ≤30ms → 동기 송출 요건(같은 순간 시작) 충족
 
 | 시나리오 | 카메라(도면 위치) | 길이 | 촬영 시각 | 이동 위치(피난 동선) |
